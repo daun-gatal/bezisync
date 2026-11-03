@@ -1,0 +1,61 @@
+name: Question
+description: Ask a question about BeziSync
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question? Please include enough context for maintainers or the community to help.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know?
+      placeholder: Ask your question here...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What are you trying to accomplish? What have you tried?
+      placeholder: |
+        I'm trying to...
+        I've tried...
+        I'm stuck on...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: topic
+    attributes:
+      label: Topic
+      description: What area does your question relate to?
+      options:
+        - General Usage
+        - Installation/Setup
+        - Configuration
+        - Connectivity Checks
+        - Preflight Validation
+        - Pipeline Deployment
+        - Observability/Logs
+        - Debezium Concepts
+        - Docker/Runtime Config
+        - API/Integration
+        - Other
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: BeziSync version, git commit, or Docker image tag, if applicable
+      placeholder: e.g., 0.1.0
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Information
+      description: Any other details that might help us answer your question

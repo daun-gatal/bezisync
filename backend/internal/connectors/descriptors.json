@@ -1,0 +1,3748 @@
+{
+ "connectors": [
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "source",
+    "type": "postgresql",
+    "title": "PostgreSQL",
+    "description": "PostgreSQL 12+ using logical decoding (pgoutput). Self-hosted, RDS, Cloud SQL, Azure.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "aws_rds",
+      "title": "AWS RDS / Aurora",
+      "defaults": {
+       "ssl_mode": "require"
+      },
+      "note": "Logical replication is a parameter-group setting (rds.logical_replication)."
+     },
+     {
+      "id": "gcp_cloudsql",
+      "title": "Google Cloud SQL / AlloyDB",
+      "defaults": {
+       "ssl_mode": "require"
+      },
+      "note": "Logical decoding is the cloudsql.logical_decoding database flag."
+     },
+     {
+      "id": "azure_flexible",
+      "title": "Azure Database for PostgreSQL",
+      "defaults": {
+       "ssl_mode": "require"
+      },
+      "note": "Set wal_level=logical in server parameters."
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "Host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "orders-db.internal"
+       }
+      },
+      "port": {
+       "default": 5432,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "database": {
+       "maxLength": 63,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "app"
+       }
+      },
+      "user": {
+       "maxLength": 63,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Credentials",
+        "placeholder": "cdc_reader"
+       }
+      },
+      "ssl_mode": {
+       "default": "prefer",
+       "enum": [
+        "disable",
+        "prefer",
+        "require",
+        "verify-ca",
+        "verify-full"
+       ],
+       "title": "TLS",
+       "type": "string",
+       "ui": {
+        "group": "Security",
+        "help": "Use verify-full in production."
+       }
+      },
+      "ssh_host": {
+       "default": "",
+       "maxLength": 255,
+       "title": "SSH bastion host",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "Reach the database through this host. Empty: connect directly."
+       }
+      },
+      "ssh_port": {
+       "default": 22,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "SSH port",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_user": {
+       "default": "",
+       "maxLength": 100,
+       "title": "SSH user",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_host_key": {
+       "default": "",
+       "maxLength": 2000,
+       "title": "Bastion host key",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "The bastion's public host key (from ssh-keyscan). Recommended: without it any key is accepted.",
+        "placeholder": "ssh-ed25519 AAAA…"
+       }
+      }
+     },
+     "required": [
+      "host",
+      "database",
+      "user"
+     ],
+     "title": "PostgresConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "maxLength": 1024,
+       "minLength": 1,
+       "title": "Password",
+       "type": "string",
+       "ui": {
+        "group": "Credentials"
+       }
+      },
+      "ssl_root_cert": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "CA certificate (PEM)",
+       "ui": {
+        "expert": true,
+        "group": "Security",
+        "multiline": true
+       }
+      },
+      "ssh_private_key": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "SSH private key",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "OpenSSH or PEM, without a passphrase.",
+        "multiline": true
+       }
+      }
+     },
+     "required": [
+      "password"
+     ],
+     "title": "PostgresSecrets",
+     "type": "object"
+    },
+    "transforms": {
+     "value_formats": {
+      "decimals": [
+       "precise",
+       "double",
+       "string"
+      ],
+      "timestamps": [
+       "epoch",
+       "isostring"
+      ],
+      "binary": [
+       "bytes",
+       "base64",
+       "hex"
+      ]
+     },
+     "key_columns": true,
+     "row_filters": true,
+     "maskable_types": [
+      "character varying",
+      "character",
+      "text"
+     ]
+    },
+    "capture": {
+     "snapshot_modes": [
+      "initial",
+      "no_data",
+      "when_needed",
+      "initial_only",
+      "always"
+     ],
+     "incremental": true,
+     "maturity": "stable"
+    }
+   },
+   "debezium_name": "io.debezium.connector.postgresql.PostgresConnector",
+   "needs_schema_history": false,
+   "tracks_schema": true,
+   "supports_canary": true,
+   "unwrap_transform": "io.debezium.transforms.ExtractNewRecordState"
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "source",
+    "type": "mysql",
+    "title": "MySQL / MariaDB",
+    "description": "MySQL 8+ and MariaDB 10.6+ using the row-based binlog.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted MySQL",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "mariadb",
+      "title": "MariaDB",
+      "defaults": {},
+      "note": "Uses Debezium's dedicated MariaDB connector."
+     },
+     {
+      "id": "aws_rds",
+      "title": "AWS RDS / Aurora MySQL",
+      "defaults": {
+       "ssl_mode": "required"
+      },
+      "note": "binlog_format is a parameter-group setting; binlog retention is set with mysql.rds_set_configuration."
+     },
+     {
+      "id": "gcp_cloudsql",
+      "title": "Google Cloud SQL for MySQL",
+      "defaults": {
+       "ssl_mode": "required"
+      },
+      "note": ""
+     },
+     {
+      "id": "azure_flexible",
+      "title": "Azure Database for MySQL",
+      "defaults": {
+       "ssl_mode": "required"
+      },
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "Host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "inventory-db.internal"
+       }
+      },
+      "port": {
+       "default": 3306,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "user": {
+       "maxLength": 80,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Credentials",
+        "placeholder": "cdc_reader"
+       }
+      },
+      "ssl_mode": {
+       "default": "preferred",
+       "enum": [
+        "disabled",
+        "preferred",
+        "required",
+        "verify_ca",
+        "verify_identity"
+       ],
+       "title": "TLS",
+       "type": "string",
+       "ui": {
+        "group": "Security"
+       }
+      },
+      "ssh_host": {
+       "default": "",
+       "maxLength": 255,
+       "title": "SSH bastion host",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "Reach the database through this host. Empty: connect directly."
+       }
+      },
+      "ssh_port": {
+       "default": 22,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "SSH port",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_user": {
+       "default": "",
+       "maxLength": 100,
+       "title": "SSH user",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_host_key": {
+       "default": "",
+       "maxLength": 2000,
+       "title": "Bastion host key",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "The bastion's public host key (from ssh-keyscan). Recommended: without it any key is accepted.",
+        "placeholder": "ssh-ed25519 AAAA…"
+       }
+      }
+     },
+     "required": [
+      "host",
+      "user"
+     ],
+     "title": "MySqlConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "maxLength": 1024,
+       "minLength": 1,
+       "title": "Password",
+       "type": "string",
+       "ui": {
+        "group": "Credentials"
+       }
+      },
+      "ssh_private_key": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "SSH private key",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "OpenSSH or PEM, without a passphrase.",
+        "multiline": true
+       }
+      }
+     },
+     "required": [
+      "password"
+     ],
+     "title": "MySqlSecrets",
+     "type": "object"
+    },
+    "transforms": {
+     "value_formats": {
+      "decimals": [
+       "precise",
+       "double",
+       "string"
+      ],
+      "timestamps": [
+       "epoch",
+       "isostring"
+      ],
+      "binary": [
+       "bytes",
+       "base64",
+       "hex"
+      ]
+     },
+     "key_columns": true,
+     "row_filters": true,
+     "maskable_types": [
+      "char",
+      "varchar",
+      "tinytext",
+      "text",
+      "mediumtext",
+      "longtext"
+     ]
+    },
+    "capture": {
+     "snapshot_modes": [
+      "initial",
+      "no_data",
+      "when_needed",
+      "initial_only",
+      "always"
+     ],
+     "incremental": true,
+     "maturity": "stable"
+    }
+   },
+   "debezium_name": "io.debezium.connector.mysql.MySqlConnector",
+   "needs_schema_history": true,
+   "tracks_schema": true,
+   "supports_canary": true,
+   "unwrap_transform": "io.debezium.transforms.ExtractNewRecordState"
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "source",
+    "type": "sqlserver",
+    "title": "SQL Server",
+    "description": "SQL Server 2017+ and Azure SQL MI using SQL Server change data capture.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted SQL Server",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "aws_rds",
+      "title": "AWS RDS for SQL Server",
+      "defaults": {},
+      "note": "Enable CDC with msdb.dbo.rds_cdc_enable_db."
+     },
+     {
+      "id": "azure_sql_mi",
+      "title": "Azure SQL Managed Instance",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "Host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "payments-sql.internal"
+       }
+      },
+      "port": {
+       "default": 1433,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "database": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "Payments"
+       }
+      },
+      "user": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Credentials",
+        "placeholder": "cdc_reader"
+       }
+      },
+      "encrypt": {
+       "default": true,
+       "title": "Encrypt the connection",
+       "type": "boolean",
+       "ui": {
+        "group": "Security"
+       }
+      },
+      "trust_server_certificate": {
+       "default": false,
+       "title": "Trust the server certificate",
+       "type": "boolean",
+       "ui": {
+        "expert": true,
+        "group": "Security",
+        "help": "Only for self-signed test servers."
+       }
+      },
+      "ssh_host": {
+       "default": "",
+       "maxLength": 255,
+       "title": "SSH bastion host",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "Reach the database through this host. Empty: connect directly."
+       }
+      },
+      "ssh_port": {
+       "default": 22,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "SSH port",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_user": {
+       "default": "",
+       "maxLength": 100,
+       "title": "SSH user",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_host_key": {
+       "default": "",
+       "maxLength": 2000,
+       "title": "Bastion host key",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "The bastion's public host key (from ssh-keyscan). Recommended: without it any key is accepted.",
+        "placeholder": "ssh-ed25519 AAAA…"
+       }
+      }
+     },
+     "required": [
+      "host",
+      "database",
+      "user"
+     ],
+     "title": "SqlServerConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "maxLength": 1024,
+       "minLength": 1,
+       "title": "Password",
+       "type": "string",
+       "ui": {
+        "group": "Credentials"
+       }
+      },
+      "ssh_private_key": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "SSH private key",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "OpenSSH or PEM, without a passphrase.",
+        "multiline": true
+       }
+      }
+     },
+     "required": [
+      "password"
+     ],
+     "title": "SqlServerSecrets",
+     "type": "object"
+    },
+    "transforms": {
+     "value_formats": {
+      "decimals": [
+       "precise",
+       "double",
+       "string"
+      ],
+      "timestamps": [
+       "epoch"
+      ],
+      "binary": [
+       "bytes",
+       "base64",
+       "hex"
+      ]
+     },
+     "key_columns": false,
+     "row_filters": true,
+     "maskable_types": [
+      "char",
+      "varchar",
+      "nchar",
+      "nvarchar",
+      "text",
+      "ntext"
+     ]
+    },
+    "capture": {
+     "snapshot_modes": [
+      "initial",
+      "no_data",
+      "when_needed",
+      "initial_only",
+      "always"
+     ],
+     "incremental": true,
+     "maturity": "stable"
+    }
+   },
+   "debezium_name": "io.debezium.connector.sqlserver.SqlServerConnector",
+   "needs_schema_history": true,
+   "tracks_schema": true,
+   "supports_canary": false,
+   "unwrap_transform": "io.debezium.transforms.ExtractNewRecordState"
+  },
+  {
+   "descriptor": {
+    "supports_masking": false,
+    "kind": "source",
+    "type": "mongodb",
+    "title": "MongoDB",
+    "description": "MongoDB 6+ replica sets and sharded clusters (including Atlas) via change streams.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted replica set",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "atlas",
+      "title": "MongoDB Atlas",
+      "defaults": {
+       "srv": true,
+       "tls": true
+      },
+      "note": ""
+     },
+     {
+      "id": "sharded",
+      "title": "Sharded cluster (mongos)",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "hosts": {
+       "maxLength": 2000,
+       "minLength": 3,
+       "title": "Hosts",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "help": "Replica-set members or mongos routers.",
+        "placeholder": "mongo-1:27017,mongo-2:27017"
+       }
+      },
+      "replica_set": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Replica set name",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "rs0"
+       }
+      },
+      "user": {
+       "maxLength": 200,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Credentials",
+        "placeholder": "cdc_reader"
+       }
+      },
+      "auth_source": {
+       "default": "admin",
+       "title": "Auth Source",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "Credentials"
+       }
+      },
+      "tls": {
+       "default": false,
+       "title": "TLS",
+       "type": "boolean",
+       "ui": {
+        "group": "Security"
+       }
+      },
+      "srv": {
+       "default": false,
+       "title": "Use mongodb+srv:// (Atlas)",
+       "type": "boolean",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "capture_full_documents": {
+       "default": "change_streams_update_full",
+       "enum": [
+        "change_streams_update_full",
+        "change_streams",
+        "change_streams_with_pre_image",
+        "change_streams_update_full_with_pre_image"
+       ],
+       "title": "Update events contain",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "Events",
+        "help": "change_streams_update_full: the whole document after each update."
+       }
+      }
+     },
+     "required": [
+      "hosts",
+      "user"
+     ],
+     "title": "MongoConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "maxLength": 1024,
+       "minLength": 1,
+       "title": "Password",
+       "type": "string",
+       "ui": {
+        "group": "Credentials"
+       }
+      }
+     },
+     "required": [
+      "password"
+     ],
+     "title": "MongoSecrets",
+     "type": "object"
+    },
+    "transforms": {
+     "value_formats": {},
+     "key_columns": false,
+     "row_filters": false,
+     "maskable_types": []
+    },
+    "capture": {
+     "snapshot_modes": [
+      "initial",
+      "no_data",
+      "when_needed",
+      "initial_only",
+      "always"
+     ],
+     "incremental": true,
+     "maturity": "stable"
+    }
+   },
+   "debezium_name": "io.debezium.connector.mongodb.MongoDbConnector",
+   "needs_schema_history": false,
+   "tracks_schema": false,
+   "supports_canary": false,
+   "unwrap_transform": "io.debezium.connector.mongodb.transforms.ExtractNewDocumentState"
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "source",
+    "type": "oracle",
+    "title": "Oracle",
+    "description": "Oracle 19c+ (also multitenant CDB/PDB) using LogMiner. Self-hosted, Amazon RDS, OCI.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "aws_rds",
+      "title": "Amazon RDS for Oracle",
+      "defaults": {
+       "database": "ORCL"
+      },
+      "note": "Grants on SYS objects and log settings go through rdsadmin procedures; keep archived logs with 'archivelog retention hours'."
+     },
+     {
+      "id": "oci",
+      "title": "OCI Base Database",
+      "defaults": {},
+      "note": "Use the PDB's service name. Autonomous Database doesn't support LogMiner."
+     }
+    ],
+    "transforms": {
+     "value_formats": {
+      "decimals": [
+       "precise",
+       "double",
+       "string"
+      ],
+      "timestamps": [
+       "epoch"
+      ],
+      "binary": [
+       "bytes",
+       "base64",
+       "hex"
+      ]
+     },
+     "key_columns": true,
+     "row_filters": true,
+     "maskable_types": [
+      "varchar2",
+      "nvarchar2",
+      "char",
+      "nchar"
+     ]
+    },
+    "capture": {
+     "snapshot_modes": [
+      "initial",
+      "no_data",
+      "when_needed",
+      "initial_only",
+      "always"
+     ],
+     "incremental": true,
+     "maturity": "stable"
+    },
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "Host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "erp-db.internal"
+       }
+      },
+      "port": {
+       "default": 1521,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "database": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "ORCLCDB",
+        "help": "The service Debezium signs in to: the database (SID), or the CDB of a multitenant one."
+       }
+      },
+      "pdb": {
+       "anyOf": [
+        {
+         "maxLength": 128,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Pluggable database",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "ORCLPDB1",
+        "help": "Multitenant only: the PDB with the tables. Needs a common user (C##…)."
+       }
+      },
+      "service_name": {
+       "default": "",
+       "maxLength": 128,
+       "title": "PDB service name",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "Connection",
+        "help": "Only when the PDB's service name differs from its name."
+       }
+      },
+      "user": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Credentials",
+        "placeholder": "C##CDC_READER"
+       }
+      },
+      "lob_enabled": {
+       "default": false,
+       "title": "Capture LOB columns",
+       "type": "boolean",
+       "ui": {
+        "expert": true,
+        "group": "Events",
+        "help": "CLOB, NCLOB, BLOB and XMLTYPE values. The connector keeps whole values in memory."
+       }
+      },
+      "ssh_host": {
+       "default": "",
+       "maxLength": 255,
+       "title": "SSH bastion host",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "Reach the database through this host. Empty: connect directly."
+       }
+      },
+      "ssh_port": {
+       "default": 22,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "SSH port",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_user": {
+       "default": "",
+       "maxLength": 100,
+       "title": "SSH user",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_host_key": {
+       "default": "",
+       "maxLength": 2000,
+       "title": "Bastion host key",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "The bastion's public host key (from ssh-keyscan). Recommended: without it any key is accepted.",
+        "placeholder": "ssh-ed25519 AAAA…"
+       }
+      }
+     },
+     "required": [
+      "host",
+      "database",
+      "user"
+     ],
+     "title": "OracleConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "maxLength": 1024,
+       "minLength": 1,
+       "title": "Password",
+       "type": "string",
+       "ui": {
+        "group": "Credentials"
+       }
+      },
+      "ssh_private_key": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "SSH private key",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "OpenSSH or PEM, without a passphrase.",
+        "multiline": true
+       }
+      }
+     },
+     "required": [
+      "password"
+     ],
+     "title": "OracleSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "io.debezium.connector.oracle.OracleConnector",
+   "needs_schema_history": true,
+   "tracks_schema": true,
+   "supports_canary": true,
+   "unwrap_transform": "io.debezium.transforms.ExtractNewRecordState"
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "source",
+    "type": "cockroachdb",
+    "title": "CockroachDB",
+    "description": "CockroachDB v22.2+ (self-hosted or Cloud) using a changefeed; no Kafka needed.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "cockroach_cloud",
+      "title": "CockroachDB Cloud",
+      "defaults": {
+       "ssl_mode": "verify-full"
+      },
+      "note": "Paste the cluster's CA certificate (Connect dialog → download CA cert) under TLS CA certificate."
+     }
+    ],
+    "transforms": {
+     "value_formats": {
+      "decimals": [
+       "string"
+      ],
+      "timestamps": [
+       "epoch"
+      ],
+      "binary": [
+       "bytes",
+       "base64",
+       "hex"
+      ]
+     },
+     "key_columns": true,
+     "row_filters": true,
+     "maskable_types": [
+      "text",
+      "character varying",
+      "character"
+     ]
+    },
+    "capture": {
+     "snapshot_modes": [
+      "initial",
+      "no_data",
+      "when_needed",
+      "initial_only",
+      "always"
+     ],
+     "incremental": true,
+     "maturity": "incubating",
+     "incremental_note": "Debezium 3.7 sends TIMESTAMP and TIMESTAMPTZ columns of re-copied rows as empty (null); live changes carry them.",
+     "min_debezium": "3.7.0"
+    },
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "Host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "orders-crdb.internal"
+       }
+      },
+      "port": {
+       "default": 26257,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "database": {
+       "maxLength": 63,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "shop"
+       }
+      },
+      "user": {
+       "maxLength": 63,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Credentials",
+        "placeholder": "cdc_reader"
+       }
+      },
+      "ssl_mode": {
+       "default": "prefer",
+       "enum": [
+        "disable",
+        "prefer",
+        "require",
+        "verify-ca",
+        "verify-full"
+       ],
+       "title": "TLS",
+       "type": "string",
+       "ui": {
+        "group": "Security",
+        "help": "Use verify-full in production (CockroachDB Cloud: with its CA certificate)."
+       }
+      },
+      "ssh_host": {
+       "default": "",
+       "maxLength": 255,
+       "title": "SSH bastion host",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "Reach the database through this host. Empty: connect directly."
+       }
+      },
+      "ssh_port": {
+       "default": 22,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "SSH port",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_user": {
+       "default": "",
+       "maxLength": 100,
+       "title": "SSH user",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_host_key": {
+       "default": "",
+       "maxLength": 2000,
+       "title": "Bastion host key",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "The bastion's public host key (from ssh-keyscan). Recommended: without it any key is accepted.",
+        "placeholder": "ssh-ed25519 AAAA…"
+       }
+      }
+     },
+     "required": [
+      "host",
+      "database",
+      "user"
+     ],
+     "title": "CockroachConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 1024,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Credentials",
+        "help": "Leave empty for a cluster that accepts this user without one."
+       }
+      },
+      "ssl_root_cert": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "TLS CA certificate",
+       "ui": {
+        "expert": true,
+        "group": "Security",
+        "help": "PEM. Needed for verify-ca and verify-full.",
+        "multiline": true
+       }
+      },
+      "ssh_private_key": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "SSH private key",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "OpenSSH or PEM, without a passphrase.",
+        "multiline": true
+       }
+      }
+     },
+     "title": "CockroachSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "io.debezium.connector.cockroachdb.CockroachDBConnector",
+   "needs_schema_history": false,
+   "tracks_schema": true,
+   "supports_canary": true,
+   "unwrap_transform": "io.debezium.transforms.ExtractNewRecordState"
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "source",
+    "type": "vitess",
+    "title": "Vitess",
+    "description": "A Vitess keyspace (all its shards) through VTGate, using VStream.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted Vitess",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "transforms": {
+     "value_formats": {
+      "decimals": [
+       "string"
+      ],
+      "timestamps": [
+       "epoch"
+      ],
+      "binary": [
+       "bytes",
+       "base64",
+       "hex"
+      ]
+     },
+     "key_columns": true,
+     "row_filters": true,
+     "maskable_types": [
+      "char",
+      "varchar",
+      "tinytext",
+      "text",
+      "mediumtext",
+      "longtext"
+     ]
+    },
+    "capture": {
+     "snapshot_modes": [
+      "initial",
+      "no_data"
+     ],
+     "mode_names": {
+      "no_data": "never"
+     },
+     "incremental": false,
+     "maturity": "incubating"
+    },
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "VTGate host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "vtgate.vitess.svc"
+       }
+      },
+      "port": {
+       "default": 15991,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "gRPC port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection",
+        "help": "VTGate's gRPC port, which Debezium streams from."
+       }
+      },
+      "mysql_port": {
+       "default": 15306,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "MySQL port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection",
+        "help": "VTGate's MySQL port, which BeziSync reads the tables through."
+       }
+      },
+      "keyspace": {
+       "maxLength": 64,
+       "minLength": 1,
+       "title": "Keyspace",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "commerce"
+       }
+      },
+      "tablet_type": {
+       "default": "primary",
+       "enum": [
+        "primary",
+        "replica",
+        "rdonly"
+       ],
+       "title": "Read from",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "labels": {
+         "primary": "Primary tablets",
+         "replica": "Replica tablets",
+         "rdonly": "Read-only tablets"
+        },
+        "help": "Replica or read-only tablets keep the load off the primaries."
+       }
+      },
+      "user": {
+       "default": "",
+       "maxLength": 80,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Credentials",
+        "help": "VTGate's static authentication. Empty when VTGate has none."
+       }
+      },
+      "ssh_host": {
+       "default": "",
+       "maxLength": 255,
+       "title": "SSH bastion host",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "Reach the database through this host. Empty: connect directly."
+       }
+      },
+      "ssh_port": {
+       "default": 22,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "SSH port",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_user": {
+       "default": "",
+       "maxLength": 100,
+       "title": "SSH user",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel"
+       }
+      },
+      "ssh_host_key": {
+       "default": "",
+       "maxLength": 2000,
+       "title": "Bastion host key",
+       "type": "string",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "The bastion's public host key (from ssh-keyscan). Recommended: without it any key is accepted.",
+        "placeholder": "ssh-ed25519 AAAA…"
+       }
+      }
+     },
+     "required": [
+      "host",
+      "keyspace"
+     ],
+     "title": "VitessConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 1024,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Credentials"
+       }
+      },
+      "ssh_private_key": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "SSH private key",
+       "ui": {
+        "expert": true,
+        "group": "SSH tunnel",
+        "help": "OpenSSH or PEM, without a passphrase.",
+        "multiline": true
+       }
+      }
+     },
+     "title": "VitessSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "io.debezium.connector.vitess.VitessConnector",
+   "needs_schema_history": false,
+   "tracks_schema": true,
+   "supports_canary": false,
+   "unwrap_transform": "io.debezium.transforms.ExtractNewRecordState"
+  },
+  {
+   "descriptor": {
+    "supports_masking": false,
+    "kind": "source",
+    "type": "spanner",
+    "title": "Google Cloud Spanner",
+    "description": "Spanner GoogleSQL databases through a change stream. Coordinates through a Kafka connection of the project.",
+    "presets": [
+     {
+      "id": "gcp",
+      "title": "Google Cloud",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "transforms": {
+     "value_formats": {},
+     "key_columns": false,
+     "row_filters": true,
+     "maskable_types": []
+    },
+    "capture": {
+     "snapshot_modes": [],
+     "incremental": false,
+     "maturity": "incubating"
+    },
+    "config_schema": {
+     "properties": {
+      "project_id": {
+       "maxLength": 100,
+       "minLength": 1,
+       "title": "Project ID",
+       "type": "string",
+       "ui": {
+        "group": "Database",
+        "placeholder": "my-project"
+       }
+      },
+      "instance_id": {
+       "maxLength": 100,
+       "minLength": 1,
+       "title": "Instance",
+       "type": "string",
+       "ui": {
+        "group": "Database",
+        "placeholder": "prod-instance"
+       }
+      },
+      "database_id": {
+       "maxLength": 100,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Database",
+        "placeholder": "orders"
+       }
+      },
+      "change_stream_mode": {
+       "default": "managed",
+       "enum": [
+        "managed",
+        "existing"
+       ],
+       "title": "Change stream",
+       "type": "string",
+       "ui": {
+        "group": "Change stream",
+        "labels": {
+         "managed": "BeziSync creates one per pipeline",
+         "existing": "Use an existing change stream"
+        },
+        "descriptions": {
+         "managed": "Watches the pipeline's tables (without its removed columns) and is dropped with the pipeline. Needs schema changes.",
+         "existing": "Yours to create and keep; every pipeline reads it."
+        }
+       }
+      },
+      "change_stream": {
+       "default": "",
+       "maxLength": 128,
+       "title": "Change stream name",
+       "type": "string",
+       "ui": {
+        "group": "Change stream",
+        "placeholder": "orders_stream",
+        "when": {
+         "change_stream_mode": [
+          "existing"
+         ]
+        }
+       }
+      },
+      "coordination_kafka": {
+       "maxLength": 100,
+       "minLength": 1,
+       "title": "Coordination Kafka",
+       "type": "string",
+       "ui": {
+        "group": "Coordination",
+        "connection": "sink/kafka",
+        "help": "Debezium's Spanner connector keeps its partition state in two Kafka topics of its own. Pick a Kafka connection of this project."
+       }
+      },
+      "emulator_host": {
+       "anyOf": [
+        {
+         "maxLength": 255,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Emulator (host:port)",
+       "ui": {
+        "expert": true,
+        "group": "Database",
+        "help": "For tests against the Spanner emulator. No credentials are used."
+       }
+      }
+     },
+     "required": [
+      "project_id",
+      "instance_id",
+      "database_id",
+      "coordination_kafka"
+     ],
+     "title": "SpannerConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "service_account_json": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Service-account key (JSON)",
+       "ui": {
+        "group": "Credentials",
+        "multiline": true,
+        "help": "Leave empty to use Workload Identity where the runtime runs."
+       }
+      }
+     },
+     "title": "SpannerSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "io.debezium.connector.spanner.SpannerConnector",
+   "needs_schema_history": false,
+   "tracks_schema": true,
+   "supports_canary": false,
+   "unwrap_transform": "io.debezium.transforms.ExtractNewRecordState"
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "kafka",
+    "title": "Kafka",
+    "description": "Apache Kafka and compatible brokers (Amazon MSK, Confluent Cloud, Redpanda).",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted Kafka",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "confluent_cloud",
+      "title": "Confluent Cloud",
+      "defaults": {
+       "security_protocol": "SASL_SSL",
+       "sasl_mechanism": "PLAIN",
+       "replication_factor": 3
+      },
+      "note": ""
+     },
+     {
+      "id": "aws_msk",
+      "title": "Amazon MSK (SASL/SCRAM)",
+      "defaults": {
+       "security_protocol": "SASL_SSL",
+       "sasl_mechanism": "SCRAM-SHA-512",
+       "replication_factor": 3
+      },
+      "note": ""
+     },
+     {
+      "id": "redpanda",
+      "title": "Redpanda",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "bootstrap_servers": {
+       "maxLength": 2000,
+       "minLength": 3,
+       "title": "Bootstrap Servers",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "help": "Comma-separated host:port list.",
+        "placeholder": "broker-1:9092,broker-2:9092"
+       }
+      },
+      "security_protocol": {
+       "default": "PLAINTEXT",
+       "enum": [
+        "PLAINTEXT",
+        "SSL",
+        "SASL_PLAINTEXT",
+        "SASL_SSL"
+       ],
+       "title": "Security Protocol",
+       "type": "string",
+       "ui": {
+        "group": "Security"
+       }
+      },
+      "sasl_mechanism": {
+       "anyOf": [
+        {
+         "enum": [
+          "PLAIN",
+          "SCRAM-SHA-256",
+          "SCRAM-SHA-512"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "SASL mechanism",
+       "ui": {
+        "group": "Security"
+       }
+      },
+      "username": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Username",
+       "ui": {
+        "group": "Security"
+       }
+      },
+      "create_topics": {
+       "default": true,
+       "title": "Create topics automatically",
+       "type": "boolean",
+       "ui": {
+        "group": "Topics",
+        "help": "BeziSync's connector creates one topic per table when missing."
+       }
+      },
+      "partitions": {
+       "default": 1,
+       "maximum": 10000,
+       "minimum": 1,
+       "title": "Partitions",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "Topics"
+       }
+      },
+      "replication_factor": {
+       "default": 1,
+       "maximum": 10,
+       "minimum": 1,
+       "title": "Replication Factor",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "Topics"
+       }
+      }
+     },
+     "required": [
+      "bootstrap_servers"
+     ],
+     "title": "KafkaConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 4096,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Security"
+       }
+      },
+      "ssl_ca_pem": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "CA certificate (PEM)",
+       "ui": {
+        "expert": true,
+        "group": "Security",
+        "multiline": true
+       }
+      }
+     },
+     "title": "KafkaSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "kafka",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "http",
+    "title": "HTTP",
+    "description": "POST each change event as JSON to an HTTP endpoint.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Any HTTP endpoint",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "url": {
+       "maxLength": 2000,
+       "pattern": "^https?://",
+       "title": "Url",
+       "type": "string",
+       "ui": {
+        "group": "Endpoint",
+        "placeholder": "https://ingest.example.com/cdc"
+       }
+      },
+      "timeout_ms": {
+       "default": 10000,
+       "maximum": 600000,
+       "minimum": 100,
+       "title": "Timeout Ms",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "Delivery"
+       }
+      },
+      "retries": {
+       "default": 5,
+       "maximum": 100,
+       "minimum": 0,
+       "title": "Retries",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "Delivery"
+       }
+      },
+      "retry_interval_ms": {
+       "default": 1000,
+       "maximum": 600000,
+       "minimum": 0,
+       "title": "Retry Interval Ms",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "Delivery"
+       }
+      }
+     },
+     "required": [
+      "url"
+     ],
+     "title": "HttpConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {},
+     "title": "HttpSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "http",
+   "readable": false
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "pubsub",
+    "title": "Google Pub/Sub",
+    "description": "Google Cloud Pub/Sub, one topic per table, ordered per row.",
+    "presets": [
+     {
+      "id": "gcp",
+      "title": "Google Cloud",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "project_id": {
+       "maxLength": 30,
+       "minLength": 6,
+       "title": "Project Id",
+       "type": "string",
+       "ui": {
+        "group": "Google Cloud",
+        "placeholder": "acme-data"
+       }
+      },
+      "ordering": {
+       "default": true,
+       "title": "Keep per-row order (ordering keys)",
+       "type": "boolean",
+       "ui": {
+        "group": "Delivery"
+       }
+      },
+      "create_topics": {
+       "default": true,
+       "title": "Create topics automatically",
+       "type": "boolean",
+       "ui": {
+        "group": "Topics"
+       }
+      },
+      "emulator_host": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Emulator Host",
+       "ui": {
+        "expert": true,
+        "group": "Google Cloud",
+        "help": "host:port of a Pub/Sub emulator (testing)."
+       }
+      }
+     },
+     "required": [
+      "project_id"
+     ],
+     "title": "PubSubConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "service_account_json": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Service account key (JSON)",
+       "ui": {
+        "group": "Credentials",
+        "help": "Leave empty to use Workload Identity on the runtime.",
+        "multiline": true
+       }
+      }
+     },
+     "title": "PubSubSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "pubsub",
+   "readable": false
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "kinesis",
+    "title": "AWS Kinesis",
+    "description": "Amazon Kinesis Data Streams, one stream per table.",
+    "presets": [
+     {
+      "id": "aws",
+      "title": "Amazon Kinesis",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "region": {
+       "maxLength": 40,
+       "minLength": 3,
+       "title": "Region",
+       "type": "string",
+       "ui": {
+        "group": "AWS",
+        "placeholder": "eu-west-1"
+       }
+      },
+      "access_key_id": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Access Key Id",
+       "ui": {
+        "group": "Credentials",
+        "help": "Leave empty to use the runtime's IAM role (IRSA / instance profile)."
+       }
+      },
+      "endpoint": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Endpoint",
+       "ui": {
+        "expert": true,
+        "group": "AWS",
+        "help": "Custom endpoint (LocalStack, VPC endpoint)."
+       }
+      },
+      "create_streams": {
+       "default": true,
+       "title": "Create streams automatically",
+       "type": "boolean",
+       "ui": {
+        "group": "Streams"
+       }
+      },
+      "shards": {
+       "default": 1,
+       "maximum": 500,
+       "minimum": 1,
+       "title": "Shards",
+       "type": "integer",
+       "ui": {
+        "expert": true,
+        "group": "Streams"
+       }
+      }
+     },
+     "required": [
+      "region"
+     ],
+     "title": "KinesisConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "secret_access_key": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Secret Access Key",
+       "ui": {
+        "group": "Credentials"
+       }
+      }
+     },
+     "title": "KinesisSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "kinesis",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "redis",
+    "title": "Redis Streams",
+    "description": "Append events to Redis Streams (XADD), one stream per table.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Redis",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "aws_elasticache",
+      "title": "AWS ElastiCache",
+      "defaults": {
+       "tls": true
+      },
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "Host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "redis.internal"
+       }
+      },
+      "port": {
+       "default": 6379,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "user": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "User",
+       "ui": {
+        "group": "Credentials",
+        "help": "ACL user (Redis 6+)."
+       }
+      },
+      "tls": {
+       "default": false,
+       "title": "TLS",
+       "type": "boolean",
+       "ui": {
+        "group": "Security"
+       }
+      },
+      "max_stream_length": {
+       "anyOf": [
+        {
+         "minimum": 1000,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Trim streams to N entries",
+       "ui": {
+        "expert": true,
+        "group": "Streams",
+        "help": "Approximate MAXLEN; empty keeps every event."
+       }
+      }
+     },
+     "required": [
+      "host"
+     ],
+     "title": "RedisConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 1024,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Credentials"
+       }
+      }
+     },
+     "title": "RedisSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "redis",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "nats",
+    "title": "NATS JetStream",
+    "description": "NATS JetStream: one subject per table in a persistent stream.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "NATS",
+      "defaults": {},
+      "note": ""
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "url": {
+       "maxLength": 500,
+       "pattern": "^(nats|tls)://",
+       "title": "Url",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "nats://nats.internal:4222"
+       }
+      },
+      "stream": {
+       "default": "CDC",
+       "pattern": "^[A-Za-z0-9_-]{1,64}$",
+       "title": "Stream",
+       "type": "string",
+       "ui": {
+        "group": "JetStream",
+        "help": "Stream holding every pipeline subject. Created when missing."
+       }
+      },
+      "user": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "User",
+       "ui": {
+        "group": "Credentials"
+       }
+      }
+     },
+     "required": [
+      "url"
+     ],
+     "title": "NatsConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 1024,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Credentials"
+       }
+      }
+     },
+     "title": "NatsSecrets",
+     "type": "object"
+    }
+   },
+   "debezium_name": "nats-jetstream",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "iceberg",
+    "title": "Apache Iceberg",
+    "description": "Iceberg tables through a REST catalog or AWS Glue, one table per source table: upserts, deletes and new columns.",
+    "presets": [
+     {
+      "id": "rest",
+      "title": "Iceberg REST catalog (Polaris, Lakekeeper, Gravitino, Nessie)",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "s3_tables",
+      "title": "Amazon S3 Tables",
+      "defaults": {
+       "catalog_type": "rest",
+       "auth": "sigv4",
+       "signing_name": "s3tables",
+       "storage": "s3"
+      },
+      "note": "Catalog URL https://s3tables.<region>.amazonaws.com/iceberg; warehouse is the table bucket ARN."
+     },
+     {
+      "id": "glue",
+      "title": "AWS Glue Data Catalog",
+      "defaults": {
+       "catalog_type": "glue",
+       "storage": "s3"
+      },
+      "note": "Warehouse is an s3:// location for new tables."
+     },
+     {
+      "id": "open_catalog",
+      "title": "Snowflake Open Catalog",
+      "defaults": {
+       "catalog_type": "rest",
+       "auth": "oauth2",
+       "scope": "PRINCIPAL_ROLE:ALL",
+       "storage": "vended"
+      },
+      "note": "Catalog URL https://<account>.snowflakecomputing.com/polaris/api/catalog; warehouse is the catalog name."
+     },
+     {
+      "id": "unity",
+      "title": "Databricks Unity Catalog",
+      "defaults": {
+       "catalog_type": "rest",
+       "auth": "token",
+       "storage": "vended"
+      },
+      "note": "Catalog URL https://<workspace>/api/2.1/unity-catalog/iceberg-rest; warehouse is the Unity catalog name."
+     },
+     {
+      "id": "rustfs",
+      "title": "RustFS S3 Tables (preview)",
+      "defaults": {
+       "catalog_type": "rest",
+       "auth": "sigv4",
+       "signing_name": "s3",
+       "region": "us-east-1",
+       "storage": "s3",
+       "path_style": true
+      },
+      "note": "Catalog URL http://<rustfs>:9000/iceberg, warehouse is the table bucket, object storage http://<rustfs>:9000. Preview: change logs only (no upserts), format v2 only, and RustFS keeps a dropped table's files."
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "catalog_type": {
+       "default": "rest",
+       "enum": [
+        "rest",
+        "glue"
+       ],
+       "title": "Catalog",
+       "type": "string",
+       "ui": {
+        "group": "Catalog",
+        "labels": {
+         "rest": "Iceberg REST catalog",
+         "glue": "AWS Glue Data Catalog"
+        }
+       }
+      },
+      "uri": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Catalog URL",
+       "ui": {
+        "group": "Catalog",
+        "placeholder": "https://catalog.example.com/api/catalog",
+        "when": {
+         "catalog_type": [
+          "rest"
+         ]
+        }
+       }
+      },
+      "warehouse": {
+       "maxLength": 500,
+       "minLength": 1,
+       "title": "Warehouse",
+       "type": "string",
+       "ui": {
+        "group": "Catalog",
+        "help": "REST: the warehouse or catalog name (S3 Tables: the table bucket ARN; RustFS: the bucket). Glue: an s3:// location."
+       }
+      },
+      "namespace": {
+       "default": "cdc",
+       "maxLength": 128,
+       "minLength": 1,
+       "pattern": "^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)*$",
+       "title": "Namespace",
+       "type": "string",
+       "ui": {
+        "group": "Catalog",
+        "help": "Tables are created here; BeziSync creates it when missing. Nested namespaces use dots."
+       }
+      },
+      "auth": {
+       "default": "none",
+       "enum": [
+        "none",
+        "oauth2",
+        "token",
+        "sigv4"
+       ],
+       "title": "Sign in",
+       "type": "string",
+       "ui": {
+        "group": "Sign in",
+        "when": {
+         "catalog_type": [
+          "rest"
+         ]
+        },
+        "labels": {
+         "none": "No sign-in",
+         "oauth2": "OAuth2 client credentials",
+         "token": "Bearer token",
+         "sigv4": "AWS Signature V4"
+        }
+       }
+      },
+      "client_id": {
+       "anyOf": [
+        {
+         "maxLength": 300,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Client ID",
+       "ui": {
+        "group": "Sign in",
+        "when": {
+         "catalog_type": [
+          "rest"
+         ],
+         "auth": [
+          "oauth2"
+         ]
+        }
+       }
+      },
+      "scope": {
+       "anyOf": [
+        {
+         "maxLength": 300,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Scope",
+       "ui": {
+        "group": "Sign in",
+        "placeholder": "PRINCIPAL_ROLE:ALL",
+        "when": {
+         "catalog_type": [
+          "rest"
+         ],
+         "auth": [
+          "oauth2"
+         ]
+        }
+       }
+      },
+      "oauth2_server_uri": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Token URL",
+       "ui": {
+        "expert": true,
+        "group": "Sign in",
+        "help": "Empty: the catalog's own /v1/oauth/tokens.",
+        "when": {
+         "catalog_type": [
+          "rest"
+         ],
+         "auth": [
+          "oauth2"
+         ]
+        }
+       }
+      },
+      "signing_name": {
+       "default": "execute-api",
+       "enum": [
+        "s3tables",
+        "glue",
+        "s3",
+        "execute-api"
+       ],
+       "title": "Signing service",
+       "type": "string",
+       "ui": {
+        "group": "Sign in",
+        "when": {
+         "catalog_type": [
+          "rest"
+         ],
+         "auth": [
+          "sigv4"
+         ]
+        },
+        "labels": {
+         "s3tables": "S3 Tables (s3tables)",
+         "glue": "Glue REST (glue)",
+         "s3": "S3-compatible (s3)",
+         "execute-api": "API Gateway (execute-api)"
+        }
+       }
+      },
+      "region": {
+       "anyOf": [
+        {
+         "maxLength": 40,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "AWS region",
+       "ui": {
+        "group": "Storage",
+        "placeholder": "eu-west-1",
+        "help": "For AWS (S3, Glue, S3 Tables, request signing); us-east-1 when empty with an S3-compatible endpoint."
+       }
+      },
+      "storage": {
+       "default": "s3",
+       "enum": [
+        "s3",
+        "vended"
+       ],
+       "title": "Data files",
+       "type": "string",
+       "ui": {
+        "group": "Storage",
+        "labels": {
+         "s3": "Object storage credentials below, or the runtime's IAM role",
+         "vended": "Credentials vended by the catalog"
+        }
+       }
+      },
+      "s3_endpoint": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "S3 endpoint",
+       "ui": {
+        "group": "Storage",
+        "placeholder": "http://rustfs:9000",
+        "help": "For S3-compatible storage (RustFS, MinIO, Ceph); empty for AWS S3.",
+        "when": {
+         "storage": [
+          "s3"
+         ]
+        }
+       }
+      },
+      "path_style": {
+       "default": false,
+       "title": "Path-style bucket addressing",
+       "type": "boolean",
+       "ui": {
+        "group": "Storage",
+        "help": "Most S3-compatible stores need it.",
+        "when": {
+         "storage": [
+          "s3"
+         ]
+        }
+       }
+      },
+      "access_key_id": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Access key ID",
+       "ui": {
+        "group": "Storage",
+        "help": "Used for object storage and AWS request signing. Leave empty to use the runtime's IAM role (IRSA / instance profile)."
+       }
+      }
+     },
+     "required": [
+      "warehouse"
+     ],
+     "title": "IcebergConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "client_secret": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Client secret",
+       "ui": {
+        "group": "Sign in",
+        "help": "With OAuth2 client credentials."
+       }
+      },
+      "token": {
+       "anyOf": [
+        {
+         "maxLength": 4000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Bearer token",
+       "ui": {
+        "group": "Sign in",
+        "help": "With bearer-token sign-in (e.g. a Databricks token)."
+       }
+      },
+      "secret_access_key": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Secret access key",
+       "ui": {
+        "group": "Storage"
+       }
+      }
+     },
+     "title": "IcebergSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "{schema}_{table}",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "max_length": 128,
+      "message": "Use letters, digits and '_' (dots become '_'; names are lower-cased).",
+      "flatten_dots": true,
+      "single": false
+     },
+     "formats": [
+      "connect"
+     ],
+     "unwrap": {
+      "required": true,
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "delete_handling": [
+       "rewrite"
+      ]
+     },
+     "outbox": false,
+     "time_precision": true,
+     "options_schema": {
+      "properties": {
+       "write_mode": {
+        "default": "upsert_keep_deletes",
+        "enum": [
+         "upsert_keep_deletes",
+         "upsert",
+         "append"
+        ],
+        "title": "Rows",
+        "type": "string",
+        "ui": {
+         "group": "Iceberg tables",
+         "labels": {
+          "upsert_keep_deletes": "Latest row; deletes kept with __deleted = true",
+          "upsert": "Latest row; deletes removed",
+          "append": "Every change appended"
+         },
+         "descriptions": {
+          "upsert_keep_deletes": "Upsert by key; a deleted row stays, marked.",
+          "upsert": "Upsert by key; a deleted row is removed.",
+          "append": "A change log: no updates in place."
+         }
+        }
+       },
+       "commit_interval": {
+        "default": "1m",
+        "enum": [
+         "now",
+         "1m",
+         "5m",
+         "15m"
+        ],
+        "title": "Commit",
+        "type": "string",
+        "ui": {
+         "group": "Iceberg tables",
+         "help": "Fewer commits mean fewer, larger files.",
+         "labels": {
+          "now": "As soon as possible",
+          "1m": "At least every minute",
+          "5m": "At least every 5 minutes",
+          "15m": "At least every 15 minutes"
+         }
+        }
+       },
+       "buckets": {
+        "default": "16",
+        "enum": [
+         "4",
+         "16",
+         "64"
+        ],
+        "title": "Key buckets",
+        "type": "string",
+        "ui": {
+         "group": "Iceberg tables",
+         "help": "Tables with a key are partitioned by bucket(key); tables without one by day of the change.",
+         "labels": {
+          "4": "4 (small tables)",
+          "16": "16 (most tables)",
+          "64": "64 (tables over ~100 GB)"
+         }
+        }
+       },
+       "partitioning": {
+        "default": "auto",
+        "enum": [
+         "auto",
+         "none"
+        ],
+        "title": "Partitioning",
+        "type": "string",
+        "ui": {
+         "expert": true,
+         "group": "Iceberg tables",
+         "labels": {
+          "auto": "By key bucket, or day of the change",
+          "none": "None"
+         }
+        }
+       },
+       "format_version": {
+        "default": "2",
+        "enum": [
+         "2",
+         "3"
+        ],
+        "title": "Table format",
+        "type": "string",
+        "ui": {
+         "expert": true,
+         "group": "Iceberg tables",
+         "labels": {
+          "2": "v2 (widest engine support)",
+          "3": "v3 (deletion vectors)"
+         }
+        }
+       },
+       "partitions": {
+        "additionalProperties": {
+         "maxLength": 128,
+         "type": "string"
+        },
+        "default": {},
+        "title": "Partition keys",
+        "type": "object",
+        "ui": {
+         "hidden": true,
+         "help": "Table (schema.table) → the key column to bucket by; \"\" partitions by the day of the change. The wizard keeps it from discovery.",
+         "from": "table_keys"
+        }
+       }
+      },
+      "title": "IcebergOptions",
+      "type": "object"
+     },
+     "image": {
+      "repository": "ghcr.io/memiiso/debezium-server-iceberg",
+      "tag": "1.2.1.Final",
+      "digest": "sha256:f574edd87406c969fd2dc195f2a40b698d73acda582ccb7a6cc05f01607ae5b1",
+      "debezium": "3.6",
+      "platforms": [
+       "amd64"
+      ],
+      "health_port": 9000
+     }
+    }
+   },
+   "debezium_name": "iceberg",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "jdbc",
+    "title": "Database (JDBC)",
+    "description": "PostgreSQL, MySQL, MariaDB or SQL Server tables, one per source table: upserts, deletes and new columns.",
+    "presets": [
+     {
+      "id": "postgresql",
+      "title": "PostgreSQL",
+      "defaults": {
+       "database_type": "postgresql",
+       "port": 5432,
+       "schema": "public"
+      },
+      "note": ""
+     },
+     {
+      "id": "mysql",
+      "title": "MySQL",
+      "defaults": {
+       "database_type": "mysql",
+       "port": 3306
+      },
+      "note": ""
+     },
+     {
+      "id": "mariadb",
+      "title": "MariaDB",
+      "defaults": {
+       "database_type": "mariadb",
+       "port": 3306
+      },
+      "note": ""
+     },
+     {
+      "id": "sqlserver",
+      "title": "SQL Server",
+      "defaults": {
+       "database_type": "sqlserver",
+       "port": 1433
+      },
+      "note": "Tables are created in the login's default schema (dbo unless set otherwise)."
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "database_type": {
+       "default": "postgresql",
+       "enum": [
+        "postgresql",
+        "mysql",
+        "mariadb",
+        "sqlserver"
+       ],
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "labels": {
+         "postgresql": "PostgreSQL",
+         "mysql": "MySQL",
+         "mariadb": "MariaDB",
+         "sqlserver": "SQL Server"
+        }
+       }
+      },
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "Host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "warehouse.internal"
+       }
+      },
+      "port": {
+       "default": 5432,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "database": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "schema": {
+       "default": "public",
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "Schema",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "help": "Tables are created here.",
+        "when": {
+         "database_type": [
+          "postgresql"
+         ]
+        }
+       }
+      },
+      "user": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "tls": {
+       "default": "require",
+       "enum": [
+        "require",
+        "verify",
+        "disable"
+       ],
+       "title": "TLS",
+       "type": "string",
+       "ui": {
+        "group": "Security",
+        "labels": {
+         "require": "Encrypt",
+         "verify": "Encrypt and verify the server",
+         "disable": "Off"
+        }
+       }
+      }
+     },
+     "required": [
+      "host",
+      "database",
+      "user"
+     ],
+     "title": "JdbcConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Connection"
+       }
+      }
+     },
+     "title": "JdbcSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "{schema}_{table}",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "max_length": 63,
+      "message": "Use letters, digits and '_' (dots become '_').",
+      "flatten_dots": true,
+      "single": false
+     },
+     "formats": [
+      "connect"
+     ],
+     "unwrap": {
+      "required": false,
+      "add_fields": [],
+      "delete_handling": [],
+      "delete_handling_from": {
+       "option": "deletes",
+       "map": {
+        "delete": "tombstone",
+        "ignore": "drop"
+       }
+      }
+     },
+     "outbox": false,
+     "options_schema": {
+      "properties": {
+       "write_mode": {
+        "default": "upsert",
+        "enum": [
+         "upsert",
+         "insert"
+        ],
+        "title": "Rows",
+        "type": "string",
+        "ui": {
+         "group": "Tables",
+         "labels": {
+          "upsert": "Upsert by key",
+          "insert": "Insert only"
+         },
+         "descriptions": {
+          "upsert": "The table mirrors the source.",
+          "insert": "Every change is a new row; needs no key."
+         }
+        }
+       },
+       "deletes": {
+        "default": "delete",
+        "enum": [
+         "delete",
+         "ignore"
+        ],
+        "title": "Deletes",
+        "type": "string",
+        "ui": {
+         "group": "Tables",
+         "labels": {
+          "delete": "Delete the row",
+          "ignore": "Keep the row"
+         },
+         "when": {
+          "write_mode": [
+           "upsert"
+          ]
+         }
+        }
+       },
+       "schema_evolution": {
+        "default": "basic",
+        "enum": [
+         "basic",
+         "none"
+        ],
+        "title": "Tables",
+        "type": "string",
+        "ui": {
+         "group": "Tables",
+         "labels": {
+          "basic": "Create tables and add new columns",
+          "none": "Use existing tables only"
+         }
+        }
+       },
+       "batch_size": {
+        "default": "500",
+        "enum": [
+         "500",
+         "2000",
+         "5000"
+        ],
+        "title": "Batch size",
+        "type": "string",
+        "ui": {
+         "expert": true,
+         "group": "Tables",
+         "help": "Rows written per statement batch."
+        }
+       }
+      },
+      "title": "JdbcOptions",
+      "type": "object"
+     }
+    }
+   },
+   "debezium_name": "jdbc",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "sqs",
+    "title": "Amazon SQS",
+    "description": "One SQS queue for every table of the pipeline; best for low-volume tables.",
+    "presets": [
+     {
+      "id": "aws",
+      "title": "Amazon SQS",
+      "defaults": {},
+      "note": "Every table goes to this queue, one message per change: tell tables apart by source.table (or __table with the row-after-change shape)."
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "region": {
+       "maxLength": 40,
+       "minLength": 3,
+       "title": "Region",
+       "type": "string",
+       "ui": {
+        "group": "AWS",
+        "placeholder": "eu-west-1"
+       }
+      },
+      "queue_url": {
+       "maxLength": 500,
+       "minLength": 10,
+       "pattern": "^https?://\\S+$",
+       "title": "Queue URL",
+       "type": "string",
+       "ui": {
+        "group": "Queue",
+        "placeholder": "https://sqs.eu-west-1.amazonaws.com/123456789012/orders-cdc",
+        "help": "A FIFO queue (.fifo) needs content-based deduplication."
+       }
+      },
+      "endpoint": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Endpoint",
+       "ui": {
+        "expert": true,
+        "group": "AWS",
+        "help": "Custom endpoint (VPC endpoint, LocalStack, ElasticMQ)."
+       }
+      },
+      "access_key_id": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Access Key Id",
+       "ui": {
+        "group": "Credentials",
+        "help": "Leave empty to use the runtime's IAM role (IRSA / instance profile)."
+       }
+      }
+     },
+     "required": [
+      "region",
+      "queue_url"
+     ],
+     "title": "SqsConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "secret_access_key": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Secret Access Key",
+       "ui": {
+        "group": "Credentials"
+       }
+      }
+     },
+     "title": "SqsSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "cdc.{schema}.{table}",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "max_length": 249,
+      "message": "Use letters, digits, '.', '_' and '-'.",
+      "flatten_dots": false,
+      "single": true
+     },
+     "formats": [
+      "json",
+      "cloudevents"
+     ],
+     "unwrap": {
+      "required": false,
+      "add_fields": [],
+      "delete_handling": [
+       "rewrite",
+       "drop"
+      ]
+     },
+     "no_tombstones": true
+    }
+   },
+   "debezium_name": "sqs",
+   "readable": true,
+   "canary": false
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "sns",
+    "title": "Amazon SNS",
+    "description": "One SNS topic per table, for fan-out to queues, Lambda, HTTP and email subscribers.",
+    "presets": [
+     {
+      "id": "aws",
+      "title": "Amazon SNS",
+      "defaults": {},
+      "note": "Names ending in .fifo make FIFO topics, ordered per row key."
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "region": {
+       "maxLength": 40,
+       "minLength": 3,
+       "title": "Region",
+       "type": "string",
+       "ui": {
+        "group": "AWS",
+        "placeholder": "eu-west-1"
+       }
+      },
+      "account_id": {
+       "pattern": "^[0-9]{12}$",
+       "title": "Account ID",
+       "type": "string",
+       "ui": {
+        "group": "AWS",
+        "placeholder": "123456789012",
+        "help": "The account that owns the topics."
+       }
+      },
+      "endpoint": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Endpoint",
+       "ui": {
+        "expert": true,
+        "group": "AWS",
+        "help": "Custom endpoint (VPC endpoint, LocalStack). It also serves SQS for the preview queues."
+       }
+      },
+      "access_key_id": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Access Key Id",
+       "ui": {
+        "group": "Credentials",
+        "help": "Leave empty to use the runtime's IAM role (IRSA / instance profile)."
+       }
+      },
+      "create_topics": {
+       "default": true,
+       "title": "Create topics automatically",
+       "type": "boolean",
+       "ui": {
+        "group": "Topics"
+       }
+      }
+     },
+     "required": [
+      "region",
+      "account_id"
+     ],
+     "title": "SnsConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "secret_access_key": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Secret Access Key",
+       "ui": {
+        "group": "Credentials"
+       }
+      }
+     },
+     "title": "SnsSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "cdc_{schema}_{table}",
+      "pattern": "^[A-Za-z0-9_-]+(\\.fifo)?$",
+      "max_length": 256,
+      "message": "Use letters, digits, '_' and '-'; end with .fifo for FIFO topics.",
+      "flatten_dots": false,
+      "single": false
+     },
+     "formats": [
+      "json",
+      "cloudevents"
+     ],
+     "unwrap": {
+      "required": false,
+      "add_fields": [],
+      "delete_handling": [
+       "rewrite",
+       "drop"
+      ]
+     },
+     "no_tombstones": true
+    }
+   },
+   "debezium_name": "sns",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "eventhubs",
+    "title": "Azure Event Hubs",
+    "description": "One event hub for every table of the pipeline, partitioned by row key.",
+    "presets": [
+     {
+      "id": "azure",
+      "title": "Azure Event Hubs",
+      "defaults": {},
+      "note": "Every table goes to this hub: tell tables apart by source.table (or __table with the row-after-change shape). The hub must exist."
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "hub_name": {
+       "maxLength": 256,
+       "minLength": 1,
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+       "title": "Event hub",
+       "type": "string",
+       "ui": {
+        "group": "Event hub",
+        "placeholder": "orders-cdc"
+       }
+      }
+     },
+     "required": [
+      "hub_name"
+     ],
+     "title": "EventHubsConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "connection_string": {
+       "anyOf": [
+        {
+         "maxLength": 1000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Connection string",
+       "ui": {
+        "group": "Sign in",
+        "help": "Of a shared access policy on the namespace with Send rights, without EntityPath."
+       }
+      },
+      "listen_connection_string": {
+       "anyOf": [
+        {
+         "maxLength": 1000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Connection string for reading",
+       "ui": {
+        "group": "Sign in",
+        "help": "Only when the first one cannot Listen: the Events tab and the delivery canary read with it."
+       }
+      }
+     },
+     "title": "EventHubsSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "cdc.{schema}.{table}",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "max_length": 249,
+      "message": "Use letters, digits, '.', '_' and '-'.",
+      "flatten_dots": false,
+      "single": true
+     }
+    }
+   },
+   "debezium_name": "eventhubs",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": true,
+    "kind": "sink",
+    "type": "pulsar",
+    "title": "Apache Pulsar",
+    "description": "One persistent Pulsar topic per table, keyed by row.",
+    "presets": [
+     {
+      "id": "self_hosted",
+      "title": "Self-hosted Pulsar",
+      "defaults": {},
+      "note": ""
+     },
+     {
+      "id": "streamnative",
+      "title": "StreamNative Cloud",
+      "defaults": {},
+      "note": "Service URL pulsar+ssl://<cluster>:6651 and admin URL https://<cluster>; sign in with an API key as the token."
+     }
+    ],
+    "config_schema": {
+     "properties": {
+      "service_url": {
+       "maxLength": 500,
+       "minLength": 9,
+       "pattern": "^pulsar(\\+ssl)?://\\S+$",
+       "title": "Service URL",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "pulsar://broker:6650",
+        "help": "What the connector produces to."
+       }
+      },
+      "admin_url": {
+       "maxLength": 500,
+       "minLength": 8,
+       "pattern": "^https?://\\S+$",
+       "title": "Admin URL",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "http://broker:8080",
+        "help": "BeziSync checks the namespace, creates topics and reads recent messages through it."
+       }
+      },
+      "tenant": {
+       "default": "public",
+       "maxLength": 128,
+       "minLength": 1,
+       "pattern": "^[A-Za-z0-9._-]+$",
+       "title": "Tenant",
+       "type": "string",
+       "ui": {
+        "group": "Topics"
+       }
+      },
+      "namespace": {
+       "default": "default",
+       "maxLength": 128,
+       "minLength": 1,
+       "pattern": "^[A-Za-z0-9._-]+$",
+       "title": "Namespace",
+       "type": "string",
+       "ui": {
+        "group": "Topics"
+       }
+      },
+      "create_topics": {
+       "default": true,
+       "title": "Create topics automatically",
+       "type": "boolean",
+       "ui": {
+        "group": "Topics"
+       }
+      }
+     },
+     "required": [
+      "service_url",
+      "admin_url"
+     ],
+     "title": "PulsarConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "token": {
+       "anyOf": [
+        {
+         "maxLength": 4000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Token",
+       "ui": {
+        "group": "Sign in",
+        "help": "A JWT (or API key) when the cluster requires authentication."
+       }
+      },
+      "ca_cert": {
+       "anyOf": [
+        {
+         "maxLength": 20000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "CA certificate (PEM)",
+       "ui": {
+        "expert": true,
+        "group": "Sign in",
+        "multiline": true,
+        "help": "Only for TLS with a private CA."
+       }
+      }
+     },
+     "title": "PulsarSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "cdc.{schema}.{table}",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "max_length": 255,
+      "message": "Use letters, digits, '.', '_' and '-'.",
+      "flatten_dots": false,
+      "single": false
+     }
+    }
+   },
+   "debezium_name": "pulsar",
+   "readable": true
+  }
+ ]
+}

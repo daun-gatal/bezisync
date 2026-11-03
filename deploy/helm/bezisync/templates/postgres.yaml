@@ -1,0 +1,55 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "bezisync.fullname" . }}-postgres
+  labels: {{- include "bezisync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ include "bezisync.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: postgres }
+  template:
+    metadata:
+      labels: {{- include "bezisync.labels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "bezisync.podSecurityContext" (dict "root" . "base" (dict)) | nindent 8 }}
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          env:
+            - { name: POSTGRES_USER, value: bezisync }
+            {{- if .Values.existingSecret }}
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: BEZISYNC_POSTGRES_PASSWORD } }
+            {{- else }}
+            - { name: POSTGRES_PASSWORD, value: {{ .Values.postgres.password | quote }} }
+            {{- end }}
+            - { name: POSTGRES_DB, value: bezisync }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ name: pg, containerPort: 5432 }]
+          readinessProbe: { exec: { command: [pg_isready, -U, bezisync] }, periodSeconds: 3 }
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.postgres.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.postgres.storage }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bezisync.fullname" . }}-postgres
+  labels: {{- include "bezisync.labels" . | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: postgres }
+  ports: [{ name: pg, port: 5432, targetPort: pg }]
+{{- end }}

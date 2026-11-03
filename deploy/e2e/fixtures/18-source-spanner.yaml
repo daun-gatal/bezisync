@@ -1,0 +1,47 @@
+# Cloud Spanner emulator with instance "shop" and database "orders" (GoogleSQL). In-cluster:
+# spanner.bezisync-e2e-data — gRPC 9010, REST 9020; runner: bezisync-e2e-k3s:30920 (REST).
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: spanner-init }
+data:
+  init.sh: |
+    set -e
+    api=http://127.0.0.1:9020/v1/projects/bezisync-e2e
+    until curl -sf "$api/instanceConfigs" >/dev/null; do sleep 1; done
+    curl -sf -X POST "$api/instances" -d '{"instanceId":"shop","instance":{"config":"emulator-config","displayName":"shop","nodeCount":1}}' >/dev/null
+    curl -sf -X POST "$api/instances/shop/databases" -d '{"createStatement":"CREATE DATABASE orders","extraStatements":[
+      "CREATE TABLE Orders (OrderId INT64 NOT NULL, Status STRING(40) NOT NULL, Email STRING(200), Total NUMERIC) PRIMARY KEY (OrderId)",
+      "CREATE TABLE Customers (CustomerId INT64 NOT NULL, Name STRING(100)) PRIMARY KEY (CustomerId)"]}' >/dev/null
+    touch /tmp/ready
+    exec sleep infinity
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: spanner }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: spanner } }
+  template:
+    metadata: { labels: { app: spanner, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: emulator
+          image: gcr.io/cloud-spanner-emulator/emulator@sha256:5f71fecd6330211789b75065ade9587d67b3a6b4678e7e5408e42c22f778c63e
+          ports: [{ containerPort: 9010 }, { containerPort: 9020 }]
+        - name: init
+          image: curlimages/curl:8.10.1
+          command: [sh, /init/init.sh]
+          readinessProbe: { exec: { command: [test, -f, /tmp/ready] }, periodSeconds: 2, failureThreshold: 60 }
+          volumeMounts: [{ name: init, mountPath: /init }]
+      volumes: [{ name: init, configMap: { name: spanner-init } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: spanner }
+spec:
+  type: NodePort
+  selector: { app: spanner }
+  ports:
+    - { name: grpc, port: 9010, targetPort: 9010, nodePort: 30910 }
+    - { name: rest, port: 9020, targetPort: 9020, nodePort: 30920 }

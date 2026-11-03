@@ -1,0 +1,837 @@
+{
+ "stores": [
+  {
+   "kind": "vault",
+   "title": "HashiCorp Vault",
+   "description": "KV version 2 secrets, token or AppRole sign-in.",
+   "config_schema": {
+    "properties": {
+     "address": {
+      "maxLength": 300,
+      "pattern": "^https?://",
+      "title": "Address",
+      "type": "string",
+      "ui": {
+       "group": "Vault",
+       "placeholder": "https://vault.internal:8200"
+      }
+     },
+     "mount": {
+      "default": "secret",
+      "maxLength": 100,
+      "title": "Mount",
+      "type": "string",
+      "ui": {
+       "group": "Vault",
+       "help": "KV version 2 mount."
+      }
+     },
+     "namespace": {
+      "default": "",
+      "maxLength": 100,
+      "title": "Namespace",
+      "type": "string",
+      "ui": {
+       "expert": true,
+       "group": "Vault",
+       "help": "Vault Enterprise namespace."
+      }
+     },
+     "auth_method": {
+      "default": "token",
+      "enum": [
+       "token",
+       "approle"
+      ],
+      "title": "Sign in with",
+      "type": "string",
+      "ui": {
+       "group": "Credentials"
+      }
+     },
+     "approle_mount": {
+      "default": "approle",
+      "maxLength": 100,
+      "title": "Approle Mount",
+      "type": "string",
+      "ui": {
+       "expert": true,
+       "group": "Credentials"
+      }
+     }
+    },
+    "required": [
+     "address"
+    ],
+    "title": "VaultConfig",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "token": {
+      "anyOf": [
+       {
+        "maxLength": 2000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Token",
+      "ui": {
+       "group": "Credentials"
+      }
+     },
+     "role_id": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Role Id",
+      "ui": {
+       "group": "Credentials",
+       "help": "AppRole only."
+      }
+     },
+     "secret_id": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Secret Id",
+      "ui": {
+       "group": "Credentials",
+       "help": "AppRole only."
+      }
+     }
+    },
+    "title": "VaultSecrets",
+    "type": "object"
+   }
+  },
+  {
+   "kind": "aws",
+   "title": "AWS Secrets Manager",
+   "description": "Secrets by name or ARN; JSON keys with #key.",
+   "config_schema": {
+    "properties": {
+     "region": {
+      "pattern": "^[a-z0-9-]{4,30}$",
+      "title": "Region",
+      "type": "string",
+      "ui": {
+       "group": "AWS",
+       "placeholder": "eu-west-1"
+      }
+     },
+     "endpoint": {
+      "default": "",
+      "maxLength": 300,
+      "title": "Endpoint",
+      "type": "string",
+      "ui": {
+       "expert": true,
+       "group": "AWS",
+       "help": "Custom endpoint (VPC endpoint or emulator)."
+      }
+     }
+    },
+    "required": [
+     "region"
+    ],
+    "title": "AwsConfig",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "access_key_id": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Access Key Id",
+      "ui": {
+       "group": "Credentials",
+       "help": "Leave empty to use the instance or IRSA role."
+      }
+     },
+     "secret_access_key": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Secret Access Key",
+      "ui": {
+       "group": "Credentials"
+      }
+     }
+    },
+    "title": "AwsSecrets",
+    "type": "object"
+   }
+  },
+  {
+   "kind": "gcp",
+   "title": "Google Secret Manager",
+   "description": "Secrets by name, latest or /versions/N.",
+   "config_schema": {
+    "properties": {
+     "project_id": {
+      "pattern": "^[a-z][a-z0-9-]{4,62}$",
+      "title": "Project Id",
+      "type": "string",
+      "ui": {
+       "group": "Google Cloud"
+      }
+     },
+     "endpoint": {
+      "default": "",
+      "maxLength": 300,
+      "title": "Endpoint",
+      "type": "string",
+      "ui": {
+       "expert": true,
+       "group": "Google Cloud",
+       "help": "Custom endpoint (private endpoint or emulator). With no key, BeziSync sends no sign-in, as emulators expect."
+      }
+     }
+    },
+    "required": [
+     "project_id"
+    ],
+    "title": "GcpConfig",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "service_account_json": {
+      "anyOf": [
+       {
+        "maxLength": 20000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Service Account Json",
+      "ui": {
+       "group": "Credentials",
+       "help": "Leave empty to use Workload Identity / application default credentials.",
+       "multiline": true
+      }
+     }
+    },
+    "title": "GcpSecrets",
+    "type": "object"
+   }
+  },
+  {
+   "kind": "kubernetes",
+   "title": "Kubernetes Secrets",
+   "description": "Secrets in one namespace; #key picks a data key.",
+   "config_schema": {
+    "properties": {
+     "namespace": {
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "title": "Namespace",
+      "type": "string",
+      "ui": {
+       "group": "Kubernetes"
+      }
+     },
+     "in_cluster": {
+      "default": true,
+      "title": "Cluster",
+      "type": "boolean",
+      "ui": {
+       "group": "Kubernetes",
+       "labels": {
+        "true": "This cluster",
+        "false": "Another cluster"
+       },
+       "help": "This cluster: BeziSync's own service account. Another cluster: a kubeconfig."
+      }
+     }
+    },
+    "required": [
+     "namespace"
+    ],
+    "title": "K8sConfig",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "kubeconfig": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Kubeconfig",
+      "ui": {
+       "group": "Kubernetes",
+       "multiline": true,
+       "when": {
+        "in_cluster": [
+         false
+        ]
+       },
+       "help": "A kubeconfig with a static ServiceAccount token that may get and list Secrets in the namespace. Sign-in plugins (exec, such as gcloud's) can't run here."
+      }
+     }
+    },
+    "title": "K8sSecrets",
+    "type": "object"
+   }
+  }
+ ],
+ "runtimes": [
+  {
+   "kind": "kubernetes",
+   "config_schema": {
+    "properties": {
+     "namespace": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "title": "Namespace",
+      "type": "string",
+      "ui": {
+       "group": "Kubernetes",
+       "placeholder": "cdc-prod"
+      }
+     },
+     "in_cluster": {
+      "default": true,
+      "title": "Cluster",
+      "type": "boolean",
+      "ui": {
+       "group": "Kubernetes",
+       "labels": {
+        "true": "This cluster",
+        "false": "Another cluster"
+       },
+       "help": "This cluster: BeziSync's own service account. Another cluster: a kubeconfig, GKE or EKS."
+      }
+     },
+     "cluster_auth": {
+      "default": "kubeconfig",
+      "enum": [
+       "kubeconfig",
+       "gke",
+       "eks"
+      ],
+      "title": "Sign in to the cluster with",
+      "type": "string",
+      "ui": {
+       "group": "Other cluster",
+       "help": "kubeconfig: a static ServiceAccount token. GKE / EKS: BeziSync mints short-lived tokens itself.",
+       "when": {
+        "in_cluster": [
+         false
+        ]
+       }
+      }
+     },
+     "endpoint": {
+      "default": "",
+      "maxLength": 300,
+      "title": "API server endpoint",
+      "type": "string",
+      "ui": {
+       "group": "Other cluster",
+       "placeholder": "https://34.12.0.10",
+       "when": {
+        "in_cluster": [
+         false
+        ],
+        "cluster_auth": [
+         "gke",
+         "eks"
+        ]
+       }
+      }
+     },
+     "ca_certificate": {
+      "default": "",
+      "maxLength": 20000,
+      "title": "Cluster CA certificate",
+      "type": "string",
+      "ui": {
+       "group": "Other cluster",
+       "help": "PEM or base64 (as shown in the cloud console).",
+       "multiline": true,
+       "when": {
+        "in_cluster": [
+         false
+        ],
+        "cluster_auth": [
+         "gke",
+         "eks"
+        ]
+       }
+      }
+     },
+     "eks_cluster_name": {
+      "default": "",
+      "maxLength": 100,
+      "title": "EKS cluster name",
+      "type": "string",
+      "ui": {
+       "group": "Other cluster",
+       "when": {
+        "in_cluster": [
+         false
+        ],
+        "cluster_auth": [
+         "eks"
+        ]
+       }
+      }
+     },
+     "region": {
+      "default": "",
+      "maxLength": 40,
+      "title": "AWS region",
+      "type": "string",
+      "ui": {
+       "group": "Other cluster",
+       "placeholder": "eu-west-1",
+       "when": {
+        "in_cluster": [
+         false
+        ],
+        "cluster_auth": [
+         "eks"
+        ]
+       }
+      }
+     },
+     "service_account": {
+      "default": "",
+      "maxLength": 253,
+      "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$",
+      "title": "Connector service account",
+      "type": "string",
+      "ui": {
+       "expert": true,
+       "group": "Kubernetes",
+       "help": "ServiceAccount for connector pods, e.g. one bound to IRSA or Workload Identity. Empty: the namespace default."
+      }
+     },
+     "image_pull_secrets": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Image pull secrets",
+      "type": "array",
+      "ui": {
+       "expert": true,
+       "group": "Kubernetes",
+       "help": "Comma-separated Secret names in the namespace, for private or custom Debezium images."
+      }
+     }
+    },
+    "required": [
+     "namespace"
+    ],
+    "title": "KubernetesConfig",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "kubeconfig": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Kubeconfig",
+      "ui": {
+       "group": "Other cluster",
+       "multiline": true,
+       "when": {
+        "in_cluster": [
+         false
+        ],
+        "cluster_auth": [
+         "kubeconfig"
+        ]
+       },
+       "help": "A kubeconfig with a static ServiceAccount token. Sign-in plugins (exec, such as gcloud's) can't run here."
+      }
+     },
+     "gcp_service_account_json": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Google service account key (JSON)",
+      "ui": {
+       "group": "Other cluster",
+       "help": "Empty: Workload Identity / default credentials.",
+       "multiline": true,
+       "when": {
+        "in_cluster": [
+         false
+        ],
+        "cluster_auth": [
+         "gke"
+        ]
+       }
+      }
+     },
+     "aws_access_key_id": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "AWS access key ID",
+      "ui": {
+       "group": "Other cluster",
+       "help": "Empty: IRSA / default credentials.",
+       "when": {
+        "in_cluster": [
+         false
+        ],
+        "cluster_auth": [
+         "eks"
+        ]
+       }
+      }
+     },
+     "aws_secret_access_key": {
+      "anyOf": [
+       {
+        "maxLength": 200,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "AWS secret access key",
+      "ui": {
+       "group": "Other cluster",
+       "when": {
+        "in_cluster": [
+         false
+        ],
+        "cluster_auth": [
+         "eks"
+        ]
+       }
+      }
+     }
+    },
+    "title": "KubernetesSecrets",
+    "type": "object"
+   }
+  },
+  {
+   "kind": "docker",
+   "config_schema": {
+    "properties": {
+     "host": {
+      "default": "",
+      "maxLength": 300,
+      "title": "Host",
+      "type": "string",
+      "ui": {
+       "group": "Docker",
+       "help": "Empty uses the local Docker socket.",
+       "placeholder": "tcp://runner.internal:2376"
+      }
+     },
+     "tls_verify": {
+      "default": false,
+      "title": "Verify TLS",
+      "type": "boolean",
+      "ui": {
+       "group": "Docker"
+      }
+     },
+     "network": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Network",
+      "type": "string",
+      "ui": {
+       "expert": true,
+       "group": "Docker",
+       "help": "Docker network to attach connectors to."
+      }
+     },
+     "image_pull_timeout": {
+      "default": "30m",
+      "enum": [
+       "10m",
+       "30m",
+       "1h",
+       "2h"
+      ],
+      "title": "Image download timeout",
+      "type": "string",
+      "ui": {
+       "group": "Docker",
+       "help": "How long downloading a Debezium image may take. The current connector keeps running meanwhile."
+      }
+     }
+    },
+    "title": "DockerConfig",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "ca_pem": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "CA certificate",
+      "ui": {
+       "expert": true,
+       "group": "TLS",
+       "multiline": true
+      }
+     },
+     "cert_pem": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Client certificate",
+      "ui": {
+       "expert": true,
+       "group": "TLS",
+       "multiline": true
+      }
+     },
+     "key_pem": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Client key",
+      "ui": {
+       "expert": true,
+       "group": "TLS",
+       "multiline": true
+      }
+     }
+    },
+    "title": "DockerSecrets",
+    "type": "object"
+   }
+  }
+ ],
+ "channels": [
+  {
+   "kind": "slack",
+   "title": "Slack",
+   "config_schema": {
+    "properties": {},
+    "title": "Empty",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "webhook_url": {
+      "pattern": "^https://",
+      "title": "Webhook Url",
+      "type": "string",
+      "ui": {
+       "group": "Slack",
+       "placeholder": "https://hooks.slack.com/services/…"
+      }
+     }
+    },
+    "required": [
+     "webhook_url"
+    ],
+    "title": "SlackSecrets",
+    "type": "object"
+   }
+  },
+  {
+   "kind": "webhook",
+   "title": "Webhook",
+   "config_schema": {
+    "properties": {},
+    "title": "Empty",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "url": {
+      "pattern": "^https?://",
+      "title": "Url",
+      "type": "string",
+      "ui": {
+       "group": "Webhook",
+       "placeholder": "https://ops.example.com/hooks/cdc"
+      }
+     },
+     "signing_secret": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Signing Secret",
+      "ui": {
+       "group": "Webhook",
+       "help": "Signs each body: X-BeziSync-Signature: sha256=<hmac>."
+      }
+     }
+    },
+    "required": [
+     "url"
+    ],
+    "title": "WebhookSecrets",
+    "type": "object"
+   }
+  },
+  {
+   "kind": "pagerduty",
+   "title": "PagerDuty",
+   "config_schema": {
+    "properties": {
+     "events_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Events Url",
+      "ui": {
+       "expert": true,
+       "group": "PagerDuty"
+      }
+     }
+    },
+    "title": "PagerDutyConfig",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {
+     "routing_key": {
+      "minLength": 8,
+      "title": "Routing Key",
+      "type": "string",
+      "ui": {
+       "group": "PagerDuty",
+       "help": "Events API v2 integration key."
+      }
+     }
+    },
+    "required": [
+     "routing_key"
+    ],
+    "title": "PagerDutySecrets",
+    "type": "object"
+   }
+  },
+  {
+   "kind": "email",
+   "title": "Email",
+   "config_schema": {
+    "properties": {
+     "recipients": {
+      "items": {
+       "format": "email",
+       "type": "string"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Recipients",
+      "type": "array"
+     }
+    },
+    "required": [
+     "recipients"
+    ],
+    "title": "EmailConfig",
+    "type": "object"
+   },
+   "secret_schema": {
+    "properties": {},
+    "title": "Empty",
+    "type": "object"
+   }
+  }
+ ]
+}

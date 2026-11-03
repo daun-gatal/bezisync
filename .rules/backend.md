@@ -1,0 +1,385 @@
+# Backend (`backend/`)
+
+One Go module (`github.com/daun-gatal/bezisync/backend`), one static binary `bezisync` for every
+role: `api`, `controller`, `agent`, `migrate` and the CLI.
+
+## Layout
+```
+cmd/bezisync/         # main: hands os.Args to internal/cli
+internal/
+├── cli/              # cobra commands (server roles, admin commands, `remote` client)
+├── api/              # HTTP handlers: thin; one file per resource; mounted under /api/v1 (+ openapi.json, embedded)
+├── httpapi/          # chi router, middleware (request id, security headers, access log), problems, Body/Query readers
+├── auth/             # sessions + CSRF, API tokens, MCP OAuth tokens, Perm/roles, project resolution
+├── mcpserver/        # the MCP endpoint (/api/v1/mcp): tool catalog, per-caller filtering, in-process API calls
+├── services/         # business logic (audit, pipelines, approvals, alerts, secret stores, …)
+├── controller/       # leader-elected reconcile loop, jobs, uninstall
+├── agent/            # `bezisync agent` (dials out; never listens)
+├── connectors/       # sources and sinks (+ descriptors.json: their forms/validation schemas)
+├── compiler/         # spec + resolved connections → application.properties + env (pure)
+├── runtime/          # Docker and Kubernetes drivers (+ GKE/EKS auth)
+├── secrets/          # external secret store clients (Vault, AWS, GCP, Kubernetes)
+├── domain/           # pure rules: spec, health, policies, schema drift, windows, manifests
+├── checks/           # check type, Run helper, catalog.json (the check reference registry)
+├── db/ models/       # pgx pool, transactions, handwritten SQL helpers; row structs (`db` tags)
+├── migrate/          # goose migrations (sql/), Alembic adoption, schema golden (testdata/schema.txt)
+├── config/ logging/ security/ ssrf/ oidc/ ratelimit/ problem/
+├── val/ schemaval/ schemas/   # Pydantic-compatible validation and messages; captured model schemas
+└── pyjson/ pyyaml/ pytime/ om/ difflib/   # byte-exact Python behaviour where hashes and output depend on it
+testdata/contract/    # contract corpus recorded from the Python implementation (frozen; tests compare against it)
+```
+
+## Rules
+- Go version from `go.mod` (`~/.local/go` locally); `golangci-lint` v2 (`.golangci.yml`). `go mod tidy`
+  after dependency changes; never hand-edit `go.sum`.
+- Config comes from `config.Get()` (`BEZISYNC_*` env, loaded once). Never read `os.Getenv` for
+  settings elsewhere (CLI flags with an env default are the exception).
+- PostgreSQL only, also in tests (`testdb.Main` creates and migrates a database per test package;
+  `testdb.Reset` empties it). SQL is handwritten with pgx; `db.Insert/Update/Delete` map row structs by
+  their `db` tags. JSONB columns are `db.Map` / `db.List` (numbers decode as `json.Number`).
+- Schema changes: `make migration m="…"` writes the next goose SQL file in `internal/migrate/sql/`;
+  update `internal/migrate/testdata/schema.txt` in the same change (the migrate test compares a fresh
+  database with it). `bezisync migrate` adopts a database left by the Alembic releases by recording the
+  goose baseline without running DDL; an older Alembic revision is refused.
+- Errors are `*problem.Problem` (`problem.New(status, code, detail)`, `problem.NotFound`, `problem.Conflict`)
+  → RFC 9457 `application/problem+json` with `request_id`; anything else is a logged 500. Codes are
+  stable snake_case; details are plain sentences. Handlers return errors through `httpapi.H`.
+- Request validation mirrors Pydantic exactly (the UI and CLI show these messages): read bodies with
+  `body(r, func(v *val.V, o *val.Object) T)`, query parameters with `httpapi.Q(r)`; 422 errors carry
+  `loc` / `message` / `type` like FastAPI.
+- JSON responses keep the documented field order: response structs, or `obj(k, v, …)` (an ordered
+  `om.Map`) for ad-hoc objects. Timestamps are `pytime.Time` (`…Z`) unless the API returned an
+  isoformat string (`pytime.ISOFormat`).
+- Auth: browser sessions (HttpOnly cookie `bz_session` + CSRF header from cookie `bz_csrf`) or
+  bearer API tokens. Project resources live under `/api/v1/projects/{project_id}/…` and are
+  resolved with `project(r)` (`auth.Project`); unauthorized and unknown both return **404**.
+- Authorization asks for a `Perm` (`a.Require(auth.PipelineDeploy)`); never check role names.
+- Every mutation writes `services.Record(ctx, q, services.AuditEvent{…})` (audit by default).
+- **Admin is account-wide** (`User.IsSuperuser`, "Admin" in the UI) and holds every permission in
+  every project; project roles are viewer / operator / editor only and never include
+  `project.manage`, `member.manage`, `runtime.manage`, `alert.manage` or `audit.view`. Admins need
+  no membership (creating a project or bootstrapping adds none). `superuser(r)` guards
+  `api/users.go` (people, Admin, deactivation — which deletes sessions — and per-project access, also
+  `GET /users?project_id=` = its members plus every Admin; edits clear `granted_by_sso`),
+  `POST/DELETE /projects` (delete refused while live pipelines or cleanup jobs exist) and the Debezium
+  catalog. Guards: no self-demotion/deactivation, last active Admin. Project notifications (alerts,
+  approval requests) go to `services.ProjectAudience`: members (or approvers) plus every active Admin.
+- Lists use keyset pagination (`paginate` in `api`, `services.PageSQL`, max 200); cursors are
+  `base64url(json([isoformat, id]))`, compatible with the Python releases.
+- The API is spec-first: `internal/api/openapi.json` is the contract the frontend client is generated
+  from. Change it together with the handlers, then `make openapi`; `TestRoutesMatchOpenAPI` fails when
+  a route and the document disagree, and `make verify` when `frontend/openapi.json` is stale.
+- Logging: `logging.Logger("bezisync.<area>")` (JSON lines with `ts`, `level`, `logger`, `msg` and
+  extra fields). Never log secret values.
+
+## Connectors (`internal/connectors/`)
+- One file per source/sink implementing `connectors.Source` / `connectors.Sink`, registered with
+  `connectors.Register`. `descriptors.json` holds each type's descriptor (title, presets, flags) and its
+  config and secret JSON Schemas: the UI renders forms from them and `schemaval` validates against them
+  with Pydantic semantics, so a new field is added there and read in the connector.
+- `Check` returns a `checks.Report` of `checks.Check`s: stable `Code`, plain `Message` (Guided),
+  `Technical` (Expert), `Why`, and a copyable `Fix` tailored to the provider preset. Anything
+  that would make a deploy fail is `Status: checks.Fail, Blocking: true`. Every code needs an entry in
+  `internal/checks/catalog.json` (a test scans the source), and `make verify` fails when
+  `docs/reference/checks.md` differs from `bezisync check-docs`.
+- Every outbound probe goes through `ssrf` (`connectors.NetworkCheck`, `ssrf.TCPProbe`,
+  `ssrf.ResolveChecked`). Loopback, link-local and metadata addresses are denied unless
+  `BEZISYNC_SSRF_ALLOW_CIDRS` allows them.
+- Secrets: `services.ValidateConnection` validates, `services.MergeSecrets` applies write-only patches,
+  `services.EncryptOrNil` encrypts, and `services.ScrubReport` removes known secret values from every
+  check message. API responses expose only `secret_fields_set` (and `secret_refs`).
+- Connection edits need `If-Match: "<version>"` (412 on conflict, 428 when missing).
+- Copy to project (`services/copy.go`, `POST …/connections:copy` with `dry_run` for the plan,
+  `POST …/secret-stores/{id}/copy`): never a move; `connection.manage` in both projects; saved secrets
+  stay behind unless an Admin sends `secrets: copy`; a reference to a store the target lacks needs a
+  choice (copy the store, Admins only, or use one of the target's); name clashes copy under another name
+  or `update` (keeps the target's own secrets). A connection without a required secret reports
+  `missing_secrets`, and `Resolve` fails with `secret_missing` (a blocking check in connection checks,
+  a 422 from preflight), so copies are never half-usable. Secret-store edits accept `test_first`; `secrets_updated_at` records when credentials changed.
+- External secret stores (`internal/secrets/`, `services` store functions, Settings → Secret stores):
+  Vault KV v2 (token/AppRole), AWS Secrets Manager, Google Secret Manager, Kubernetes Secrets.
+  A secret field may hold `ref+<store>://<path>#<key>`; only the reference is stored and
+  `services.Resolve` reads the value on demand (60 s in-process cache keyed by store version).
+  Validation skips references; `services.ValidateRefs` requires the store to exist.
+  Failures are `services.UnresolvedSecret` (422) and become a blocking `secret_ref_unresolved` check —
+  messages name the field and store, never a value. `check-ref` confirms a reference without
+  returning it. Pickers list without values: `Client.List` (≤ `secrets.ListLimit` paths; Vault walks
+  `metadata/`, Kubernetes skips token/Helm/pull Secrets) behind `GET …/secret-stores/{id}/secrets`, and
+  `secrets.Keys` behind `POST …/keys` (key names, or `whole_value` when not a JSON object); a store
+  that can't list answers `ok=false` with the reason (also MCP `list_secret_store_secrets`,
+  `list_secret_keys`). Creating and editing accept `test_first` (422 `store_test_failed`, nothing
+  saved). Store clients go through the SSRF guard: a kubeconfig's API server dials through
+  `ssrf.DialContext`, and `exec`/auth-provider users are refused; Google takes an optional `endpoint`
+  (no sign-in without a key, for emulators). Kubernetes stores need `get`/`list` on Secrets in their
+  namespace (the chart grants it in runtime namespaces).
+- Shipped: sources `postgresql`, `mysql` (+ MariaDB preset), `sqlserver`, `mongodb`, `oracle` (LogMiner,
+  go-ora; CDB/PDB; own tables `BZ_*` in the user's schema), `cockroachdb` (sinkless changefeed, pgx),
+  `vitess` (VTGate gRPC for Debezium, its MySQL port for checks; no re-copies or canary) and `spanner`
+  (change streams; per-pipeline stream `bz_<id>` or an existing one; coordination Kafka as a linked
+  connection; no snapshots); sinks `kafka`,
+  `http`, `pubsub`, `kinesis`, `redis`, `nats`, `iceberg` (REST catalog / Glue, iceberg-go for checks
+  and Tail, its own image), `jdbc` (PostgreSQL, MySQL, MariaDB, SQL Server), `sqs` (one queue; peeking
+  Tail, no canary: descriptor `canary: false`), `sns` (topics plus BeziSync's preview queues, removed by
+  `SinkReleaser` on every pipeline cleanup), `eventhubs` (one hub; Tail reads partitions with Listen
+  rights) and `pulsar` (admin REST API for checks, topics and Tail via `examinemessage`). Descriptor flags declare capabilities
+  (`needs_schema_history`, `supports_masking`, `unwrap_transform`, `tracks_schema`, `supports_canary`,
+  `readable`, `canary`); the wizard reads them from `connector-types`. Sinks that need files (e.g. a Pub/Sub
+  service-account key) return them from `SecretFiles`; drivers mount them under `connectors.SecretDir`
+  and they count in `config_hash`. Readable sinks implement `Tail` for the Events tab.
+- Source capture (descriptor `"capture"`, `connectors.CaptureCaps`): `snapshot_modes` the source offers
+  (empty: it cannot copy existing rows), `mode_names` (the connector's name for a mode, Vitess
+  `no_data` → `never`), `incremental` (re-copies while streaming: the Snapshots tab, the snapshot API and
+  the auto-snapshot of added tables need it), `incremental_note`, `min_debezium` (the oldest Debezium
+  Server release it works with: preflight blocks older official images, `services.MinimumDebeziumCheck`)
+  and `maturity` (`incubating` shows a Preview badge);
+  `connector-types` also serves `capture.canary` from `supports_canary`. `compiler.SnapshotProps` emits
+  the snapshot properties from them. Optional source interfaces: `SourceFiler` (files under
+  `SecretDir`, like sinks), `ManagedTopics` (BeziSync's own tables outside a `bezisync` schema, filtered
+  from the destination), `Namer` (topics named after `debezium.source.name`, Spanner). Sources whose
+  history is kept for a time report it with `connectors.TimeWindowImpact` (`behind_seconds` against
+  `retention_seconds`; at risk at 80%, lost past it).
+- Linked connections: a config field with `ui.connection: "<kind>/<type>"` names another connection of
+  the project (Spanner's coordination Kafka). `services.NormalizeLinks` stores its id (given an id or
+  a name), `services.Resolve`/`ResolveLinks` put the resolved target in `Resolved.Linked[field]`
+  (agents get it in the check payload's `linked`), check reports scrub its secrets too, and a linked
+  connection cannot be deleted (`services.LinkedBy`).
+- Sink capabilities (`connectors/sinkcaps.go`, descriptor `"sink"`, shown by `connector-types` with
+  defaults filled in): `naming` (default template, pattern, max length, `flatten_dots`, `single` for one
+  destination per pipeline; rendered names are checked only when a descriptor states its rules),
+  `formats` (one entry is forced, e.g. Iceberg's `connect`), `unwrap` (required step, fields always
+  added, allowed delete handling), `outbox`, `no_tombstones`, `time_precision` (no adaptive temporal
+  types), `options_schema` (JSON Schema of `spec.sink.options`, validated with `schemaval`; sinks without
+  one ignore old free-form keys) and `min_resources`. The compiler applies them (`compiler/sinkcaps.go`),
+  saving a pipeline checks options, naming and format (`services.ValidateSinkSpec`), and transforms
+  are checked when compiling, so changing the destination never needs a later step fixed first.
+  Optional sink interfaces: `DestinationNamer` (the destination Prepare, cleanup and Tail use, e.g. a
+  namespace in front or one queue for every table) and `PipelineChecker` (checks on the captured tables,
+  keys and options, run in preflight's Configuration section with the shared discovery).
+  Checks and previews of user-supplied HTTP endpoints use `ssrf.HTTPClient`.
+- SSH tunnels (`connectors/ssh.go`): SQL sources accept the SSH fields and wrap every connection in
+  `connectors.Tunnel(...)`; checks call `connectors.SSHChecks` instead of `NetworkCheck` when `ssh_host`
+  is set. The compiler emits `Compiled.Tunnel` (part of `config_hash`) and points Debezium at
+  `127.0.0.1:connectors.TunnelPort`; drivers run `bezisync tunnel` (agent image, key in `BZ_SSH_KEY`) as a
+  k8s native sidecar (startup probe `bezisync tunnel-probe`) or a Docker container whose network the
+  connector shares. MongoDB is excluded.
+
+## Pipelines, compiler, runtimes, controller
+- `domain.PipelineSpec` is the contract (API body, YAML, wizard); it serialises in declaration order.
+  One change is one `PipelineVersion`: while the current version is unsealed (`sealed_at` null) and
+  the caller made it, `UpdatePipeline` updates it in place (wizard steps and autosave never pile up
+  versions); otherwise it starts a new one. Deploy and approval requests seal a version
+  (`services.SealVersion`), after which it never changes; deploy points `deployed_version_id` at one.
+  A change that must be its own version (a Debezium image move) sets `PipelineEdit.Separate`.
+- `compiler.Compile` is pure: spec + resolved connections → `application.properties`
+  (secrets only as `${ENV}`) + env. Experts may add `advanced` properties except the managed patterns.
+  Offsets/schema history use Debezium's JDBC store in the state DB (`debezium_state` schema,
+  tables `offsets_<id>` / `history_<id>`). `config_hash` is computed with Python's `json.dumps`
+  semantics (`pyjson`) so it matches what the Python releases stored: a hash change restarts connectors.
+- Debezium 3.7 keeps its SMTs in `lib_opt/`; workloads always set `ENABLE_DEBEZIUM_SCRIPTING=true`.
+- Transforms (`domain/transforms.go`, `compiler/transforms.go`): `spec.transforms` steps are
+  `unwrap`, `filter`, `outbox` (the Python types: fixed four-field dump) and the typed `rename`,
+  `add_field`, `flatten`, `custom`; filters are either typed (`operations` + `rules`) or a raw
+  `condition`. **Fields added after the Python releases dump only when set** (also `values`, `keys`
+  and the new policies), so stored specs, `spec_hash` and the corpus never change; follow that for
+  any new spec or policy field. Steps run in stages the decoder enforces (typed filters before the
+  event shape, field changes after it); steps with an `id` compile to `t_<id>` (stable names),
+  others to `t<index><type>`. Typed filters compile to a generated Groovy expression: literals and
+  field names are single-quoted Groovy strings, fields are read null-safely (`Struct.get` on a
+  missing field fails the connector) and numbers compare as `BigDecimal` (also decimals sent as
+  text). Values that reach `application.properties` refuse `${` (Quarkus would expand it, e.g. a
+  secret env) and control characters. `debezium.transforms*` / `debezium.predicates*` are managed.
+  Source capabilities (value formats, key columns, column rules) live in each source descriptor's
+  `transforms` object; `TopicPattern` gives the pre-route topic of a table for scopes. Raw scripts
+  need the policy `allow_scripted_transforms`, custom classes `allow_custom_transforms`,
+  `allowed_transforms` limits the built-in types. Debezium 3.7 facts verified against the image:
+  `TimestampConverter` cannot read Debezium's temporal encodings (not offered), `InsertField`'s
+  `timestamp.field` is always null under Debezium Server, `time.precision.mode=isostring` exists
+  for PostgreSQL and MySQL only, and renaming a missing field is a no-op.
+- `runtime` drivers (Kubernetes, Docker) implement `runtime.Driver`; they are idempotent and
+  level-based. Kubernetes uses one Deployment (`strategy: Recreate`) + ConfigMap + Secret per
+  pipeline and reads health/metrics via the pod proxy. Docker reads them with `docker exec curl`, so
+  no network path to the container is needed. Docker downloads a missing image in the background
+  (one per image, on a client without the 30 s request timeout, bounded by the runtime's
+  `image_pull_timeout`; a failure is reported for 2 minutes before a retry): `Apply` returns without
+  touching the current container until every image is there, and `Observation.ImagePull` (forwarded
+  by agents as `image_pull`) makes `domain.Derive` report Deploying, or an info reason on a running
+  connector, instead of a failure. On Kubernetes the kubelet pulls; `ErrImagePull` is still Pending,
+  only `ImagePullBackOff` is Failed. Workloads carry `Owner` (runtime id, label
+  `app.bezisync.io/runtime`); `ListWorkloads(owner)` is scoped so runtimes sharing a host or namespace
+  never touch each other's connectors. Tests swap `services.DriverFactory` for a fake.
+- `Runtime.Enabled = false` cordons a runtime: create / move and `services.RequireEnabled` refuse it with
+  `409 runtime_disabled`, and preflight's runtime section fails with `runtime_disabled` (hard, never
+  forceable) — existing workloads keep reconciling and pause / resume / restart / snapshot still work.
+  Runtimes can be renamed; deleting one detaches deleted pipelines (`runtime_id = NULL`) once none of
+  their jobs is queued or running.
+- **Agent mode** (`Runtime.Mode == "agent"`): `bezisync agent` (`internal/agent`) runs next to the
+  runtime and only dials out — `POST /api/v1/agent/poll` with a `bza_` token (hashed at rest,
+  shown once, rotatable). The control plane uses `services.AgentDriver`: desired workloads are
+  stored encrypted in `agent_workloads`; observations, health and metrics come from the agent's
+  latest report; logs go through `agent_requests`. No poll for 30 s ⇒ runtime unreachable ⇒
+  health Unknown (lifecycle keeps its last known value). Only the agent's poll updates
+  `last_seen_at` for agent runtimes. The agent converges off the poll loop (image pulls must not
+  stall reporting) and never prunes before its first successful poll. Install with the Helm chart
+  `deploy/helm/bezisync-agent` or `docker run` (`BEZISYNC_AGENT_URL` / `BEZISYNC_AGENT_IMAGE` shape the
+  generated commands; agents run the same `bezisync` image as the control plane).
+  Preflight checks for agent runtimes run on the agent (`check` request; request args are encrypted at
+  rest because they carry resolved secrets) and fall back to the control plane with a
+  `checked_from_control_plane` warning.
+- Kubernetes direct mode signs in in-cluster, with a kubeconfig, or natively to GKE / EKS
+  (`runtime/cloudauth.go`: refreshed bearer tokens from Google credentials or STS presigning;
+  no exec plugins). Runtime `service_account` and `image_pull_secrets` travel with the
+  `Workload` (so they work through agents too) into the connector pod spec.
+- The API only writes desired state. `bezisync controller` (leader-elected via
+  `pg_try_advisory_lock`) prepares source/sink artifacts, applies workloads, observes health and
+  metrics, writes `Pipeline.status`, and runs jobs (`restart`, `snapshot`, `cleanup`, `notify`) claimed
+  with `FOR UPDATE SKIP LOCKED`. Job handlers must be idempotent; a failing handler's writes are kept
+  in a savepoint only when it succeeds. On start the leader warns once about connectors whose
+  configuration would change (`config_hash` drift).
+- Debezium images (`services/images.go`): a pipeline runs `spec.debezium_image` (pin) else
+  `Runtime.default_image` else the catalog default (`services.ResolveImage`). A sink whose descriptor
+  names its own build (`sink.image`, e.g. Iceberg) always runs it (`connectors.SinkImageFor`, mirror via
+  `BEZISYNC_ICEBERG_IMAGE`): only pins to that repository apply (`422 image_family`), usage groups it
+  with `sink` set, its standing is never "unlisted", and preflight's runtime section checks its
+  `platforms` against the architectures runtimes report in `capacity`. Its `health_port` (Iceberg:
+  9000, a build-time Quarkus management interface) travels as `Compiled.HealthPort` /
+  `Workload.HealthPort` to the Kubernetes probes, the controller's health reads and agents (which
+  report `health_port` and the `features` they support; older agents get `agent_upgrade_required`). The catalog
+  (`services/catalog.go`, `api/catalog.go`, Admins write, everyone reads) lists `debezium_images` rows;
+  the install default (`BEZISYNC_DEBEZIUM_DEFAULT_IMAGE`) is always offered as a built-in entry and
+  applies unless a row `is_default` — never seed it. `services.DefaultImage` replaces every direct read
+  of the setting; `services.Standing` feeds `ImageUsage.Standing` and the non-blocking
+  `debezium_image_deprecated` / `debezium_image_unlisted` preflight warnings. `Deploy` stores the result
+  in `Pipeline.deployed_image` and `WorkloadFor` compiles with it, so changing a default never changes a
+  running workload's `config_hash` (no silent restarts). `GET …/debezium-images` groups deployed
+  pipelines by image; `POST …/debezium-images:apply` moves pipelines as ordinary new versions
+  (per-pipeline savepoints, rollback = deploy an older version) and refuses to deploy over other
+  undeployed edits so an upgrade always ships alone.
+- Project policies (`domain/policies.go`, pure; `Project.policies` JSON, `GET/PUT …/policies`):
+  disallowed runtimes and connection types are refused at save (`policy_violation`); spec rules
+  (snapshot modes, max size, pipelines-per-source) form the `policy`
+  preflight section, which "Deploy anyway" can never skip; `allow_force_deploy=false` forbids
+  forcing at all (`force_not_allowed`).
+- Approvals (`services/approvals.go`, `change_requests`): with `require_approval`, deploys
+  (including rollbacks and image moves) validate like a deploy and become a pending change
+  request (202, `PipelineRead.pending_change`); a different person with `pipeline.approve`
+  approves, which re-runs preflight and deploys that exact version. Requesters and approvers
+  get in-app notifications.
+- Templates (`api/templates.go`, `pipeline_templates`): a spec without tables plus an optional
+  destination and runtime; pipeline creation's `template_id` starts from it (label `template`).
+  `services.EnsureSandbox` creates the demo stack's Sandbox project (idempotent).
+- Config-as-code (`domain/manifest.go` pure, `services/manifests.go`, `api/manifests.go`):
+  `kind: Pipeline` manifests reference connections and the runtime **by name**. `:apply` is
+  all-or-nothing across documents, supports `dry_run` (unified diff + change notes, rolled back) and
+  `deploy` (respects approvals). `:adopt` maps an `application.properties` without writing
+  (mapped / kept as advanced / managed / replaced + warnings; never keeps plain passwords).
+  `/promote` applies the latest version into another project with that project's permissions,
+  policies and approvals. Personal API tokens (`/auth/tokens`, `bzt_…`) are hashed, shown once,
+  project-scoped, optionally read-only, expiring, and can only be minted from a session.
+- CLI: `bezisync remote login|get|export|apply|diff|pipelines …` (`internal/cli/remote.go`) talks to
+  the API with a token (config `~/.config/bezisync/cli.json`, 0600; `BEZISYNC_URL/TOKEN/PROJECT`).
+- SSO kinds (`sso_providers.kind` + `config`): `oidc`; `oauth2` (`oidc/oauth2.go`: userinfo
+  instead of an ID token, claim names in config, flavor `github` reads `/user/emails` and orgs/teams,
+  subject `oauth2:<origin>|<id>`); `saml` (`internal/samlsp` on gosaml2/goxmldsig, one SP for all
+  providers: entity ID = `/api/v1/auth/saml/metadata`, ACS `/api/v1/auth/saml/acs`; the SP key pair
+  lives encrypted in `instance_state` `saml_sp` and is re-encrypted by `rotate-master-key`;
+  `sso_requests` = single-use AuthnRequests with a relay cookie, `sso_replays` = assertion IDs;
+  `ParseResponse` adds the checks gosaml2 leaves to callers: one assertion, mandatory audience,
+  validity window, InResponseTo, no transient NameID). Edits are applied to a copy and validated
+  whole for the kind (`api/sso_kinds.go` `resolveKind`); kind and OAuth2 flavor never change.
+  `SyncSSOUser` refuses a person bound to another subject unless the provider's `link_existing`,
+  and links to an existing account only when `Identity.EmailVerified` (OIDC: the configured
+  "verified" claim must be true, absent is no; OAuth2: a named field or GitHub's verified primary;
+  SAML: always). Claims go through `oidc.Lookup` (exact name, then dotted path); missing groups
+  with an overage marker (`_claim_names`, `groups.link`) or GitHub's `X-GitHub-SSO: partial-results`
+  refuse the sign-in (`oidc.ErrGroupsOverage`, `oidc.ErrGitHubPartial`). Callbacks check RFC 9207
+  `iss` (OIDC: discovery issuer, required when advertised; OAuth2: `response_issuer` when set).
+  Every provider request sends `User-Agent: BeziSync/<version>`.
+- SSO (`internal/oidc`, `services/sso.go`, `api/auth.go`, `api/sso_providers.go`): OIDC
+  authorization code + PKCE against providers Admins add in Settings → Sign-in (`sso_providers`:
+  issuer, client id, encrypted write-only client secret, scopes, groups claim, structured group
+  rules, default role/projects, `If-Match` edits; nothing comes from env — `BEZISYNC_OIDC_*` are
+  only reported as retired). Every provider shares one callback; the login transaction is an
+  encrypted 10-minute cookie scoped to `/api/v1/auth/oidc` that names the provider. Issuer
+  discovery, JWKS and token calls go through `ssrf.HTTPClient`. ID tokens are verified against JWKS
+  (signature, `iss`, `aud`, `exp`, nonce) and need a verified email.
+  Users bind by `sso_subject` (issuer|sub). Group rules map groups to project roles / approver /
+  superuser (= Admin; stored as `{"group", "superuser": true}`); such memberships carry
+  `granted_by_sso` and follow the groups at every sign-in (so does the default-role grant), while
+  manually granted memberships are never touched. Any edit through `PUT …/members` clears
+  `granted_by_sso`, so an admin's change sticks. Return paths are same-site only.
+  Password sign-in (`instance_state` key `auth`, `services.PasswordLogin`) can be turned off only
+  with a provider that passed its test and an active Admin linked to SSO; the last enabled provider
+  cannot be turned off or deleted while it is off, it stays in force while no provider is enabled,
+  and `bezisync enable-password-login` is the break-glass switch.
+  Audit logs export as CSV / JSON Lines (`…/audit:export`).
+- Operations: `bezisync uninstall [--yes] [--drop-destinations]` (plan first; reuses the cleanup
+  job), `bezisync rotate-master-key` (re-encrypts `*_enc` columns; token/session hashes are
+  matched under previous keys and moved to the current key on use), opt-in telemetry
+  (`services/telemetry.go`: aggregate counts only, needs `TELEMETRY_ENABLED` + `TELEMETRY_URL`,
+  preview at `/api/v1/system/telemetry`). Every `Check` links to its generated reference entry.
+- Schema drift: the controller re-reads captured tables' columns (connector `Discover`, every
+  `SCHEMA_CHECK_SECONDS`, sources with `tracks_schema`), diffs them with `domain.DiffSchema`
+  and stores `schema_changes` rows; unreviewed breaking changes feed `status.schema_pending_breaking`
+  and the `schema_breaking` alert rule. Snapshot maintenance windows (`domain/windows.go`) defer
+  snapshot jobs with `controller.Defer` (not an attempt); a run supersedes queued snapshots it covers.
+- MCP (`internal/mcpserver`, `services/mcp.go`, `services/oauth.go`, `api/mcp.go`): a stateless
+  Streamable HTTP endpoint (official Go SDK) at `POST /api/v1/mcp`, off until an Admin turns it on
+  (`instance_state` key `mcp`: API tokens / OAuth switches, registration mode, redirect hosts, max
+  grant days, per-tool overrides, allowed origins). Each request authenticates a bearer (`bzt_`
+  API token or `bzo_` OAuth access token; never cookies), reads `/auth/me` and builds a server with
+  only the tools the caller may use (`Tool.Perm` in any project, `Admin`, read-only tokens → `Read`
+  tools, destructive tools default off). Every tool calls the REST router **in process** with the
+  caller's `Authorization` (`invoke`, fresh chi route context, `auth.WithMCP`), so permissions,
+  policies, approvals and audit are the API's own — add behaviour to the API, never to a tool. A
+  tool must not take or return a credential: secret fields go in as `secret_refs` (`ref+…` only),
+  token/credential/SSO/MCP-settings endpoints have no tool, and `read_pipeline_events` forces
+  `mask=true`. Every `Tool` needs a path that `TestEveryMCPReadToolReachesItsRoute` exercises.
+  OAuth: BeziSync is the authorization server (`/.well-known/oauth-authorization-server`,
+  `/.well-known/oauth-protected-resource[/api/v1/mcp]` at the site root, proxied by the web
+  image's nginx; `/api/v1/oauth/register|authorize|token|revoke`). Public clients, PKCE S256,
+  exact redirect URIs (`services.RedirectProblem`), consent in the SPA (`/oauth/consent`, session
+  only), one-time 60 s codes, 1 h access tokens valid only via `auth.ViaMCP`, rotating refresh
+  tokens with reuse revocation; a grant maps onto a synthetic `APIToken` (name `MCP · <agent>`,
+  project scope, read-only) so every token rule applies. Codes and tokens are stored hashed
+  (`oauth_clients`, `oauth_requests`, `oauth_grants`).
+- Personal data (`domain/personal.go`, `services.personalDataChecks`): chosen per pipeline in
+  `spec.source.columns` (`mask`, `exclude`, and `keep` = sent as is on purpose, dumped only when
+  set). Preflight's Configuration section compares them with discovery: `pii_mask_unsupported`
+  (blocking: a masked column whose type is not in the source descriptor's
+  `transforms.maskable_types` — Debezium hashes character columns only — or a source without
+  masking), `pii_unprotected` (warning: `connectors.LooksLikePII` columns without a choice),
+  `pii_rule_column_missing`, `pii_unknown`, `pii_protected`. `SchemaChangeRead.personal_data`
+  flags added PII-looking columns without a choice. The retired `require_pii_masking` policy is
+  accepted and ignored (never dumped); the contract test strips it from the recorded cases.
+- Delivery canary (`policies.delivery_canary`): sources that support it write canary rows; the compiler
+  captures that table and exempts it from the `bzmeta` filter (`(?!canary_)`); the controller writes a
+  token every `CANARY_INTERVAL_SECONDS` and looks for it with the sink's `Tail` (status `canary`, alert
+  `delivery_unverified`).
+- Feedback (`services/feedback.go`, `api/feedback.go`): any project member sends
+  `POST /projects/{id}/feedback` from a session (API tokens get `403 session_required`), limited by
+  `ratelimit.Feedback` (10/hour/person); Admins list (`GET /feedback`, with open/resolved totals)
+  and resolve (`PATCH /feedback/{id}`). Each report notifies every Admin (`feedback_received`) in the
+  sender's project. The message is untrusted text: never put it in audit details or render it as markup.
+  `BEZISYNC_LAB` marks an open lab (`/auth/providers` → `lab`).
+- In-app notifications go through `services.Notify`, which skips users who muted that kind
+  (`User.muted_notifications`, kinds in `services.InboxKinds`); never insert `notifications` rows directly.
+- Status keys written outside the observe loop must be listed in `controller.CarriedStatus`,
+  or the next tick drops them.
+- Health comes only from `domain.Derive`: no fresh positive evidence ⇒ not healthy.
+- Source impact: source probes (e.g. Postgres slot retained WAL, `wal_status`, `safe_wal_size`) run at
+  most every 30 s per pipeline; a risk marks health **At risk**.
+- Metrics: the controller writes `metric_samples` rows (≤ every 15 s; rates from counter deltas).
+  `services.EnforceMetricRetention` rolls raw samples older than 24 h into 1-minute rows and
+  drops data past `BEZISYNC_METRICS_RETENTION_DAYS`. `GET …/pipelines/{id}/metrics?range=` serves charts.
+- `GET /api/v1/projects/{id}/stream` is a server-sent event feed of pipeline changes (the UI
+  invalidates queries on each event; the API server has no write timeout for it). `GET /metrics` is
+  Prometheus exposition, enabled only when `BEZISYNC_METRICS_TOKEN` is set (bearer token required).
+
+## Alerts and notifications
+- `services/alerts.go`: rule conditions are pure (`services.Evaluate(kind, pipeline, params, now)`); the
+  controller calls `services.EvaluateProject` every tick. Alerts go `pending` → `firing` (after the
+  rule's `for_seconds`) → `resolved` (condition cleared or pipeline deleted). Only firing/resolved
+  transitions notify. Every project gets default rules on first use (`services.SeedDefaultRules`).
+- Delivery runs as `notify` jobs (retried with backoff, idempotent per target+state). Channels:
+  Slack, webhook (optional HMAC `X-BeziSync-Signature`), PagerDuty Events v2, email (SMTP settings).
+  Every outbound URL passes the SSRF guard. Members also get an in-app notification.

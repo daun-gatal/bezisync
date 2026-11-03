@@ -1,0 +1,11 @@
+# CI (helm.yml): an external PostgreSQL (postgres-ci, deployed by the workflow), HA replicas.
+publicUrl: http://bezisync.ci.internal
+cookieSecure: false
+allowPlainHttp: true
+secrets:
+  masterKey: Y2ktb25seS1tYXN0ZXIta2V5LTMyLWJ5dGVzLWxvbmc=
+  databaseUrl: postgresql://bezisync:ci-postgres-password@postgres-ci:5432/bezisync
+  bootstrapAdminPassword: ci-admin-password
+api: { replicas: 2, resources: { requests: { cpu: 50m, memory: 128Mi } } }
+controller: { replicas: 2, resources: { requests: { cpu: 50m, memory: 128Mi } } }
+web: { replicas: 2 }

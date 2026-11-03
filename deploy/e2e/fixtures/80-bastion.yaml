@@ -1,0 +1,40 @@
+# SSH bastion for the tunnel journey: user "jump", key in e2e/tests/fixtures.ts (test only),
+# TCP forwarding enabled. In-cluster: bastion.bezisync-e2e-data.svc.cluster.local:2222.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: bastion-init }
+data:
+  10-forwarding.sh: |
+    #!/usr/bin/with-contenv bash
+    sed -i 's/^#\?AllowTcpForwarding.*/AllowTcpForwarding yes/' /config/sshd/sshd_config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: bastion }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: bastion } }
+  template:
+    metadata: { labels: { app: bastion, app.bezisync.io/fixture: "true" } }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: sshd
+          image: lscr.io/linuxserver/openssh-server@sha256:b07414bb329b86a00525c9256711a7855fc3a369e9f62c36f1de8d1923197580
+          env:
+            - { name: USER_NAME, value: jump }
+            - { name: PUBLIC_KEY, value: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJcC/JA3/ypmYZXF0WzS9kpc0NDNQnjcgsv2hf3QMRR7 bezisync-e2e-only" }
+            - { name: PASSWORD_ACCESS, value: "false" }
+            - { name: PUID, value: "1000" }
+            - { name: PGID, value: "1000" }
+          ports: [{ containerPort: 2222 }]
+          readinessProbe: { tcpSocket: { port: 2222 }, periodSeconds: 3 }
+          volumeMounts: [{ name: init, mountPath: /custom-cont-init.d }]
+      volumes: [{ name: init, configMap: { name: bastion-init, defaultMode: 0755 } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: bastion }
+spec:
+  selector: { app: bastion }
+  ports: [{ port: 2222, targetPort: 2222 }]

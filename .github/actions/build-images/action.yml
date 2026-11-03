@@ -1,0 +1,123 @@
+name: Build and push the BeziSync images
+description: >-
+  Builds bezisync (backend) and bezisync-web (frontend) for linux/amd64 and linux/arm64 (the
+  builds cross-compile; only the web image's package upgrade runs emulated), pushes them to GHCR under the given tags and attests
+  their build provenance (stored by GitHub, so no extra registry tags). Each image index carries
+  the source commit as org.opencontainers.image.revision, which the release checks before it
+  ships a pre-release. Shared by build-branch.yml and release.yml. The calling job needs
+  packages: write, id-token: write and attestations: write.
+
+inputs:
+  version:
+    description: The version baked into the binary and the labels (e.g. 0.2.0 or 0.2.0-pre).
+    required: true
+  tags:
+    description: Space-separated image tags to push (e.g. "0.2.0 latest").
+    required: true
+  revision:
+    description: The commit the images are built from.
+    required: true
+  token:
+    description: Token with packages:write for GHCR.
+    required: true
+
+outputs:
+  backend-digest:
+    description: Digest of ghcr.io/<owner>/bezisync.
+    value: ${{ steps.backend.outputs.digest }}
+  web-digest:
+    description: Digest of ghcr.io/<owner>/bezisync-web.
+    value: ${{ steps.web.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Image names and tags
+      id: meta
+      shell: bash
+      env:
+        TAGS: ${{ inputs.tags }}
+      run: |
+        owner=${GITHUB_REPOSITORY_OWNER,,}
+        for name in bezisync bezisync-web; do
+          list=""
+          for tag in $TAGS; do list+="ghcr.io/$owner/$name:$tag,"; done
+          echo "${name//-/_}=${list%,}" >> "$GITHUB_OUTPUT"
+        done
+        echo "owner=$owner" >> "$GITHUB_OUTPUT"
+        echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+    # The web image upgrades its Alpine packages in the final (per-platform) stage: arm64 runs
+    # under emulation there; the Go and bun builds cross-compile natively.
+    - uses: docker/setup-qemu-action@v3
+      with: { platforms: arm64 }
+    - uses: docker/setup-buildx-action@v3
+    - uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+    # buildx's own provenance and SBOM would add "unknown/unknown" entries to every image; the
+    # attestations below cover both without touching the registry.
+    - name: Backend image `bezisync` (API, controller, agent, migrate, CLI)
+      id: backend
+      uses: docker/build-push-action@v6
+      with:
+        context: backend
+        platforms: linux/amd64,linux/arm64
+        push: true
+        provenance: false
+        sbom: false
+        tags: ${{ steps.meta.outputs.bezisync }}
+        annotations: index:org.opencontainers.image.revision=${{ inputs.revision }}
+        build-args: |
+          RELEASE_VERSION=${{ inputs.version }}
+          VERSION=${{ inputs.version }}
+          COMMIT_SHA=${{ inputs.revision }}
+          BUILD_DATE=${{ steps.meta.outputs.created }}
+        cache-from: type=gha,scope=backend
+        cache-to: type=gha,mode=max,scope=backend
+    - name: Frontend image `bezisync-web`
+      id: web
+      uses: docker/build-push-action@v6
+      with:
+        context: frontend
+        platforms: linux/amd64,linux/arm64
+        push: true
+        provenance: false
+        sbom: false
+        tags: ${{ steps.meta.outputs.bezisync_web }}
+        annotations: index:org.opencontainers.image.revision=${{ inputs.revision }}
+        build-args: |
+          VERSION=${{ inputs.version }}
+          COMMIT_SHA=${{ inputs.revision }}
+          BUILD_DATE=${{ steps.meta.outputs.created }}
+        cache-from: type=gha,scope=frontend
+        cache-to: type=gha,mode=max,scope=frontend
+    # Artifact attestations need a public repository (or GitHub Enterprise Cloud).
+    - name: Attest the backend image
+      if: ${{ !github.event.repository.private }}
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-name: ghcr.io/${{ steps.meta.outputs.owner }}/bezisync
+        subject-digest: ${{ steps.backend.outputs.digest }}
+        push-to-registry: false
+    - name: Attest the frontend image
+      if: ${{ !github.event.repository.private }}
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-name: ghcr.io/${{ steps.meta.outputs.owner }}/bezisync-web
+        subject-digest: ${{ steps.web.outputs.digest }}
+        push-to-registry: false
+    - name: Summary
+      shell: bash
+      env:
+        TAGS: ${{ inputs.tags }}
+        OWNER: ${{ steps.meta.outputs.owner }}
+        BACKEND: ${{ steps.backend.outputs.digest }}
+        WEB: ${{ steps.web.outputs.digest }}
+      run: |
+        {
+          echo "### Images ($TAGS)"
+          echo "- \`ghcr.io/$OWNER/bezisync\` \`$BACKEND\`"
+          echo "- \`ghcr.io/$OWNER/bezisync-web\` \`$WEB\`"
+        } >> "$GITHUB_STEP_SUMMARY"

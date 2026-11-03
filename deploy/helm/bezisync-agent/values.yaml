@@ -1,0 +1,52 @@
+image:
+  # -- The agent image (the `bezisync` image runs agents too).
+  repository: ghcr.io/daun-gatal/bezisync
+  # -- Pin a release (e.g. `0.1.0`) for reproducible installs; `""` uses the chart's appVersion.
+  tag: latest
+  # -- `Always` re-pulls `latest`; `IfNotPresent` suits a pinned tag.
+  pullPolicy: Always
+# -- For private registries, e.g. `[{ name: ghcr-pull-secret }]`.
+imagePullSecrets: []
+
+controlPlane:
+  # -- The control plane's URL, e.g. `https://bezisync.example.com` (required).
+  url: ""
+  # -- Skip TLS verification: testing only.
+  insecure: false
+
+# -- The enrollment token shown once when the runtime was added (`bza_...`). Either set it here
+# or reference an existing Secret holding it under key `BEZISYNC_AGENT_TOKEN`.
+token: ""
+# -- Existing Secret with the token (key `BEZISYNC_AGENT_TOKEN`).
+existingSecret: ""
+
+# -- `kubernetes`: connectors run as Deployments in the release namespace. `docker`: connectors
+# run on the Docker daemon at `docker.host` (e.g. a DinD sidecar or VM).
+kind: kubernetes
+docker:
+  # -- Docker daemon, e.g. `tcp://docker-host:2375` (required with `kind: docker`).
+  host: ""
+  # -- Docker network for connectors.
+  network: ""
+  # -- How long one image download may take: `10m`, `30m`, `1h` or `2h`.
+  imagePullTimeout: "30m"
+
+# -- Lets the agent report node capacity (cluster-scoped, read-only list of nodes).
+reportNodeCapacity: true
+
+# -- Agent resources.
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 384Mi }
+
+# -- Pod security context of the agent and test pods.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+# -- Container security context of the agent and test pods.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }

@@ -1,0 +1,47 @@
+version: "2"
+run:
+  timeout: 10m
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - usestdlibvars
+  settings:
+    errcheck:
+      # Command output: a failed write to the terminal has nowhere better to be reported.
+      exclude-functions: [fmt.Fprint, fmt.Fprintf, fmt.Fprintln]
+    staticcheck:
+      checks: ["all", "-QF1001", "-ST1000", "-ST1003", "-ST1020", "-ST1021", "-ST1022", "-ST1005"] # QF1001: conditions mirror the Python originals; ST1005: error texts are user-facing sentences
+    gosec:
+      excludes:
+        - G104 # covered by errcheck
+        - G115 # integer conversions are bounds-checked where it matters
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+        - name: var-naming
+          disabled: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, bodyclose]
+      # Debezium property names look like credentials to G101; SQL there only splices
+      # BeziSync's own quoted identifiers (never user input).
+      - path: internal/(connectors|compiler)/
+        text: "G101|G201|G202"
+        linters: [gosec]
+formatters:
+  enable:
+    - gofmt
+    - goimports

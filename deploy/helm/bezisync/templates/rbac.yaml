@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "bezisync.fullname" . }}-controller
+  labels: {{- include "bezisync.labels" . | nindent 4 }}
+{{- if .Values.kubernetesRuntime.enabled }}
+{{- $namespaces := .Values.kubernetesRuntime.namespaces | default (list .Release.Namespace) }}
+{{- range $ns := $namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "bezisync.fullname" $ }}-runtime
+  namespace: {{ $ns }}
+  labels: {{- include "bezisync.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [configmaps, secrets]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/proxy]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "bezisync.fullname" $ }}-runtime
+  namespace: {{ $ns }}
+  labels: {{- include "bezisync.labels" $ | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "bezisync.fullname" $ }}-runtime }
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "bezisync.fullname" $ }}-controller
+    namespace: {{ $.Release.Namespace }}
+  - kind: ServiceAccount
+    name: {{ include "bezisync.fullname" $ }}-api
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "bezisync.fullname" . }}-{{ .Release.Namespace }}-nodes
+  labels: {{- include "bezisync.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "bezisync.fullname" . }}-{{ .Release.Namespace }}-nodes
+  labels: {{- include "bezisync.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "bezisync.fullname" . }}-{{ .Release.Namespace }}-nodes }
+subjects:
+  - { kind: ServiceAccount, name: {{ include "bezisync.fullname" . }}-controller, namespace: {{ .Release.Namespace }} }
+  - { kind: ServiceAccount, name: {{ include "bezisync.fullname" . }}-api, namespace: {{ .Release.Namespace }} }
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "bezisync.fullname" . }}-api
+  labels: {{- include "bezisync.labels" . | nindent 4 }}

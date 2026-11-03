@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bezisync.fullname" . }}-controller
+  labels: {{- include "bezisync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: controller }
+  template:
+    metadata:
+      labels: {{- include "bezisync.labels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "bezisync.fullname" . }}-controller
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "bezisync.podSecurityContext" (dict "root" . "base" .Values.podSecurityContext) | nindent 8 }}
+      initContainers:
+        - name: migrate
+          image: {{ include "bezisync.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [migrate]
+          env: {{- include "bezisync.env" . | nindent 12 }}
+          envFrom: {{- include "bezisync.envFrom" . | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+      containers:
+        - name: controller
+          image: {{ include "bezisync.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [controller]
+          env: {{- include "bezisync.env" . | nindent 12 }}
+          envFrom: {{- include "bezisync.envFrom" . | nindent 12 }}
+          resources: {{- toYaml .Values.controller.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]

@@ -1,0 +1,16 @@
+# CI (helm.yml, render only): every optional template path at once.
+publicUrl: https://bezisync.example.com
+existingSecret: bezisync-ci
+imagePullSecrets: [{ name: ghcr-pull-secret }]
+agent: { url: https://agents.example.com, image: registry.example.com/bezisync:0.1.0, chart: oci://registry.example.com/charts/bezisync-agent }
+extraEnv: [{ name: BEZISYNC_SSRF_ALLOW_CIDRS, value: '["10.0.0.0/8"]' }]
+service: { type: NodePort, nodePort: 30080, annotations: { example.com/expose: "true" }, labels: { team: data } }
+ingress:
+  enabled: true
+  className: nginx
+  host: bezisync.example.com
+  tls: [{ secretName: bezisync-tls, hosts: [bezisync.example.com] }]
+  annotations: { cert-manager.io/cluster-issuer: letsencrypt }
+kubernetesRuntime: { enabled: true, namespaces: [cdc-a, cdc-b] }
+postgres: { enabled: true, storageClass: standard }
+appArmorProfile: { type: Localhost, localhostProfile: bezisync-default }

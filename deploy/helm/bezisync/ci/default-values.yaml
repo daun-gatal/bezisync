@@ -1,0 +1,11 @@
+# CI (helm.yml): lint, render and install on kind with the bundled PostgreSQL. Never use in production.
+publicUrl: http://bezisync.ci.internal
+cookieSecure: false
+allowPlainHttp: true
+secrets:
+  masterKey: Y2ktb25seS1tYXN0ZXIta2V5LTMyLWJ5dGVzLWxvbmc=
+  bootstrapAdminPassword: ci-admin-password
+api: { replicas: 1 }
+controller: { replicas: 1 }
+web: { replicas: 1 }
+postgres: { enabled: true, storage: 1Gi }

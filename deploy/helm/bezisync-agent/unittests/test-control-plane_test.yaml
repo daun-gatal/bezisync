@@ -1,0 +1,14 @@
+suite: helm test
+templates: [templates/tests/test-control-plane.yaml]
+values: [../ci/default-values.yaml]
+tests:
+  - it: checks that the control plane answers
+    set:
+      controlPlane.url: https://bezisync.example.com/
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: test
+      - equal:
+          path: spec.containers[0].args
+          value: [healthcheck, --url, "https://bezisync.example.com/healthz"]

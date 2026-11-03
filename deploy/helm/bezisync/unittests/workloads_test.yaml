@@ -1,0 +1,66 @@
+suite: workloads
+templates: [templates/api.yaml, templates/controller.yaml, templates/web.yaml, templates/secret.yaml]
+values: [../ci/default-values.yaml]
+tests:
+  - it: runs the latest images by default
+    template: templates/api.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/daun-gatal/bezisync:latest
+  - it: falls back to the chart's appVersion without a tag
+    template: templates/web.yaml
+    documentIndex: 0
+    chart: { appVersion: 0.4.2 }
+    set: { webImage.tag: "" }
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/daun-gatal/bezisync-web:0.4.2
+  - it: leaves the agent chart version out unless the release set it
+    template: templates/api.yaml
+    documentIndex: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: { name: BEZISYNC_AGENT_CHART_VERSION }
+          any: true
+  - it: gives the controller the AppArmor profile
+    template: templates/controller.yaml
+    documentIndex: 0
+    set: { appArmorProfile: { type: Localhost, localhostProfile: bezisync-default } }
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.appArmorProfile.localhostProfile
+          value: bezisync-default
+  - it: gives the web UI the AppArmor profile
+    template: templates/web.yaml
+    documentIndex: 0
+    set: { appArmorProfile: { type: Localhost, localhostProfile: bezisync-default } }
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.appArmorProfile.localhostProfile
+          value: bezisync-default
+  - it: exposes the web Service on a node port
+    template: templates/web.yaml
+    documentIndex: 1
+    set: { service.type: NodePort, service.nodePort: 30080 }
+    asserts:
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 30080
+  - it: lets the API drain before it stops (a rollout drops no request)
+    template: templates/api.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds
+          value: 5
+  - it: lets the web UI drain before it stops (a rollout drops no request)
+    template: templates/web.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds
+          value: 5

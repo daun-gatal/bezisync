@@ -1,0 +1,143 @@
+image:
+  # -- Image of the API, controller and migrations (one binary; agents run it too).
+  repository: ghcr.io/daun-gatal/bezisync
+  # -- Pin a release (e.g. `0.1.0`) for reproducible installs; `""` uses the chart's appVersion.
+  tag: latest
+  # -- `Always` re-pulls `latest`; `IfNotPresent` suits a pinned tag.
+  pullPolicy: Always
+webImage:
+  # -- Image of the web UI (nginx).
+  repository: ghcr.io/daun-gatal/bezisync-web
+  # -- Pin a release like `image.tag`; `""` uses the chart's appVersion.
+  tag: latest
+  # -- Pull policy of the web image.
+  pullPolicy: Always
+# -- For private registries, e.g. `[{ name: ghcr-pull-secret }]` (applied to every pod).
+imagePullSecrets: []
+
+# -- `production` refuses development keys, insecure cookies and a non-https public URL.
+environment: production
+# -- The URL people open (cookies, SSO redirects, agent install commands).
+publicUrl: https://bezisync.example.com
+# -- Secure session cookies (https).
+cookieSecure: true
+# -- Production requires https; set true only when the network itself encrypts traffic
+# (e.g. a Service exposed on a Tailscale tailnet). Then use `cookieSecure: false`.
+allowPlainHttp: false
+
+# -- Existing Secret with keys `BEZISYNC_MASTER_KEY`, `BEZISYNC_DATABASE_URL` and optionally
+# `BEZISYNC_STATE_DATABASE_URL` / `BEZISYNC_BOOTSTRAP_ADMIN_PASSWORD`. When empty the chart
+# renders a Secret from `secrets` below (fine for evaluation, not for production GitOps).
+existingSecret: ""
+secrets:
+  # -- Encrypts stored secrets: `bezisync generate-master-key`.
+  masterKey: ""
+  # -- PostgreSQL URL; required unless `postgres.enabled`.
+  databaseUrl: ""
+  # -- Database for Debezium offsets and schema history; defaults to `databaseUrl`.
+  stateDatabaseUrl: ""
+  # -- The first admin, created on first start.
+  bootstrapAdminEmail: admin@bezisync.local
+  # -- The first admin's password.
+  bootstrapAdminPassword: ""
+
+# What the generated agent install commands use.
+agent:
+  # -- The URL agents dial (default: `publicUrl`).
+  url: ""
+  # -- The agent image (default: this release's `bezisync` image, which runs agents too).
+  image: ""
+  # -- The agent chart (default: `oci://ghcr.io/daun-gatal/charts/bezisync-agent`, at the version
+  # released with this chart).
+  chart: ""
+
+# -- Extra environment for API and controller (e.g. `BEZISYNC_SSRF_ALLOW_CIDRS`).
+extraEnv: []
+
+api:
+  # -- API replicas.
+  replicas: 2
+  # -- API resources.
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+controller:
+  # -- Leader election via Postgres advisory locks; extra replicas are hot standbys.
+  replicas: 2
+  # -- Controller resources.
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+web:
+  # -- Web replicas.
+  replicas: 2
+  # -- Web resources.
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+service:
+  # -- Service type of the web UI (which also proxies the API).
+  type: ClusterIP
+  # -- Service port.
+  port: 80
+  # -- Node port when `type: NodePort`.
+  nodePort: null
+  # -- Service annotations, e.g. Tailscale operator: `{ tailscale.com/expose: "true", tailscale.com/hostname: bezisync }`.
+  annotations: {}
+  # -- Service labels.
+  labels: {}
+  # -- e.g. `tailscale` with `type: LoadBalancer`.
+  loadBalancerClass: ""
+
+ingress:
+  # -- Expose the web Service through an Ingress.
+  enabled: false
+  # -- Ingress class.
+  className: ""
+  # -- Ingress host.
+  host: bezisync.example.com
+  # -- Ingress TLS.
+  tls: []
+  # -- Ingress annotations.
+  annotations: {}
+
+# Lets the controller run Debezium Server pods directly in these namespaces (Kubernetes
+# runtime, direct mode). Remote clusters use the agent chart instead.
+kubernetesRuntime:
+  # -- Grant the controller what it needs to run connectors in this cluster.
+  enabled: true
+  # -- Namespaces for connectors; defaults to the release namespace.
+  namespaces: []
+
+# Bundled PostgreSQL for evaluation and tests only. Use an HA PostgreSQL in production:
+# it also stores Debezium offsets, so it is on the connectors' critical path.
+postgres:
+  # -- Run a single PostgreSQL pod (evaluation and tests only).
+  enabled: false
+  # -- PostgreSQL image.
+  image: postgres:17
+  # -- Volume size.
+  storage: 8Gi
+  # -- StorageClass; the default one when empty (e.g. longhorn).
+  storageClass: ""
+  # -- Password of the bundled database. Ignored with `existingSecret`: then the password comes
+  # from its key `BEZISYNC_POSTGRES_PASSWORD`.
+  password: bezisync
+
+# -- AppArmor profile for every pod of this chart. Empty keeps the container runtime's default.
+# Example: `{ type: Localhost, localhostProfile: bezisync-default }` for a profile loaded on every
+# node (`deploy/apparmor/`).
+appArmorProfile: {}
+
+# -- Pod security context of the API, controller and test pods.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+# -- Container security context of the API, controller and test pods.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }

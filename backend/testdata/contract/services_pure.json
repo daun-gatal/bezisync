@@ -1,0 +1,768 @@
+{
+ "adopt": [
+  {
+   "text": "debezium.source.connector.class=io.debezium.connector.postgresql.PostgresConnector\ndebezium.source.database.hostname=db.internal\ndebezium.source.database.port=5432\ndebezium.source.database.dbname=shop\ndebezium.source.database.user=cdc\ndebezium.source.database.password=plain-text\ndebezium.source.topic.prefix=shop\ndebezium.source.table.include.list=public.orders,public\\.customers,public.items_.*\ndebezium.source.slot.name=old_slot\ndebezium.source.snapshot.mode=never\ndebezium.source.poll.interval.ms=250\ndebezium.source.offset.storage=org.x.File\ndebezium.sink.type=kafka\ndebezium.sink.kafka.producer.bootstrap.servers=k:9092\ndebezium.format.value=json\ndebezium.transforms=unwrap,route\ndebezium.transforms.unwrap.type=io.debezium.transforms.ExtractNewRecordState\ndebezium.transforms.unwrap.delete.tombstone.handling.mode=drop\ndebezium.transforms.route.type=org.apache.kafka.connect.transforms.RegexRouter\n# comment\nquarkus.log.level=DEBUG\ndebezium.source.long=a\\\n  b\n",
+   "report": {
+    "source_type": "postgresql",
+    "sink_type": "kafka",
+    "source_hint": {
+     "host": "db.internal",
+     "port": 5432,
+     "database": "shop",
+     "user": "cdc"
+    },
+    "sink_hint": {
+     "bootstrap_servers": "k:9092"
+    },
+    "spec": {
+     "source": {
+      "tables": {
+       "include": [
+        "public.orders",
+        "public.customers"
+       ]
+      }
+     },
+     "sink": {
+      "naming": "shop.{schema}.{table}",
+      "format": {
+       "type": "json"
+      }
+     },
+     "transforms": [
+      {
+       "type": "unwrap",
+       "delete_handling": "drop"
+      }
+     ],
+     "advanced": {
+      "debezium.source.long": "ab",
+      "debezium.source.poll.interval.ms": "250"
+     }
+    },
+    "mapped": [
+     "debezium.format.value",
+     "debezium.sink.type",
+     "debezium.source.connector.class",
+     "debezium.source.snapshot.mode",
+     "debezium.source.table.include.list",
+     "debezium.source.topic.prefix",
+     "debezium.transforms",
+     "debezium.transforms.route.type",
+     "debezium.transforms.unwrap.delete.tombstone.handling.mode",
+     "debezium.transforms.unwrap.type"
+    ],
+    "kept": [
+     "debezium.source.long",
+     "debezium.source.poll.interval.ms"
+    ],
+    "managed": [
+     "debezium.sink.kafka.producer.bootstrap.servers",
+     "debezium.source.database.dbname",
+     "debezium.source.database.hostname",
+     "debezium.source.database.password",
+     "debezium.source.database.port",
+     "debezium.source.database.user",
+     "debezium.source.offset.storage",
+     "debezium.source.slot.name"
+    ],
+    "replaced": [
+     "quarkus.log.level"
+    ],
+    "warnings": [
+     "The file contains a plain-text database password. BeziSync did not keep it; store it in the connection (or a secret store) and rotate it.",
+     "Some include-list entries are regular expressions; pick those tables explicitly in BeziSync.",
+     "Snapshot mode 'never' is not offered; BeziSync uses 'initial' unless you choose otherwise.",
+     "A RegexRouter renamed topics; check the destination naming preview matches what consumers read.",
+     "Stop the old deployment first. BeziSync creates its own slot and publication (it does not reuse 'old_slot'); drop the old slot afterwards so it stops retaining WAL. To avoid copying existing rows again, choose 'Only new changes' (no_data).",
+     "Existing offsets stay where they are; BeziSync keeps its own offsets in its state database."
+    ]
+   }
+  },
+  {
+   "text": "debezium.source.connector.class=io.debezium.connector.mysql.MySqlConnector\ndebezium.source.collection.include.list=inv.items\ndebezium.sink.type=nats-jetstream\n",
+   "report": {
+    "source_type": "mysql",
+    "sink_type": "nats",
+    "source_hint": {},
+    "sink_hint": {},
+    "spec": {
+     "source": {
+      "tables": {
+       "include": [
+        "inv.items"
+       ]
+      }
+     },
+     "sink": {},
+     "transforms": []
+    },
+    "mapped": [
+     "debezium.sink.type",
+     "debezium.source.collection.include.list",
+     "debezium.source.connector.class"
+    ],
+    "kept": [],
+    "managed": [],
+    "replaced": [],
+    "warnings": [
+     "No unwrap transform: events keep the full Debezium envelope (before/after/op).",
+     "BeziSync keeps its own schema history; the old one is not reused."
+    ]
+   }
+  },
+  {
+   "text": "debezium.sink.type=zeromq\n",
+   "report": {
+    "source_type": null,
+    "sink_type": null,
+    "source_hint": {},
+    "sink_hint": {},
+    "spec": {
+     "source": {
+      "tables": {
+       "include": []
+      }
+     },
+     "sink": {},
+     "transforms": []
+    },
+    "mapped": [
+     "debezium.sink.type"
+    ],
+    "kept": [],
+    "managed": [],
+    "replaced": [],
+    "warnings": [
+     "No supported source connector.class found (PostgreSQL, MySQL / MariaDB, SQL Server, MongoDB, Oracle, CockroachDB, Vitess, Google Cloud Spanner).",
+     "Sink type 'zeromq' is not supported by BeziSync 1.0.",
+     "No unwrap transform: events keep the full Debezium envelope (before/after/op)."
+    ]
+   }
+  },
+  {
+   "text": "",
+   "report": {
+    "source_type": null,
+    "sink_type": null,
+    "source_hint": {},
+    "sink_hint": {},
+    "spec": {
+     "source": {
+      "tables": {
+       "include": []
+      }
+     },
+     "sink": {},
+     "transforms": []
+    },
+    "mapped": [],
+    "kept": [],
+    "managed": [],
+    "replaced": [],
+    "warnings": [
+     "No supported source connector.class found (PostgreSQL, MySQL / MariaDB, SQL Server, MongoDB, Oracle, CockroachDB, Vitess, Google Cloud Spanner)."
+    ]
+   }
+  }
+ ],
+ "offsets": [
+  {
+   "position": {
+    "lsn": 123456789012,
+    "ts_usec": 1730000000123456,
+    "txId": 5
+   },
+   "described": {
+    "position": "LSN 1C/BE991A14",
+    "source_time": "2024-10-27T03:33:20.123456+00:00"
+   }
+  },
+  {
+   "position": {
+    "file": "mysql-bin.000003",
+    "pos": 154,
+    "gtids": "abc:1-5",
+    "ts_sec": 1730000000
+   },
+   "described": {
+    "position": "binlog mysql-bin.000003:154",
+    "gtids": "abc:1-5",
+    "source_time": "2024-10-27T03:33:20+00:00"
+   }
+  },
+  {
+   "position": {
+    "file": "mysql-bin.000004",
+    "snapshot": true
+   },
+   "described": {
+    "position": "binlog mysql-bin.000004:?",
+    "snapshot_in_progress": true
+   }
+  },
+  {
+   "position": {
+    "change_lsn": "0000002b:00000000:0002",
+    "commit_lsn": null,
+    "ts_ms": 1730000000999
+   },
+   "described": {
+    "position": "LSN 0000002b:00000000:0002",
+    "source_time": "2024-10-27T03:33:20.999000+00:00"
+   }
+  },
+  {
+   "position": {
+    "resume_token": "x",
+    "sec": 1730000001
+   },
+   "described": {
+    "position": "resume token at 1730000001",
+    "source_time": "2024-10-27T03:33:21+00:00"
+   }
+  },
+  {
+   "position": {
+    "last_snapshot_record": false
+   },
+   "described": {
+    "position": "stored",
+    "snapshot_in_progress": true
+   }
+  },
+  {
+   "position": {},
+   "described": {
+    "position": "stored"
+   }
+  }
+ ],
+ "conditions": [
+  {
+   "kind": "pipeline_down",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "reasons": [
+      {
+       "message": "boom",
+       "fix": "fix it"
+      }
+     ]
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "failed",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "orders is down",
+    "message": "boom",
+    "fix": "fix it",
+    "severity": null
+   }
+  },
+  {
+   "kind": "pipeline_down",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "summary": "Down."
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "down"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "orders is down",
+    "message": "Down.",
+    "fix": "",
+    "severity": null
+   }
+  },
+  {
+   "kind": "pipeline_down",
+   "pipeline": {
+    "name": "orders",
+    "status": {},
+    "desired_state": "paused",
+    "deployed_version_id": "v",
+    "lifecycle": "failed",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": false,
+    "title": "",
+    "message": "",
+    "fix": "",
+    "severity": null
+   }
+  },
+  {
+   "kind": "latency",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "metrics": {
+      "ms_behind_source": 125000
+     },
+     "latency_target_seconds": 60
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {
+    "threshold_seconds": null
+   },
+   "cond": {
+    "active": true,
+    "title": "orders is 125 s behind the source",
+    "message": "Latency target is 60 s.",
+    "fix": "Check the destination's throughput and the connector's queue, or choose a larger size.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "latency",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "metrics": {
+      "ms_behind_source": 5000
+     }
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {
+    "threshold_seconds": 2
+   },
+   "cond": {
+    "active": true,
+    "title": "orders is 5 s behind the source",
+    "message": "Latency target is 2 s.",
+    "fix": "Check the destination's throughput and the connector's queue, or choose a larger size.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "latency",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "metrics": {
+      "ms_behind_source": 5000
+     }
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": false,
+    "title": "",
+    "message": "",
+    "fix": "",
+    "severity": null
+   }
+  },
+  {
+   "kind": "source_at_risk",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "source_impact": {
+      "risk": "WAL lost",
+      "risk_fix": "resnapshot",
+      "lost": true
+     }
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "orders puts its source at risk",
+    "message": "WAL lost",
+    "fix": "resnapshot",
+    "severity": "critical"
+   }
+  },
+  {
+   "kind": "source_at_risk",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "source_impact": {
+      "risk": "high",
+      "risk_fix": "x"
+     }
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "orders puts its source at risk",
+    "message": "high",
+    "fix": "x",
+    "severity": null
+   }
+  },
+  {
+   "kind": "status_unknown",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "as_of": "2026-01-01T11:59:00+00:00"
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "unknown"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "No fresh status for orders",
+    "message": "BeziSync has not observed the connector recently.",
+    "fix": "Check the runtime and the BeziSync controller.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "status_unknown",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "as_of": "2026-01-01T11:50:00+00:00"
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "No fresh status for orders",
+    "message": "BeziSync has not observed the connector recently.",
+    "fix": "Check the runtime and the BeziSync controller.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "status_unknown",
+   "pipeline": {
+    "name": "orders",
+    "status": {},
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "No fresh status for orders",
+    "message": "BeziSync has not observed the connector recently.",
+    "fix": "Check the runtime and the BeziSync controller.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "status_unknown",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "as_of": "2026-01-01T11:59:59+00:00"
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "deploying",
+    "health": "unknown"
+   },
+   "params": {},
+   "cond": {
+    "active": false,
+    "title": "",
+    "message": "",
+    "fix": "",
+    "severity": null
+   }
+  },
+  {
+   "kind": "delivery_unverified",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "canary": {
+      "ok": false,
+      "pending": {
+       "sent_at": "2026-01-01T11:00:00+00:00"
+      }
+     }
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "orders: delivery not verified",
+    "message": "A canary written at 2026-01-01T11:00:00+00:00 has not reached the destination.",
+    "fix": "Check the destination and the connector logs; changes may be stuck or lost.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "delivery_unverified",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "canary": {
+      "ok": false
+     }
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "orders: delivery not verified",
+    "message": "A canary written at unknown time has not reached the destination.",
+    "fix": "Check the destination and the connector logs; changes may be stuck or lost.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "schema_breaking",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "schema_pending_breaking": 2
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "Breaking schema change on orders",
+    "message": "2 unreviewed breaking change(s) to captured tables.",
+    "fix": "Check consumers of the affected tables, then mark the changes as reviewed in the Schema tab.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "position_regressed",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "position_regressed": "moved back"
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": true,
+    "title": "orders's position moved backwards",
+    "message": "moved back",
+    "fix": "Consumers may receive duplicates. Check for a restored state database or a manual offset change.",
+    "severity": null
+   }
+  },
+  {
+   "kind": "position_regressed",
+   "pipeline": {
+    "name": "orders",
+    "status": {
+     "position_regressed": null
+    },
+    "desired_state": "running",
+    "deployed_version_id": "v",
+    "lifecycle": "streaming",
+    "health": "healthy"
+   },
+   "params": {},
+   "cond": {
+    "active": false,
+    "title": "",
+    "message": "",
+    "fix": "",
+    "severity": null
+   }
+  }
+ ],
+ "sso": {
+  "rules": [
+   {
+    "group": "admins",
+    "superuser": true
+   },
+   {
+    "group": "pay",
+    "project": "payments",
+    "role": "editor",
+    "approver": true
+   },
+   {
+    "group": "pay-ro",
+    "project": "payments",
+    "role": "viewer"
+   },
+   {
+    "group": "all",
+    "project": "*",
+    "role": "operator"
+   },
+   {
+    "group": "legacy",
+    "project": "shop",
+    "role": "admin"
+   },
+   {
+    "group": "bad",
+    "project": "shop",
+    "role": "owner"
+   }
+  ],
+  "projects": [
+   "default",
+   "payments",
+   "shop"
+  ],
+  "cases": [
+   {
+    "groups": [
+     "admins"
+    ],
+    "default_role": "",
+    "default_projects": null,
+    "access": {},
+    "superuser": true
+   },
+   {
+    "groups": [
+     "pay",
+     "pay-ro"
+    ],
+    "default_role": "",
+    "default_projects": null,
+    "access": {
+     "payments": [
+      "editor",
+      true
+     ]
+    },
+    "superuser": false
+   },
+   {
+    "groups": [
+     "pay-ro",
+     "all"
+    ],
+    "default_role": "",
+    "default_projects": null,
+    "access": {
+     "payments": [
+      "operator",
+      false
+     ],
+     "default": [
+      "operator",
+      false
+     ],
+     "shop": [
+      "operator",
+      false
+     ]
+    },
+    "superuser": false
+   },
+   {
+    "groups": [
+     "legacy"
+    ],
+    "default_role": "",
+    "default_projects": null,
+    "access": {
+     "shop": [
+      "editor",
+      true
+     ]
+    },
+    "superuser": false
+   },
+   {
+    "groups": [
+     "bad"
+    ],
+    "default_role": "editor",
+    "default_projects": [
+     "default",
+     "nope"
+    ],
+    "access": {
+     "default": [
+      "editor",
+      false
+     ]
+    },
+    "superuser": false
+   },
+   {
+    "groups": [],
+    "default_role": "admin",
+    "default_projects": [
+     "default"
+    ],
+    "access": {
+     "default": [
+      "editor",
+      true
+     ]
+    },
+    "superuser": false
+   },
+   {
+    "groups": [],
+    "default_role": "",
+    "default_projects": [
+     "default"
+    ],
+    "access": {},
+    "superuser": false
+   }
+  ]
+ }
+}

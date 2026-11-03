@@ -1,0 +1,20 @@
+{
+  "name": "bezisync-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.64.1",
+    "@types/mssql": "^12.3.0",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
+    "mongodb": "^6.21.0",
+    "mssql": "^11.0.2",
+    "mysql2": "^3.24.6",
+    "pg": "^8.23.1",
+    "typescript": "~5.9.3"
+  }
+}

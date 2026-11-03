@@ -1,0 +1,78 @@
+{
+ "master_key": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+ "previous_key": "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=",
+ "current_key_id": "3eb1bd43",
+ "envelopes": [
+  {
+   "plain": {},
+   "envelope": "v1.3eb1bd43.ldmFX/NUoTl3mKwA.b8KH29X//wXQLz0VIj5L6zws"
+  },
+  {
+   "plain": {
+    "password": "s3cret",
+    "n": 1,
+    "nested": {
+     "a": [
+      1,
+      2
+     ]
+    },
+    "é": "ü"
+   },
+   "envelope": "v1.3eb1bd43.UNnFajaIOqg361wX.g4SCRQULB7E12kJnLQYc9gaVyqJECwZHwMqbwugC4DLM8LLN+B0uMltUfWC2+GsZwo0mY1aywDWQ9ChJTMaGCi4I4B0fVYb1hZlIDQPEUnpnXg=="
+  }
+ ],
+ "old_envelopes": [
+  {
+   "plain": {},
+   "envelope": "v1.4ba68aa8.hyVjmcqYkVlLS4ds.62RtF73zAO3zxfmWiEHUzveu"
+  },
+  {
+   "plain": {
+    "password": "s3cret",
+    "n": 1,
+    "nested": {
+     "a": [
+      1,
+      2
+     ]
+    },
+    "é": "ü"
+   },
+   "envelope": "v1.4ba68aa8.EPeRiMUtVDmwszG4.sxv7bBDSqqTD3e3SuPe2/4zReSb6iduFpLA1/5zfJcU9yNz0gl9fJEIjAmD+8VMCiIHqGTRKWYDpz7GN1avS4fCeWNvDLeBi5BrsAspRSzKcRA=="
+  }
+ ],
+ "token_hashes": [
+  {
+   "token": "bzs_abc",
+   "hashes": [
+    "78be4fa63b206727aa40b7a5bccf1c70c9b6028a71316e4a6a343ef5f866fcd0",
+    "e7c3b81189e85753ca1bf3a60000bac9a560a37e0f57fb6b25095c5dff4bd333"
+   ]
+  },
+  {
+   "token": "bzt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hashes": [
+    "ac7e029468f756c984f187efd2b4b8e0870b048dd58620350d46a8d16d9f00aa",
+    "7a4493d9c45cd068d4d9ce3f9b5830e2acacf6a91873c6b7bb1178c782d29987"
+   ]
+  },
+  {
+   "token": "bza_é",
+   "hashes": [
+    "31379551826e2ad7bea271effe6139c2edbc389183a124089b7056e8d8df528f",
+    "923d0c8e99acd174cf956285a20459a6d68cb3e0967fd39d4642296d49236e2a"
+   ]
+  }
+ ],
+ "passwords": [
+  {
+   "password": "correct horse battery",
+   "hash": "$argon2id$v=19$m=65536,t=3,p=4$WRtPINnJmvdAOabtSeClgg$TKSHQ93DnS59H7tMy9yb8xcKOFwlTDTWghA9EUMM35Q"
+  },
+  {
+   "password": "é😀x",
+   "hash": "$argon2id$v=19$m=65536,t=3,p=4$32riLVJzCRZhbRTL1oxHEA$3PCeOKsmki9qnYFxCvF8eMJtogCzcrM1Hmt7O3l7r+U"
+  }
+ ]
+}

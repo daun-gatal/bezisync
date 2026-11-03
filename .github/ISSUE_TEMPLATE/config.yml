@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/daun-gatal/bezisync#readme
+    about: Check the README for setup and usage instructions
+  - name: Security vulnerability
+    url: https://github.com/daun-gatal/bezisync/security/advisories/new
+    about: Please report vulnerabilities privately, not in public issues
+  - name: Discussions
+    url: https://github.com/daun-gatal/bezisync/discussions
+    about: Ask questions and share ideas in discussions

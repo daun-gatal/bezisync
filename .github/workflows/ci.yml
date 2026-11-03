@@ -1,0 +1,223 @@
+# CI: every check a change must pass before it merges to preview. Nothing here publishes or sees
+# a secret: pull requests from forks run it with a read-only token (outside contributors' runs
+# wait for a maintainer's approval). Releases are cut from preview by release.yml.
+name: CI
+
+on:
+  pull_request:
+    branches: [preview]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  # Lint and test run as parallel jobs: each is the slow half of the backend's checks.
+  backend-lint:
+    name: Backend lint
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with: { go-version-file: backend/go.mod, cache-dependency-path: backend/go.sum }
+      - name: golangci-lint (includes go vet)
+        uses: golangci/golangci-lint-action@v8
+        with: { version: v2.15.0, working-directory: backend }
+      - name: govulncheck
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: OpenAPI document is current
+        working-directory: backend
+        run: |
+          go run ./cmd/bezisync openapi --output /tmp/openapi.json
+          diff -u ../frontend/openapi.json /tmp/openapi.json
+
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with: { go-version-file: backend/go.mod, cache-dependency-path: backend/go.sum }
+      # Same database as `make verify` locally (scripts/dev-db.sh): logical replication on, which a
+      # service container cannot set. Tests reach it on its bridge address, because the SSRF guard
+      # rightly refuses loopback.
+      - name: Test database
+        run: |
+          scripts/dev-db.sh >/dev/null
+          ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' bezisync-dev-pg)
+          echo "BEZISYNC_TEST_DATABASE_URL=postgresql://bezisync:bezisync@${ip}:5432/bezisync" >> "$GITHUB_ENV"
+      - name: Test (race detector, contract corpus, migration and check-reference drift)
+        working-directory: backend
+        run: go test -race ./...
+
+  tools:
+    name: Tools
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with: { go-version-file: tools/go.mod, cache: false }
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with: { version: v2.15.0, working-directory: tools }
+      - name: Vet and test (release tool, demo smoke test)
+        working-directory: tools
+        run: go vet ./... && go test ./...
+      - name: Scripts are clean
+        run: shellcheck -S warning scripts/*.sh
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: Install
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+      - name: Generated API client is current
+        working-directory: frontend
+        run: bun run check:api
+      - name: Type check
+        working-directory: frontend
+        run: bun run typecheck
+      - name: Unit tests
+        working-directory: frontend
+        run: bun run test
+      - name: Build
+        working-directory: frontend
+        run: bun run build
+      - name: Type check e2e suite
+        working-directory: e2e
+        run: npm ci && npx tsc --noEmit
+
+  versions:
+    name: Versions and changelog
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    outputs:
+      build: ${{ steps.changes.outputs.build }}
+      demo: ${{ steps.changes.outputs.demo }}
+    steps:
+      # Full history with tags: a chart version counts as published once its tag exists.
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0 }   # HEAD is the merge into preview; HEAD^1 is preview
+      - uses: actions/setup-go@v6
+        with: { go-version-file: tools/go.mod, cache: false }
+      - name: A fragment exactly when an image changes; a new version for every changed chart
+        id: changes
+        run: scripts/release.sh --changes HEAD^1 >> "$GITHUB_OUTPUT"
+      - name: Backend, frontend and charts' appVersion agree
+        run: echo "version $(scripts/release.sh --current)"
+      - name: CHANGELOG.md and the app version are left to the release
+        run: |
+          set -euo pipefail
+          # Only once preview has them (the first import brings both).
+          git cat-file -e HEAD^1:scripts/release.sh 2>/dev/null || exit 0
+          if git cat-file -e HEAD^1:CHANGELOG.md 2>/dev/null && ! git diff --quiet HEAD^1 HEAD -- CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md is written by the release: add a fragment in changelogs/unreleased/ instead"
+            exit 1
+          fi
+          git worktree add -q "$RUNNER_TEMP/base" HEAD^1
+          base=$(cd "$RUNNER_TEMP/base" && scripts/release.sh --current)
+          head=$(scripts/release.sh --current)
+          if [ "$base" != "$head" ]; then
+            echo "::error::the app version changed ($base → $head): the release sets it from the fragments"
+            exit 1
+          fi
+      - name: Changelog fragments are valid
+        run: |
+          status=0
+          for file in changelogs/unreleased/*.md; do
+            [ -e "$file" ] || continue
+            [ "$(basename "$file")" = README.md ] && continue
+            head -1 "$file" | grep -qE '^type: (major|minor|patch)$' \
+              || { echo "::error file=$file::first line must be 'type: major|minor|patch'"; status=1; }
+            grep -qE '^### (Added|Changed|Fixed|Removed)' "$file" \
+              || { echo "::error file=$file::needs a ### Added / Changed / Fixed / Removed section"; status=1; }
+          done
+          exit $status
+      - name: What the next release would publish
+        run: |
+          {
+            echo "### Next release from preview with this change"
+            echo '```'
+            scripts/release.sh --plan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  compose:
+    name: Demo compose file
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate the demo compose file
+        run: docker compose -f deploy/compose/docker-compose.yml config -q
+
+  security:
+    name: Vulnerability scan (source)
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: anchore/scan-action@v6
+        with: { path: ".", fail-build: true, severity-cutoff: high, output-format: table }
+
+  # The images a change ships, built and scanned (OS packages of the base images included).
+  images:
+    name: Build and scan images
+    runs-on: ubuntu-latest
+    needs: [versions]
+    if: needs.versions.outputs.build == 'true'
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: Backend image `bezisync` (API, controller, agent, migrate, CLI)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          load: true
+          tags: bezisync:ci
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=backend
+      - name: Frontend image `bezisync-web`
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          load: true
+          tags: bezisync-web:ci
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=frontend
+      - name: Scan bezisync
+        uses: anchore/scan-action@v6
+        with: { image: "bezisync:ci", fail-build: true, severity-cutoff: high, output-format: table }
+      - name: Scan bezisync-web
+        uses: anchore/scan-action@v6
+        with: { image: "bezisync-web:ci", fail-build: true, severity-cutoff: high, output-format: table }
+
+  demo:
+    name: Demo stack smoke test
+    runs-on: ubuntu-latest
+    needs: [versions]
+    if: needs.versions.outputs.demo == 'true'
+    timeout-minutes: 40
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with: { go-version-file: tools/go.mod, cache: false }
+      - name: Bring up the demo stack, stream through the sandbox, tear down
+        run: scripts/demo-smoke.sh

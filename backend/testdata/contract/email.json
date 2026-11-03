@@ -1,0 +1,244 @@
+{
+ "cases": [
+  {
+   "in": "a@b.co",
+   "out": "a@b.co"
+  },
+  {
+   "in": "bad",
+   "error": "value is not a valid email address: An email address must have an @-sign."
+  },
+  {
+   "in": "@x.com",
+   "error": "value is not a valid email address: There must be something before the @-sign."
+  },
+  {
+   "in": "a@",
+   "error": "value is not a valid email address: There must be something after the @-sign."
+  },
+  {
+   "in": "a b@c.de",
+   "error": "value is not a valid email address: The email address contains invalid characters before the @-sign: SPACE."
+  },
+  {
+   "in": "a,b@c.de",
+   "error": "value is not a valid email address: The email address contains invalid characters before the @-sign: ','."
+  },
+  {
+   "in": "a\"b@c.de",
+   "error": "value is not a valid email address: An email address must have an @-sign."
+  },
+  {
+   "in": "a..b@c.de",
+   "error": "value is not a valid email address: An email address cannot have two periods in a row."
+  },
+  {
+   "in": ".a@c.de",
+   "error": "value is not a valid email address: An email address cannot start with a period."
+  },
+  {
+   "in": "a.@c.de",
+   "error": "value is not a valid email address: An email address cannot have a period immediately before the @-sign."
+  },
+  {
+   "in": "a@b",
+   "error": "value is not a valid email address: The part after the @-sign is not valid. It should have a period."
+  },
+  {
+   "in": "a@b.local",
+   "error": "value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email."
+  },
+  {
+   "in": "a@b.localhost",
+   "error": "value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email."
+  },
+  {
+   "in": "a@b.test",
+   "error": "value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email."
+  },
+  {
+   "in": "a@b.invalid",
+   "error": "value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email."
+  },
+  {
+   "in": "a@b.onion",
+   "error": "value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email."
+  },
+  {
+   "in": "a@b.arpa",
+   "error": "value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email."
+  },
+  {
+   "in": "a@example.com",
+   "out": "a@example.com"
+  },
+  {
+   "in": "A@Example.COM",
+   "out": "A@example.com"
+  },
+  {
+   "in": "a@-b.com",
+   "error": "value is not a valid email address: An email address cannot have a hyphen immediately after the @-sign."
+  },
+  {
+   "in": "a@b-.com",
+   "error": "value is not a valid email address: An email address cannot have a period and a hyphen next to each other."
+  },
+  {
+   "in": "a@b_c.com",
+   "error": "value is not a valid email address: The part after the @-sign contains invalid characters: '_'."
+  },
+  {
+   "in": "a@[1.2.3.4]",
+   "error": "value is not a valid email address: A bracketed IP address after the @-sign is not allowed here."
+  },
+  {
+   "in": "a@1.2.3.4",
+   "error": "value is not a valid email address: The part after the @-sign is not valid. It is not within a valid top-level domain."
+  },
+  {
+   "in": "a@b..com",
+   "error": "value is not a valid email address: An email address cannot have two periods in a row."
+  },
+  {
+   "in": "a@.b.com",
+   "error": "value is not a valid email address: An email address cannot have a period immediately after the @-sign."
+  },
+  {
+   "in": "a@b.c",
+   "out": "a@b.c"
+  },
+  {
+   "in": "a@b.123",
+   "error": "value is not a valid email address: The part after the @-sign is not valid. It is not within a valid top-level domain."
+  },
+  {
+   "in": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@b.com",
+   "out": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@b.com"
+  },
+  {
+   "in": "a@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.com",
+   "error": "value is not a valid email address: After the @-sign, periods cannot be separated by so many characters (1 character too many)."
+  },
+  {
+   "in": "ü@b.com",
+   "out": "ü@b.com"
+  },
+  {
+   "in": "a@bücher.de",
+   "out": "a@bücher.de"
+  },
+  {
+   "in": "a@b.com.",
+   "error": "value is not a valid email address: An email address cannot end with a period."
+  },
+  {
+   "in": "a+tag@b.co",
+   "out": "a+tag@b.co"
+  },
+  {
+   "in": "a@@b.co",
+   "error": "value is not a valid email address: The part after the @-sign contains invalid characters: '@'."
+  },
+  {
+   "in": "a@b@c.co",
+   "error": "value is not a valid email address: The part after the @-sign contains invalid characters: '@'."
+  },
+  {
+   "in": "a\t@b.co",
+   "error": "value is not a valid email address: The email address contains invalid characters before the @-sign: U+0009."
+  },
+  {
+   "in": " a@b.co",
+   "out": "a@b.co"
+  },
+  {
+   "in": "a@b.co ",
+   "out": "a@b.co"
+  },
+  {
+   "in": "a@xn--bcher-kva.de",
+   "out": "a@bücher.de"
+  },
+  {
+   "in": "a@b.co\n",
+   "error": "value is not a valid email address: Carriage return and line feed characters are not allowed"
+  },
+  {
+   "in": "a@b.c0m",
+   "out": "a@b.c0m"
+  },
+  {
+   "in": "Info@Example.com",
+   "out": "info@example.com"
+  },
+  {
+   "in": "SUPPORT@x.org",
+   "out": "support@x.org"
+  },
+  {
+   "in": "\"quoted local\"@x.org",
+   "error": "value is not a valid email address: Quoting the part before the @-sign is not allowed here."
+  },
+  {
+   "in": "\"a\\\"b\"@x.org",
+   "error": "value is not a valid email address: Quoting the part before the @-sign is not allowed here."
+  },
+  {
+   "in": "Jane Doe <jane@x.org>",
+   "out": "jane@x.org"
+  },
+  {
+   "in": "\"Jane, D\" <jane@x.org>",
+   "out": "jane@x.org"
+  },
+  {
+   "in": "<jane@x.org>",
+   "out": "jane@x.org"
+  },
+  {
+   "in": "a@B.Co",
+   "out": "a@b.co"
+  },
+  {
+   "in": "a@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+   "error": "value is not a valid email address: The email address is too long after the @-sign (55 characters too many)."
+  },
+  {
+   "in": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@b.co",
+   "error": "value is not a valid email address: The email address is too long (1 character too many)."
+  },
+  {
+   "in": "admin@bezisync.local",
+   "error": "value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email."
+  },
+  {
+   "in": "user@sub.domain.example",
+   "out": "user@sub.domain.example"
+  },
+  {
+   "in": "a@xn--80ak6aa92e.com",
+   "out": "a@аррӏе.com"
+  },
+  {
+   "in": "a@b.c-d",
+   "out": "a@b.c-d"
+  },
+  {
+   "in": "a@b.--",
+   "error": "value is not a valid email address: An email address cannot end with a hyphen."
+  },
+  {
+   "in": "ab--cd@x.org",
+   "out": "ab--cd@x.org"
+  },
+  {
+   "in": "a@ab--cd.org",
+   "error": "value is not a valid email address: An email address cannot have two letters followed by two dashes immediately after the @-sign or after a period, except Punycode."
+  },
+  {
+   "in": "a@xn--ab.org",
+   "error": "value is not a valid email address: The part after the @-sign is not valid IDNA (Codepoint U+0081 at position 1 of '\\x81\\x80' not allowed)."
+  }
+ ]
+}

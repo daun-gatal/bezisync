@@ -1,0 +1,22 @@
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# e2e artifacts
+e2e/test-results/
+e2e/playwright-report/
+.e2e/
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+*.db
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

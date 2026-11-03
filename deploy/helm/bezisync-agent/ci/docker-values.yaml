@@ -1,0 +1,7 @@
+# CI (helm.yml, render only): an agent running connectors on a Docker daemon.
+controlPlane: { url: https://bezisync.example.com, insecure: true }
+existingSecret: bezisync-agent-token
+kind: docker
+docker: { host: "tcp://docker:2375", network: cdc, imagePullTimeout: 1h }
+reportNodeCapacity: false
+imagePullSecrets: [{ name: ghcr-pull-secret }]

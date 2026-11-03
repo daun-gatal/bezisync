@@ -1,0 +1,64 @@
+{
+ "dumps": [
+  {
+   "doc_json": "{\"a\": 1, \"b\": [1, 2], \"c\": {\"d\": null, \"e\": true, \"f\": 1.5, \"g\": 1e+16, \"h\": 0.0001}}",
+   "safe_dump": "a: 1\nb:\n- 1\n- 2\nc:\n  d: null\n  e: true\n  f: 1.5\n  g: 1.0e+16\n  h: 0.0001\n",
+   "unicode": "a: 1\nb:\n- 1\n- 2\nc:\n  d: null\n  e: true\n  f: 1.5\n  g: 1.0e+16\n  h: 0.0001\n---\nsecond:\n  a: 1\n  b:\n  - 1\n  - 2\n  c:\n    d: null\n    e: true\n    f: 1.5\n    g: 1.0e+16\n    h: 0.0001\n"
+  },
+  {
+   "doc_json": "{\"empty_map\": {}, \"empty_list\": [], \"nested\": [{\"x\": 1, \"y\": [{\"z\": \"w\"}]}, [1, 2]]}",
+   "safe_dump": "empty_map: {}\nempty_list: []\nnested:\n- x: 1\n  y:\n  - z: w\n- - 1\n  - 2\n",
+   "unicode": "empty_map: {}\nempty_list: []\nnested:\n- x: 1\n  y:\n  - z: w\n- - 1\n  - 2\n---\nsecond:\n  empty_map: {}\n  empty_list: []\n  nested:\n  - x: 1\n    y:\n    - z: w\n  - - 1\n    - 2\n"
+  },
+  {
+   "doc_json": "{\"s\": [\"\", \" lead\", \"trail \", \"yes\", \"No\", \"on\", \"null\", \"~\", \"123\", \"1.5\", \"0x1F\", \"1:20\", \"2020-01-02\", \"-\", \"- x\", \"a: b\", \"a #b\", \"#c\", \"x,y\", \"[a]\", \"{a}\", \"!x\", \"&a\", \"*a\", \"|\", \">\", \"%\", \"@\", \"`\", \"'q'\", \"\\\"d\\\"\", \"?\", \"? x\", \":\", \": x\", \"a:b\", \"tab\\tx\", \"nl\\nx\", \"\\u00e9\", \"\\ud83d\\ude00\", \"\\u2028\", \"---\", \"...x\", \"=\", \"<<\", \".inf\", \".5\", \"+1\", \"0o7\", \"07\", \"08\", \"1_000\", \"1e3\", \"1.0e+3\", \"True\", \"TRUE\", \"y\", \"n\", \"it's\", \"say \\\"hi\\\"\", \"back\\\\slash\", \"\\u0000nul\", \"\\u007f\", \"\\u0085\", \"\\u00a0nb\", \"\\ufeffbom\"]}",
+   "safe_dump": "s:\n- ''\n- ' lead'\n- 'trail '\n- 'yes'\n- 'No'\n- 'on'\n- 'null'\n- '~'\n- '123'\n- '1.5'\n- '0x1F'\n- '1:20'\n- '2020-01-02'\n- '-'\n- '- x'\n- 'a: b'\n- 'a #b'\n- '#c'\n- x,y\n- '[a]'\n- '{a}'\n- '!x'\n- '&a'\n- '*a'\n- '|'\n- '>'\n- '%'\n- '@'\n- '`'\n- '''q'''\n- '\"d\"'\n- '?'\n- '? x'\n- ':'\n- ': x'\n- a:b\n- \"tab\\tx\"\n- 'nl\n\n  x'\n- \"\\xE9\"\n- \"\\U0001F600\"\n- \"\\L\"\n- '---'\n- '...x'\n- '='\n- '<<'\n- '.inf'\n- '.5'\n- '+1'\n- 0o7\n- '07'\n- 08\n- '1_000'\n- 1e3\n- '1.0e+3'\n- 'True'\n- 'TRUE'\n- y\n- n\n- it's\n- say \"hi\"\n- back\\slash\n- \"\\0nul\"\n- \"\\x7F\"\n- \"\\N\"\n- \"\\_nb\"\n- \"\\uFEFFbom\"\n",
+   "unicode": "s:\n- ''\n- ' lead'\n- 'trail '\n- 'yes'\n- 'No'\n- 'on'\n- 'null'\n- '~'\n- '123'\n- '1.5'\n- '0x1F'\n- '1:20'\n- '2020-01-02'\n- '-'\n- '- x'\n- 'a: b'\n- 'a #b'\n- '#c'\n- x,y\n- '[a]'\n- '{a}'\n- '!x'\n- '&a'\n- '*a'\n- '|'\n- '>'\n- '%'\n- '@'\n- '`'\n- '''q'''\n- '\"d\"'\n- '?'\n- '? x'\n- ':'\n- ': x'\n- a:b\n- \"tab\\tx\"\n- 'nl\n\n  x'\n- é\n- 😀\n- '   '\n- '---'\n- '...x'\n- '='\n- '<<'\n- '.inf'\n- '.5'\n- '+1'\n- 0o7\n- '07'\n- 08\n- '1_000'\n- 1e3\n- '1.0e+3'\n- 'True'\n- 'TRUE'\n- y\n- n\n- it's\n- say \"hi\"\n- back\\slash\n- \"\\0nul\"\n- \"\\x7F\"\n- '  '\n-  nb\n- \"\\uFEFFbom\"\n---\nsecond:\n  s:\n  - ''\n  - ' lead'\n  - 'trail '\n  - 'yes'\n  - 'No'\n  - 'on'\n  - 'null'\n  - '~'\n  - '123'\n  - '1.5'\n  - '0x1F'\n  - '1:20'\n  - '2020-01-02'\n  - '-'\n  - '- x'\n  - 'a: b'\n  - 'a #b'\n  - '#c'\n  - x,y\n  - '[a]'\n  - '{a}'\n  - '!x'\n  - '&a'\n  - '*a'\n  - '|'\n  - '>'\n  - '%'\n  - '@'\n  - '`'\n  - '''q'''\n  - '\"d\"'\n  - '?'\n  - '? x'\n  - ':'\n  - ': x'\n  - a:b\n  - \"tab\\tx\"\n  - 'nl\n\n    x'\n  - é\n  - 😀\n  - '     '\n  - '---'\n  - '...x'\n  - '='\n  - '<<'\n  - '.inf'\n  - '.5'\n  - '+1'\n  - 0o7\n  - '07'\n  - 08\n  - '1_000'\n  - 1e3\n  - '1.0e+3'\n  - 'True'\n  - 'TRUE'\n  - y\n  - n\n  - it's\n  - say \"hi\"\n  - back\\slash\n  - \"\\0nul\"\n  - \"\\x7F\"\n  - '    '\n  -  nb\n  - \"\\uFEFFbom\"\n"
+  },
+  {
+   "doc_json": "{\"long\": \"word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word \", \"longq\": \"it's word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word \", \"longd\": \"tab\\t word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word \", \"verylongword\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"spaces\": \"a  b   c\"}",
+   "safe_dump": "long: 'word word word word word word word word word word word word word word word\n  word word word word word word word word word word word word word word word '\nlongq: 'it''s word word word word word word word word word word word word word word\n  word word word word word word word word word word word word word word word word '\nlongd: \"tab\\t word word word word word word word word word word word word word word\\\n  \\ word word word word word word word word word word word word word word word word \"\nverylongword: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nspaces: a  b   c\n",
+   "unicode": "long: 'word word word word word word word word word word word word word word word\n  word word word word word word word word word word word word word word word '\nlongq: 'it''s word word word word word word word word word word word word word word\n  word word word word word word word word word word word word word word word word '\nlongd: \"tab\\t word word word word word word word word word word word word word word\\\n  \\ word word word word word word word word word word word word word word word word \"\nverylongword: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nspaces: a  b   c\n---\nsecond:\n  long: 'word word word word word word word word word word word word word word word\n    word word word word word word word word word word word word word word word '\n  longq: 'it''s word word word word word word word word word word word word word word\n    word word word word word word word word word word word word word word word word '\n  longd: \"tab\\t word word word word word word word word word word word word word word\\\n    \\ word word word word word word word word word word word word word word word word \"\n  verylongword: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  spaces: a  b   c\n"
+  },
+  {
+   "doc_json": "{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\": \"long key\", \"multi\\nkey\": 1, \"\": \"empty key\", \"123\": \"numeric key\", \"yes\": \"bool key\"}",
+   "safe_dump": "? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n: long key\n? 'multi\n\n  key'\n: 1\n? ''\n: empty key\n'123': numeric key\n'yes': bool key\n",
+   "unicode": "? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n: long key\n? 'multi\n\n  key'\n: 1\n? ''\n: empty key\n'123': numeric key\n'yes': bool key\n---\nsecond:\n  ? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n  : long key\n  ? 'multi\n\n    key'\n  : 1\n  ? ''\n  : empty key\n  '123': numeric key\n  'yes': bool key\n"
+  },
+  {
+   "doc_json": "{\"cdc.{schema}.{table}\": \"naming\", \"naming\": \"cdc.{schema}.{table}\", \"url\": \"http://r:8080/x?y=z#f\"}",
+   "safe_dump": "cdc.{schema}.{table}: naming\nnaming: cdc.{schema}.{table}\nurl: http://r:8080/x?y=z#f\n",
+   "unicode": "cdc.{schema}.{table}: naming\nnaming: cdc.{schema}.{table}\nurl: http://r:8080/x?y=z#f\n---\nsecond:\n  cdc.{schema}.{table}: naming\n  naming: cdc.{schema}.{table}\n  url: http://r:8080/x?y=z#f\n"
+  }
+ ],
+ "loads": [
+  {
+   "text": "a: yes\nb: No\nc: on\nd: OFF\ne: y\nf: ~\ng: null\nh:\ni: 1_000\nj: 0x1f\nk: 017\nl: 1:20\nm: 1.5\nn: .inf\no: -.Inf\np: 1e3\nq: 1.0e+3\nr: '123'\ns: \"yes\"\nt: !!str 1\nu: 0b101\nv: +12\nw: 3.\n",
+   "json": "[{\"a\": true, \"b\": false, \"c\": true, \"d\": false, \"e\": \"y\", \"f\": null, \"g\": null, \"h\": null, \"i\": 1000, \"j\": 31, \"k\": 15, \"l\": 80, \"m\": 1.5, \"n\": Infinity, \"o\": -Infinity, \"p\": \"1e3\", \"q\": 1000.0, \"r\": \"123\", \"s\": \"yes\", \"t\": \"1\", \"u\": 5, \"v\": 12, \"w\": 3.0}]"
+  },
+  {
+   "text": "x: &a {k: 1}\ny: *a\nz:\n  <<: *a\n  m: 2\n",
+   "json": "[{\"x\": {\"k\": 1}, \"y\": {\"k\": 1}, \"z\": {\"k\": 1, \"m\": 2}}]"
+  },
+  {
+   "text": "- 1\n- two\n- [3, 4]\n- {five: 5}\n",
+   "json": "[[1, \"two\", [3, 4], {\"five\": 5}]]"
+  },
+  {
+   "text": "k: v\nk: w\n",
+   "json": "[{\"k\": \"w\"}]"
+  },
+  {
+   "text": "---\na: 1\n---\n---\nb: 2\n",
+   "json": "[{\"a\": 1}, null, {\"b\": 2}]"
+  },
+  {
+   "text": "plain: hello world\nquoted: 'it''s'\nlit: |\n  line1\n  line2\nfold: >\n  a\n  b\n",
+   "json": "[{\"fold\": \"a b\\n\", \"lit\": \"line1\\nline2\\n\", \"plain\": \"hello world\", \"quoted\": \"it's\"}]"
+  },
+  {
+   "text": "n: 0\nneg: -5\nfl: -0.5\nexp: 6.02e+23\nsexf: 1:30.5\n",
+   "json": "[{\"exp\": 6.02e+23, \"fl\": -0.5, \"n\": 0, \"neg\": -5, \"sexf\": 90.5}]"
+  }
+ ]
+}

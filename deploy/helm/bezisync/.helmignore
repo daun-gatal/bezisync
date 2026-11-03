@@ -1,0 +1,4 @@
+# CI values, unit tests and the README template are for this repository only.
+ci/
+unittests/
+README.md.gotmpl

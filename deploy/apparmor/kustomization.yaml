@@ -1,0 +1,13 @@
+# The bezisync-default AppArmor profile and the DaemonSet that loads it on every boot. Optional:
+# apply it (kubectl apply -k deploy/apparmor) when the default containerd profile of your nodes
+# blocks signals inside containers, then set appArmorProfile in the charts to use it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kube-system
+resources:
+  - apparmor-loader.yaml
+# The generated name carries a content hash, so editing the profile rolls the loader, which
+# replaces the profile in the kernel.
+configMapGenerator:
+  - name: bezisync-apparmor-profiles
+    files: [bezisync-default]
