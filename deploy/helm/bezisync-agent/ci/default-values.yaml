@@ -1,0 +1,4 @@
+# CI (helm.yml): an agent running connectors in its namespace. The install on kind replaces the
+# token with one from the control plane it installed first.
+controlPlane: { url: "http://bezisync" }
+token: bza_ci_placeholder

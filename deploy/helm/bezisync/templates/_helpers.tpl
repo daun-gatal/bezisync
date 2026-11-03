@@ -27,8 +27,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 - name: BEZISYNC_AGENT_IMAGE
   value: {{ .Values.agent.image | default (include "bezisync.image" .) | quote }}
+{{- with index .Chart.Annotations "bezisync.io/agent-chart-version" }}
 - name: BEZISYNC_AGENT_CHART_VERSION
-  value: {{ .Chart.Version | quote }}
+  value: {{ . | quote }}
+{{- end }}
 {{- with .Values.agent.chart }}
 - name: BEZISYNC_AGENT_CHART
   value: {{ . | quote }}

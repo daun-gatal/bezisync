@@ -213,7 +213,7 @@ func Load(lookup func(string) (string, bool)) (*Settings, error) {
 		AgentURL:                          l.str("AGENT_URL", ""),
 		AgentImage:                        l.str("AGENT_IMAGE", "ghcr.io/daun-gatal/bezisync:"+version.Version),
 		AgentChart:                        l.str("AGENT_CHART", "oci://ghcr.io/daun-gatal/charts/bezisync-agent"),
-		AgentChartVersion:                 l.str("AGENT_CHART_VERSION", version.Version),
+		AgentChartVersion:                 l.str("AGENT_CHART_VERSION", ""),
 		SandboxSourceHost:                 l.str("SANDBOX_SOURCE_HOST", ""),
 		SandboxSourcePort:                 l.integer("SANDBOX_SOURCE_PORT", 5432),
 		SandboxSourceDatabase:             l.str("SANDBOX_SOURCE_DATABASE", "shop"),

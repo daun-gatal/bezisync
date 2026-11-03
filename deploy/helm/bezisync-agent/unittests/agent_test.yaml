@@ -1,0 +1,32 @@
+suite: agent
+templates: [templates/deployment.yaml, templates/secret.yaml, templates/rbac.yaml]
+tests:
+  - it: needs the control plane's URL
+    template: templates/deployment.yaml
+    set: { token: bza_x }
+    asserts:
+      - failedTemplate: { errorMessage: "controlPlane.url is required" }
+  - it: needs a token unless an existing Secret holds it
+    template: templates/secret.yaml
+    set: { controlPlane.url: "https://x" }
+    asserts:
+      - failedTemplate: { errorMessage: "token is required (shown once when the runtime was added) unless existingSecret is set" }
+  - it: needs a Docker host for Docker connectors
+    template: templates/deployment.yaml
+    set: { controlPlane.url: "https://x", token: bza_x, kind: docker }
+    asserts:
+      - failedTemplate: { errorMessage: "docker.host is required when kind=docker" }
+  - it: dials the control plane
+    template: templates/deployment.yaml
+    values: [../ci/default-values.yaml]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: BEZISYNC_AGENT_URL, value: "http://bezisync" }
+      - equal: { path: spec.strategy.type, value: Recreate }
+  - it: runs Docker connectors without Kubernetes rights
+    template: templates/rbac.yaml
+    values: [../ci/docker-values.yaml]
+    asserts:
+      - hasDocuments: { count: 1 }
+      - isKind: { of: ServiceAccount }

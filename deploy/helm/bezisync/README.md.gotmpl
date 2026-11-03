@@ -1,0 +1,23 @@
+# bezisync
+
+{{ template "chart.versionBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}: the API, the controller and the web UI. Agents for remote
+runtimes come with the [`bezisync-agent`](../bezisync-agent) chart.
+
+## Install
+
+```bash
+helm install bezisync oci://ghcr.io/daun-gatal/charts/bezisync \
+  --namespace bezisync --create-namespace \
+  --set publicUrl=https://bezisync.example.com \
+  --set secrets.masterKey="$(docker run --rm ghcr.io/daun-gatal/bezisync generate-master-key)" \
+  --set secrets.databaseUrl=postgresql://bezisync:…@postgres:5432/bezisync
+```
+
+For a quick evaluation, `--set postgres.enabled=true` runs a single PostgreSQL pod instead of an
+external database. Production needs an HA PostgreSQL (it also stores Debezium offsets), an https
+`publicUrl` and `cookieSecure: true`; see the [guide](../../../docs/README.md#install).
+`helm test bezisync` checks that the API is ready and that the web UI reaches it.
+
+{{ template "chart.valuesSection" . }}

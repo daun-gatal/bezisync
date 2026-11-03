@@ -437,7 +437,13 @@ type Plan struct {
 	Charts []ChartRelease
 	// PreCharts are every chart at the version it would ship as (pre-release builds).
 	PreCharts []ChartRelease
+	// AgentChart is the bezisync-agent version the control-plane chart of this release pins for
+	// agent installs: the one released with it, else the newest published one ("" when none).
+	AgentChart string
 }
+
+// AgentChartName is the agent chart, whose version the control-plane chart pins.
+const AgentChartName = "bezisync-agent"
 
 // MakePlan decides what a release publishes. An override sets the app version.
 func MakePlan(root, override string) (Plan, error) {
@@ -476,7 +482,26 @@ func MakePlan(root, override string) (Plan, error) {
 	} else {
 		p.Version, err = BumpVersion(current, "patch")
 	}
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	for _, c := range p.Charts {
+		if c.Name == AgentChartName {
+			p.AgentChart = c.Version
+		}
+	}
+	for _, c := range charts {
+		if c.Name == AgentChartName && p.AgentChart == "" {
+			published, err := PublishedVersions(root, c)
+			if err != nil {
+				return p, err
+			}
+			if len(published) > 0 {
+				p.AgentChart = published[0]
+			}
+		}
+	}
+	return p, nil
 }
 
 // Assemble moves the fragments into a new CHANGELOG.md section, deletes them, sets the app

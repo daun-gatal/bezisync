@@ -1,0 +1,21 @@
+# bezisync-agent
+
+{{ template "chart.versionBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}.
+
+## Install
+
+Add a remote runtime in BeziSync (**Runtimes → Add runtime**, agent mode): it shows the install
+command with its one-time enrollment token, for example:
+
+```bash
+helm install bezisync-agent oci://ghcr.io/daun-gatal/charts/bezisync-agent \
+  --namespace cdc --create-namespace \
+  --set controlPlane.url=https://bezisync.example.com --set token=bza_…
+```
+
+The agent only dials out to the control plane. `helm test bezisync-agent` checks that it can
+reach it. See [Remote runtimes (agents)](../../../docs/README.md#remote-runtimes-agents).
+
+{{ template "chart.valuesSection" . }}

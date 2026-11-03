@@ -7,3 +7,8 @@ appVersion: "0.0.0"
 home: https://github.com/daun-gatal/bezisync
 sources: [https://github.com/daun-gatal/bezisync]
 keywords: [debezium, cdc, kafka, change-data-capture]
+annotations:
+  # The bezisync-agent chart version the generated agent install commands pin. The release fills
+  # it in when it publishes this chart (the agent chart released with it, or the newest one);
+  # empty means the newest agent chart.
+  bezisync.io/agent-chart-version: ""

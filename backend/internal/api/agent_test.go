@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/daun-gatal/bezisync/backend/internal/agent"
+	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
@@ -188,14 +189,29 @@ func TestKubernetesInstallCommandUsesThePublishedChart(t *testing.T) {
 	res := admin.post("/api/v1/projects/"+pid+"/runtimes", map[string]any{"name": "eks", "kind": "kubernetes", "mode": "agent",
 		"config": map[string]any{"namespace": "cdc", "image_pull_secrets": []string{"ghcr-pull-secret"}}}).expect(201)
 	cmd := res.Str("agent_install")
-	for _, want := range []string{"helm install bezisync-agent oci://ghcr.io/daun-gatal/charts/bezisync-agent --version ", "--namespace cdc",
+	// Without a known agent chart version (the control-plane chart sets one) Helm installs the newest chart.
+	for _, want := range []string{"helm install bezisync-agent oci://ghcr.io/daun-gatal/charts/bezisync-agent --namespace cdc",
 		"--set 'imagePullSecrets[0].name=ghcr-pull-secret'", "--set image.pullPolicy=IfNotPresent", "--set image.repository=ghcr.io/daun-gatal/bezisync "} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("%q not in %s", want, cmd)
 		}
 	}
+	if strings.Contains(cmd, "--version") {
+		t.Fatalf("an app version passed as chart version: %s", cmd)
+	}
 	if l := res.List("config", "image_pull_secrets"); len(l) != 1 || l[0] != "ghcr-pull-secret" {
 		t.Fatal(string(res.Raw))
+	}
+	// The agent chart has its own version: the control-plane chart passes the one it shipped with.
+	prev := config.Get()
+	pinned := *prev
+	pinned.AgentChartVersion = "0.1.4"
+	config.Set(&pinned)
+	t.Cleanup(func() { config.Set(prev) })
+	cmd = admin.post("/api/v1/projects/"+pid+"/runtimes", map[string]any{"name": "gke", "kind": "kubernetes", "mode": "agent",
+		"config": map[string]any{"namespace": "cdc"}}).expect(201).Str("agent_install")
+	if !strings.Contains(cmd, "oci://ghcr.io/daun-gatal/charts/bezisync-agent --version 0.1.4 --namespace cdc") {
+		t.Fatal(cmd)
 	}
 }
 

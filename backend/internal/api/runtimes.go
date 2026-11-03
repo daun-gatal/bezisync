@@ -239,7 +239,9 @@ func installCommand(rt *models.Runtime, token string) string {
 		}
 		chart := s.AgentChart
 		ver := ""
-		if strings.HasPrefix(chart, "oci://") {
+		// The chart sets the agent chart version it was released with; without one Helm installs
+		// the newest chart (an app version is no chart version).
+		if strings.HasPrefix(chart, "oci://") && s.AgentChartVersion != "" {
 			ver = " --version " + s.AgentChartVersion
 		}
 		var pulls strings.Builder

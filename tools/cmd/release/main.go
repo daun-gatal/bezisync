@@ -109,7 +109,7 @@ func dispatch(root string, o options, stdout, stderr io.Writer) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		fmt.Fprintf(stdout, "kind=%s\nversion=%s\ncharts=%s\npre_charts=%s\n", p.Kind, p.Version, list(p.Charts), list(p.PreCharts))
+		fmt.Fprintf(stdout, "kind=%s\nversion=%s\ncharts=%s\npre_charts=%s\nagent_chart=%s\n", p.Kind, p.Version, list(p.Charts), list(p.PreCharts), p.AgentChart)
 		return 0, nil
 	case o.notes != "":
 		text, err := release.Notes(root, o.notes)

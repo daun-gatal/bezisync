@@ -252,7 +252,7 @@ func TestPlanDecidesWhatAReleasePublishes(t *testing.T) {
 		return p
 	}
 	// Nothing published yet: both charts' versions are new, a chart-only release.
-	if p := plan(""); p.Kind != "charts" || p.Version != "1.4.3" || len(p.Charts) != 2 {
+	if p := plan(""); p.Kind != "charts" || p.Version != "1.4.3" || len(p.Charts) != 2 || p.AgentChart != "0.3.0" {
 		t.Fatalf("%+v", p)
 	}
 	publish(t, root, "bezisync")
@@ -260,18 +260,18 @@ func TestPlanDecidesWhatAReleasePublishes(t *testing.T) {
 	if p := plan(""); p.Kind != "none" || len(p.Charts) != 0 || p.PreCharts[0] != (ChartRelease{"bezisync", "0.3.1"}) {
 		t.Fatalf("%+v", p)
 	}
-	// A chart change bumped one chart: only that chart ships.
+	// A chart change bumped one chart: only that chart ships, and it pins the published agent chart.
 	if err := SetChartVersion(root, chart(t, root, "bezisync"), "0.4.0"); err != nil {
 		t.Fatal(err)
 	}
-	if p := plan(""); p.Kind != "charts" || len(p.Charts) != 1 || p.Charts[0] != (ChartRelease{"bezisync", "0.4.0"}) {
+	if p := plan(""); p.Kind != "charts" || len(p.Charts) != 1 || p.Charts[0] != (ChartRelease{"bezisync", "0.4.0"}) || p.AgentChart != "0.3.0" {
 		t.Fatalf("%+v", p)
 	}
 	// Fragments make it an app release, with every chart at the version it ships as.
 	fragment(t, root, "a-feature", "minor", "Added")
 	p := plan("")
 	want := []ChartRelease{{"bezisync", "0.4.0"}, {"bezisync-agent", "0.3.1"}}
-	if p.Kind != "app" || p.Version != "1.5.0" || len(p.Charts) != 2 || p.Charts[0] != want[0] || p.Charts[1] != want[1] {
+	if p.Kind != "app" || p.Version != "1.5.0" || len(p.Charts) != 2 || p.Charts[0] != want[0] || p.Charts[1] != want[1] || p.AgentChart != "0.3.1" {
 		t.Fatalf("%+v", p)
 	}
 	if p := plan("2.0.0"); p.Version != "2.0.0" {

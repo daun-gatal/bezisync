@@ -1,0 +1,19 @@
+suite: helm test
+templates: [templates/tests/test-connection.yaml]
+values: [../ci/default-values.yaml]
+release: { name: bz }
+tests:
+  - it: checks the API and the web Service with the bezisync image
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: test
+      - equal:
+          path: spec.containers[0].args
+          value: [healthcheck, --url, "http://bz-api:8000/readyz"]
+      - equal:
+          path: spec.containers[1].args
+          value: [healthcheck, --url, "http://bz:80/healthz"]
+      - equal:
+          path: spec.containers[0].image
+          value: ghcr.io/daun-gatal/bezisync:latest
