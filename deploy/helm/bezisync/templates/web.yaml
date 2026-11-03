@@ -27,6 +27,8 @@ spec:
               value: http://{{ include "bezisync.fullname" . }}-api:8000
           ports: [{ name: http, containerPort: 8080 }]
           readinessProbe: { httpGet: { path: /, port: http }, periodSeconds: 5 }
+          # Keep serving while the Service drops this pod: requests in flight during a rollout land.
+          lifecycle: { preStop: { sleep: { seconds: 5 } } }
           resources: {{- toYaml .Values.web.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false

@@ -7,7 +7,8 @@ RUN bun install --frozen-lockfile
 COPY . .
 RUN bunx --bun vite build
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+# The stable branch: nginx backports security fixes to it (a pinned 1.29 stopped receiving them).
+FROM nginxinc/nginx-unprivileged:stable-alpine
 ARG VERSION=dev
 ARG COMMIT_SHA=unknown
 ARG BUILD_DATE=unknown

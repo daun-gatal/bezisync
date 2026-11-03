@@ -50,3 +50,17 @@ tests:
       - equal:
           path: spec.ports[0].nodePort
           value: 30080
+  - it: lets the API drain before it stops (a rollout drops no request)
+    template: templates/api.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds
+          value: 5
+  - it: lets the web UI drain before it stops (a rollout drops no request)
+    template: templates/web.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds
+          value: 5
