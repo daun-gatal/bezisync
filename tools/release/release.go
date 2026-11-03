@@ -1,6 +1,8 @@
-// Package release assembles a BeziSync release from the changelog fragments in
-// changelogs/unreleased/ and checks that a change carries a fragment exactly when it reaches
-// a published artifact (an image's build context or a Helm chart). See cmd/release.
+// Package release plans and assembles BeziSync releases. The app version (images, CLI) comes
+// from the changelog fragments in changelogs/unreleased/: a change carries a fragment exactly
+// when it reaches an image's build context. Each Helm chart has its own version: a change to a
+// chart bumps it by hand, and a version counts as published once its chart-<name>-v<version>
+// tag exists. See cmd/release.
 package release
 
 import (
@@ -18,7 +20,7 @@ import (
 	"time"
 )
 
-// Every file that carries the release version, relative to the repository root.
+// Every file that carries the app version, relative to the repository root.
 const (
 	GoVersion   = "backend/internal/version/version.go"
 	PackageJSON = "frontend/package.json"
@@ -28,11 +30,14 @@ const (
 )
 
 var (
+	// Charts are the published Helm charts (each Chart.yaml carries its own version and the
+	// app version as appVersion).
 	Charts       = []string{"deploy/helm/bezisync/Chart.yaml", "deploy/helm/bezisync-agent/Chart.yaml"}
-	VersionFiles = append([]string{GoVersion, PackageJSON, OpenAPI}, Charts...)
+	AppFiles     = []string{GoVersion, PackageJSON, OpenAPI}
+	VersionFiles = append(append([]string{}, AppFiles...), Charts...)
 	// Each image is built from its directory (Dockerfile, .dockerignore and every file the
-	// .dockerignore keeps); charts are published whole. The demo smoke test also builds both
-	// images, and runs when the compose stack or its tool changes.
+	// .dockerignore keeps). The demo smoke test also builds both images, and runs when the
+	// compose stack or its tool changes.
 	ImageContexts = []string{"backend", "frontend"}
 	DemoPaths     = []string{"deploy/compose/", "scripts/demo-smoke.sh", "tools/cmd/demo-smoke/"}
 
@@ -41,6 +46,12 @@ var (
 	bumpOrder     = map[string]int{"patch": 0, "minor": 1, "major": 2}
 	semver        = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)$`)
 	goVersionLine = regexp.MustCompile(`(?m)^(var Version = ")[^"]+(")`)
+	// Chart.yaml fields: *Set patterns keep groups 1 and 2 around the value (see substitute).
+	chartName       = regexp.MustCompile(`(?m)^name:\s*(\S+)\s*$`)
+	chartVersionGet = regexp.MustCompile(`(?m)^version:\s*"?([^"\s]+)"?\s*$`)
+	chartVersionSet = regexp.MustCompile(`(?m)^(version:\s*)\S+()`)
+	chartAppGet     = regexp.MustCompile(`(?m)^appVersion:\s*"?([^"\s]+)"?\s*$`)
+	chartAppSet     = regexp.MustCompile(`(?m)^(appVersion:\s*")[^"]+(")`)
 )
 
 // Error is a release problem shown to the person running the tool.
@@ -62,7 +73,53 @@ func read(root, relative string) (string, error) {
 	return string(raw), err
 }
 
-// ReadVersion is the current version; the backend, frontend and charts must agree.
+// Chart is a Helm chart in the repository.
+type Chart struct {
+	Name       string // the chart's name (Chart.yaml name)
+	File       string // its Chart.yaml, relative to the root
+	Version    string // the chart's own version
+	AppVersion string // the app version it installs
+}
+
+// Dir is the chart's directory, relative to the root, with a trailing slash.
+func (c Chart) Dir() string { return filepath.ToSlash(filepath.Dir(c.File)) + "/" }
+
+// Tag is the git tag that marks a published version of the chart.
+func (c Chart) Tag(version string) string { return ChartTag(c.Name, version) }
+
+// ChartTag is the git tag of a published chart version: chart-<name>-v<version>.
+func ChartTag(name, version string) string { return "chart-" + name + "-v" + version }
+
+// ReadCharts reads every chart's name and versions.
+func ReadCharts(root string) ([]Chart, error) {
+	var out []Chart
+	for _, file := range Charts {
+		text, err := read(root, file)
+		if err != nil {
+			return nil, err
+		}
+		c := Chart{File: file}
+		for _, f := range []struct {
+			pattern *regexp.Regexp
+			field   *string
+			key     string
+		}{{chartName, &c.Name, "name"}, {chartVersionGet, &c.Version, "version"}, {chartAppGet, &c.AppVersion, "appVersion"}} {
+			m := f.pattern.FindStringSubmatch(text)
+			if m == nil {
+				return nil, fail("%s has no %s", file, f.key)
+			}
+			*f.field = m[1]
+		}
+		if !semver.MatchString(c.Version) {
+			return nil, fail("%s: version must look like 1.2.3, got: %s", file, c.Version)
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// ReadVersion is the current app version; the backend, frontend and every chart's appVersion
+// must agree.
 func ReadVersion(root string) (string, error) {
 	src, err := read(root, GoVersion)
 	if err != nil {
@@ -86,27 +143,20 @@ func ReadVersion(root string) (string, error) {
 	if front.Version != version {
 		return "", fail("version mismatch: %s=%s, %s=%s", GoVersion, version, PackageJSON, front.Version)
 	}
-	for _, chart := range Charts {
-		text, err := read(root, chart)
-		if err != nil {
-			return "", err
-		}
-		for _, key := range []string{"version", "appVersion"} {
-			found := regexp.MustCompile(`(?m)^` + key + `:\s*"?([^"\s]+)"?\s*$`).FindStringSubmatch(text)
-			value := "missing"
-			if found != nil {
-				value = found[1]
-			}
-			if value != version {
-				return "", fail("version mismatch: %s %s=%s, %s=%s", chart, key, value, GoVersion, version)
-			}
+	charts, err := ReadCharts(root)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range charts {
+		if c.AppVersion != version {
+			return "", fail("version mismatch: %s appVersion=%s, %s=%s", c.File, c.AppVersion, GoVersion, version)
 		}
 	}
 	return version, nil
 }
 
-// BumpVersion applies a fragment type. Below 1.0 a major bumps the minor and anything else
-// the patch, so 1.0.0 is only ever an explicit decision.
+// BumpVersion applies a fragment type, plain semver: major → X+1.0.0, minor → X.Y+1.0,
+// patch → X.Y.Z+1 (also below 1.0, where a breaking change takes a minor fragment).
 func BumpVersion(current, bumpType string) (string, error) {
 	m := semver.FindStringSubmatch(current)
 	if m == nil {
@@ -115,14 +165,10 @@ func BumpVersion(current, bumpType string) (string, error) {
 	major, _ := strconv.Atoi(m[1])
 	minor, _ := strconv.Atoi(m[2])
 	patch, _ := strconv.Atoi(m[3])
-	switch {
-	case major == 0 && bumpType == "major":
-		return fmt.Sprintf("0.%d.0", minor+1), nil
-	case major == 0:
-		return fmt.Sprintf("0.%d.%d", minor, patch+1), nil
-	case bumpType == "major":
+	switch bumpType {
+	case "major":
 		return fmt.Sprintf("%d.0.0", major+1), nil
-	case bumpType == "minor":
+	case "minor":
 		return fmt.Sprintf("%d.%d.0", major, minor+1), nil
 	}
 	return fmt.Sprintf("%d.%d.%d", major, minor, patch+1), nil
@@ -264,7 +310,13 @@ func substitute(root, relative string, pattern *regexp.Regexp, version string) e
 	return os.WriteFile(filepath.Join(root, relative), []byte(updated), 0o644) //nolint:gosec // a tracked text file
 }
 
-// SetVersion writes a version everywhere it lives.
+// SetChartVersion writes a chart's own version.
+func SetChartVersion(root string, c Chart, version string) error {
+	return substitute(root, c.File, chartVersionSet, version)
+}
+
+// SetVersion writes the app version everywhere it lives: the backend, the frontend, the
+// OpenAPI document and every chart's appVersion (not the charts' own versions).
 func SetVersion(root, version string) error {
 	if err := substitute(root, GoVersion, goVersionLine, version); err != nil {
 		return err
@@ -273,10 +325,7 @@ func SetVersion(root, version string) error {
 		return err
 	}
 	for _, chart := range Charts {
-		if err := substitute(root, chart, regexp.MustCompile(`(?m)^(version:\s*)\S+()`), version); err != nil {
-			return err
-		}
-		if err := substitute(root, chart, regexp.MustCompile(`(?m)^(appVersion:\s*")[^"]+(")`), version); err != nil {
+		if err := substitute(root, chart, chartAppSet, version); err != nil {
 			return err
 		}
 	}
@@ -321,8 +370,118 @@ func newer(a, b string) bool {
 	return false
 }
 
-// Assemble moves the fragments into a new CHANGELOG.md section, deletes them and sets the
-// version everywhere; it returns the version.
+func git(root string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...) //nolint:gosec,noctx // a fixed git argv, no shell
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fail("git %s failed: %s", strings.Join(args, " "), strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
+// PublishedVersions are the chart's versions that have a chart-<name>-v<version> tag.
+func PublishedVersions(root string, c Chart) ([]string, error) {
+	out, err := git(root, "tag", "--list", c.Tag("*"))
+	if err != nil {
+		return nil, err
+	}
+	var versions []string
+	for _, line := range strings.Split(out, "\n") {
+		if v := strings.TrimPrefix(strings.TrimSpace(line), c.Tag("")); v != strings.TrimSpace(line) && semver.MatchString(v) {
+			versions = append(versions, v)
+		}
+	}
+	sort.Slice(versions, func(i, j int) bool { return newer(versions[j], versions[i]) })
+	return versions, nil
+}
+
+// Published reports whether a version of the chart was released (its tag exists).
+func Published(root string, c Chart, version string) (bool, error) {
+	versions, err := PublishedVersions(root, c)
+	if err != nil {
+		return false, err
+	}
+	for _, v := range versions {
+		if v == version {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// NextChartVersion is the version the chart ships as in its next release: its current version
+// while that is unpublished (a chart change bumped it), else a patch bump (only appVersion
+// changed).
+func NextChartVersion(root string, c Chart) (string, error) {
+	published, err := Published(root, c, c.Version)
+	if err != nil || !published {
+		return c.Version, err
+	}
+	return BumpVersion(c.Version, "patch")
+}
+
+// ChartRelease is a chart at the version a release publishes.
+type ChartRelease struct{ Name, Version string }
+
+// Plan is what a release from the current tree publishes.
+type Plan struct {
+	// Kind is "app" (changelog fragments: images, CLI and every chart), "charts" (no fragments,
+	// but a chart's version is unpublished: only those charts) or "none".
+	Kind string
+	// Version is the app version: the release's for "app", the next patch otherwise (what a
+	// pre-release build of the images carries).
+	Version string
+	// Charts are the charts this release publishes, at their versions.
+	Charts []ChartRelease
+	// PreCharts are every chart at the version it would ship as (pre-release builds).
+	PreCharts []ChartRelease
+}
+
+// MakePlan decides what a release publishes. An override sets the app version.
+func MakePlan(root, override string) (Plan, error) {
+	fragments, err := ParseFragments(root)
+	if err != nil {
+		return Plan{}, err
+	}
+	current, err := ReadVersion(root)
+	if err != nil {
+		return Plan{}, err
+	}
+	charts, err := ReadCharts(root)
+	if err != nil {
+		return Plan{}, err
+	}
+	p := Plan{Kind: "none"}
+	var unpublished []ChartRelease
+	for _, c := range charts {
+		next, err := NextChartVersion(root, c)
+		if err != nil {
+			return Plan{}, err
+		}
+		p.PreCharts = append(p.PreCharts, ChartRelease{c.Name, next})
+		if next == c.Version {
+			unpublished = append(unpublished, ChartRelease{c.Name, next})
+		}
+	}
+	switch {
+	case len(fragments) > 0:
+		p.Kind, p.Charts = "app", p.PreCharts
+	case len(unpublished) > 0:
+		p.Kind, p.Charts = "charts", unpublished
+	}
+	if p.Kind == "app" || override != "" {
+		p.Version, err = TargetVersion(current, fragments, override)
+	} else {
+		p.Version, err = BumpVersion(current, "patch")
+	}
+	return p, err
+}
+
+// Assemble moves the fragments into a new CHANGELOG.md section, deletes them, sets the app
+// version everywhere (every chart's appVersion included) and bumps the patch of every chart
+// whose version is already published; it returns the app version.
 func Assemble(root, override string, today time.Time) (string, error) {
 	fragments, err := ParseFragments(root)
 	if err != nil {
@@ -341,6 +500,21 @@ func Assemble(root, override string, today time.Time) (string, error) {
 	}
 	if !newer(version, current) {
 		return "", fail("v%s is not newer than the current v%s", version, current)
+	}
+	charts, err := ReadCharts(root)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range charts {
+		next, err := NextChartVersion(root, c)
+		if err != nil {
+			return "", err
+		}
+		if next != c.Version {
+			if err := SetChartVersion(root, c, next); err != nil {
+				return "", err
+			}
+		}
 	}
 	if err := updateChangelog(root, version, fragments, today); err != nil {
 		return "", err
@@ -437,8 +611,8 @@ func ignored(relative string, patterns []string) bool {
 	return false
 }
 
-// ReachesArtifact reports whether a change to path changes a published image or chart.
-func ReachesArtifact(root, path string) (bool, error) {
+// ReachesImage reports whether a change to path changes a published image.
+func ReachesImage(root, path string) (bool, error) {
 	for _, context := range ImageContexts {
 		if !strings.HasPrefix(path, context+"/") {
 			continue
@@ -453,44 +627,59 @@ func ReachesArtifact(root, path string) (bool, error) {
 		}
 		return !ignored(relative, patterns), nil
 	}
-	return strings.HasPrefix(path, ChartDir), nil
+	return false, nil
 }
 
 // Changes is what a set of changed paths means for a release.
 type Changes struct {
-	Artifacts []string // changed paths that reach an image or chart
+	Images    []string // changed paths that reach an image
 	Fragments []string // fragments added or edited
+	Charts    []string // charts with changes (their names)
 	Demo      bool     // the demo smoke test has something new to prove
+	problems  []string // charts changed without a new version
 }
 
 // Problems are the reasons CI fails the change.
 func (c Changes) Problems() []string {
-	if len(c.Artifacts) > 0 && len(c.Fragments) == 0 {
-		shown := c.Artifacts
+	problems := append([]string{}, c.problems...)
+	if len(c.Images) > 0 && len(c.Fragments) == 0 {
+		shown := c.Images
 		more := ""
 		if len(shown) > 5 {
 			shown, more = shown[:5], ", ..."
 		}
-		return []string{fmt.Sprintf("these changes reach a published image or chart, so they need a changelog fragment in %s (merging releases them): %s%s",
-			FragmentDir, strings.Join(shown, ", "), more)}
+		problems = append(problems, fmt.Sprintf("these changes reach a published image, so they need a changelog fragment in %s (the next release ships them): %s%s",
+			FragmentDir, strings.Join(shown, ", "), more))
 	}
-	if len(c.Fragments) > 0 && len(c.Artifacts) == 0 {
-		return []string{fmt.Sprintf("%s: nothing here reaches an image or chart, so there is nothing to release - remove the fragment (docs, tests and CI ship without one)",
-			strings.Join(c.Fragments, ", "))}
+	if len(c.Fragments) > 0 && len(c.Images) == 0 {
+		problems = append(problems, fmt.Sprintf("%s: nothing here reaches an image, so there is nothing to release - remove the fragment (charts take a version bump instead; docs, tests and CI ship without one)",
+			strings.Join(c.Fragments, ", ")))
 	}
-	return nil
+	return problems
 }
 
-// Classify sorts changed paths.
+// Classify sorts changed paths. A changed chart must carry a version that is not published
+// yet and is newer than every published one.
 func Classify(root string, paths []string) (Changes, error) {
 	var c Changes
+	charts, err := ReadCharts(root)
+	if err != nil {
+		return c, err
+	}
+	changed := map[string]bool{}
 	for _, p := range paths {
-		reaches, err := ReachesArtifact(root, p)
+		reaches, err := ReachesImage(root, p)
 		if err != nil {
 			return c, err
 		}
 		if reaches {
-			c.Artifacts = append(c.Artifacts, p)
+			c.Images = append(c.Images, p)
+		}
+		for _, chart := range charts {
+			if strings.HasPrefix(p, chart.Dir()) && !changed[chart.Name] {
+				changed[chart.Name] = true
+				c.Charts = append(c.Charts, chart.Name)
+			}
 		}
 		rest := strings.TrimPrefix(p, FragmentDir)
 		if strings.HasPrefix(p, FragmentDir) && !strings.Contains(rest, "/") && strings.HasSuffix(p, ".md") && !skipFiles[filepath.Base(p)] {
@@ -504,26 +693,75 @@ func Classify(root string, paths []string) (Changes, error) {
 			}
 		}
 	}
-	c.Demo = c.Demo || len(c.Artifacts) > 0
+	for _, chart := range charts {
+		if !changed[chart.Name] {
+			continue
+		}
+		published, err := PublishedVersions(root, chart)
+		if err != nil {
+			return c, err
+		}
+		if len(published) > 0 && !newer(chart.Version, published[0]) {
+			c.problems = append(c.problems, fmt.Sprintf("%s changed, but its version %s is already published or older than the published %s: bump version in %s (a breaking values change bumps the minor below 1.0, the major from 1.0)",
+				chart.Name, chart.Version, published[0], chart.File))
+		}
+	}
+	c.Demo = c.Demo || len(c.Images) > 0
 	return c, nil
 }
 
 // ChangedPaths lists BASE...HEAD.
 func ChangedPaths(root, base string) ([]string, error) {
-	cmd := exec.Command("git", "diff", "--name-only", "--no-renames", base+"...HEAD") //nolint:gosec,noctx // a fixed argv, no shell
-	cmd.Dir = root
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fail("git diff %s...HEAD failed: %s", base, strings.TrimSpace(stderr.String()))
+	out, err := git(root, "diff", "--name-only", "--no-renames", base+"...HEAD")
+	if err != nil {
+		return nil, err
 	}
-	var out []string
-	for _, line := range strings.Split(stdout.String(), "\n") {
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
 		if line != "" {
-			out = append(out, line)
+			paths = append(paths, line)
 		}
 	}
-	return out, nil
+	return paths, nil
+}
+
+// ChartNotes are the release notes of a chart-only release: the subjects of the pull requests
+// that changed the chart since its last published version (merge commits name the pull request
+// in their body; squash merges carry it in the subject).
+func ChartNotes(root string, c Chart) (string, error) {
+	published, err := PublishedVersions(root, c)
+	if err != nil {
+		return "", err
+	}
+	args := []string{"log", "--first-parent", "--format=%s%x1f%b%x1e"}
+	if len(published) > 0 {
+		args = append(args, c.Tag(published[0])+"..HEAD")
+	} else {
+		args = append(args, "HEAD")
+	}
+	out, err := git(root, append(args, "--", strings.TrimSuffix(c.Dir(), "/"))...)
+	if err != nil {
+		return "", err
+	}
+	merge := regexp.MustCompile(`^Merge pull request (#\d+) from `)
+	var lines []string
+	for _, entry := range strings.Split(out, "\x1e") {
+		subject, body, _ := strings.Cut(strings.TrimSpace(entry), "\x1f")
+		if subject == "" || strings.HasPrefix(subject, "chore: release ") {
+			continue
+		}
+		if m := merge.FindStringSubmatch(subject); m != nil {
+			title, _, _ := strings.Cut(strings.TrimSpace(body), "\n")
+			if title = strings.TrimSpace(title); title != "" {
+				subject = title + " (" + m[1] + ")"
+			}
+		}
+		lines = append(lines, "- "+subject)
+	}
+	if len(lines) == 0 {
+		lines = []string{"- Chart maintenance"}
+	}
+	return fmt.Sprintf("Helm chart **%s %s** (installs BeziSync %s).\n\n### Changes\n%s\n", c.Name, c.Version, c.AppVersion, strings.Join(lines, "\n")), nil
 }
 
 // writeIndented is Python's json.dumps(value, indent=2, sort_keys=True) (ensure_ascii,
