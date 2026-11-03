@@ -1,0 +1,157 @@
+# Build branch: pre-release images (and charts) from any branch but main, to test before a
+# release. Publishes X.Y.Z-pre — the version the branch's changes would release (release.sh --plan)
+# — replacing the previous -pre; commits, tags and releases nothing. To release, build preview
+# with this workflow, test it, then run the Release workflow: it only ships a -pre built from
+# preview's latest commit. Every release deletes the -pre tags.
+name: Build branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to build (any branch except main)
+        required: true
+        default: preview
+        type: string
+      charts:
+        description: Also publish the Helm charts as <chart version>-pre
+        required: true
+        default: true
+        type: boolean
+      version:
+        description: App version override (e.g. 1.0.0); empty = from the changelog fragments. Give the Release workflow the same.
+        required: false
+        type: string
+
+concurrency:
+  group: prerelease
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  plan:
+    name: Plan the pre-release
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      version: ${{ steps.plan.outputs.version }}
+      charts: ${{ steps.plan.outputs.charts }}
+    steps:
+      - name: Refuse main
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          if [ "$BRANCH" = main ]; then
+            echo "::error::main only holds releases: build preview (or a feature branch) instead"
+            exit 1
+          fi
+      - uses: actions/checkout@v6
+        with: { ref: "${{ inputs.branch }}", fetch-depth: 0 }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: tools/go.mod, cache: false }
+      - name: Versions
+        id: plan
+        env:
+          OVERRIDE: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          plan=$(scripts/release.sh --plan ${OVERRIDE:+"$OVERRIDE"})
+          echo "$plan"
+          version=$(echo "$plan" | sed -n 's/^version=//p')
+          agent=$(echo "$plan" | sed -n 's/^pre_charts=//p' | tr ' ' '\n' | sed -n 's/^bezisync-agent=//p')
+          charts=$(echo "$plan" | sed -n 's/^pre_charts=//p' | tr ' ' '\n' | jq -Rnc --arg app "$version-pre" --arg agent "$agent-pre" \
+            '[inputs | select(length > 0) | split("=") | {name: .[0], version: (.[1] + "-pre"), app: $app, agent: (if .[0] == "bezisync" then $agent else "" end)}]')
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "version=$version"
+            echo "charts=$charts"
+          } >> "$GITHUB_OUTPUT"
+
+  images:
+    name: Images ${{ needs.plan.outputs.version }}-pre
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: "${{ needs.plan.outputs.sha }}" }
+      - uses: ./.github/actions/build-images
+        with:
+          version: ${{ needs.plan.outputs.version }}-pre
+          tags: ${{ needs.plan.outputs.version }}-pre
+          revision: ${{ needs.plan.outputs.sha }}
+          token: ${{ github.token }}
+      # The replaced -pre leaves its old index and platform images untagged: remove them.
+      - name: Remove the previous pre-release images
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f
+        with:
+          token: ${{ github.token }}
+          packages: bezisync,bezisync-web
+          delete-untagged: true
+
+  charts:
+    name: Chart ${{ matrix.chart.name }} ${{ matrix.chart.version }}
+    needs: [plan, images]
+    if: inputs.charts
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    strategy:
+      matrix:
+        chart: ${{ fromJSON(needs.plan.outputs.charts) }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: "${{ needs.plan.outputs.sha }}" }
+      - uses: azure/setup-helm@v4
+        with: { version: v4.3.0 }
+      - uses: ./.github/actions/helm-publish
+        with:
+          chart: ${{ matrix.chart.name }}
+          version: ${{ matrix.chart.version }}
+          app-version: ${{ matrix.chart.app }}
+          agent-chart-version: ${{ matrix.chart.agent }}
+          revision: ${{ needs.plan.outputs.sha }}
+          allow-overwrite: "true"
+          token: ${{ github.token }}
+      - name: Remove the previous pre-release chart
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f
+        with:
+          token: ${{ github.token }}
+          packages: charts/${{ matrix.chart.name }}
+          delete-untagged: true
+
+  summary:
+    name: How to test it
+    needs: [plan, images, charts]
+    if: ${{ !cancelled() && needs.images.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Summary
+        env:
+          BRANCH: ${{ inputs.branch }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          CHARTS: ${{ needs.plan.outputs.charts }}
+          WITH_CHARTS: ${{ inputs.charts }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          owner=${OWNER,,}
+          {
+            echo "## Pre-release $VERSION-pre from \`$BRANCH\` (${SHA::7})"
+            echo
+            echo '```bash'
+            echo "docker pull ghcr.io/$owner/bezisync:$VERSION-pre"
+            echo "docker pull ghcr.io/$owner/bezisync-web:$VERSION-pre"
+            if [ "$WITH_CHARTS" = true ]; then
+              echo "$CHARTS" | jq -r --arg o "$owner" '.[] | "helm install \(.name) oci://ghcr.io/\($o)/charts/\(.name) --version \(.version)"'
+            fi
+            echo '```'
+            echo
+            if [ "$BRANCH" = preview ]; then
+              echo "To release it, run the **Release** workflow: it ships only a -pre built from preview's latest commit."
+            else
+              echo "A test build: to release, merge to preview and build preview."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

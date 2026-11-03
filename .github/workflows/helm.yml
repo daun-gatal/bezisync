@@ -1,0 +1,152 @@
+# Helm charts: lint, unit tests, schema validation and real installs on kind, for pull requests that
+# touch a chart (or the images it installs). The version rule (a changed chart needs a new,
+# unpublished version) is checked by ci.yml with the release tool.
+name: Helm charts
+
+on:
+  pull_request:
+    branches: [preview]
+    paths:
+      - deploy/helm/**
+      - backend/**
+      - frontend/**
+      - .github/workflows/helm.yml
+      - .github/actions/helm-publish/**
+
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  HELM_VERSION: v4.3.0
+  UNITTEST_VERSION: 1.2.1
+  KUBECONFORM_VERSION: v0.8.0
+  HELM_DOCS_VERSION: 1.14.2
+
+jobs:
+  lint-test:
+    name: Lint, unit tests, schema and docs
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+        with: { version: "${{ env.HELM_VERSION }}" }
+      - name: Tools
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "$UNITTEST_VERSION" --verify=false
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+          curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin helm-docs
+      - name: helm lint --strict (every ci/*-values.yaml)
+        run: |
+          for chart in bezisync bezisync-agent; do
+            for values in "deploy/helm/$chart"/ci/*-values.yaml; do
+              echo "::group::$chart with $values"
+              helm lint "deploy/helm/$chart" --strict -f "$values"
+              echo "::endgroup::"
+            done
+          done
+      - name: Unit tests
+        run: helm unittest -f 'unittests/*_test.yaml' deploy/helm/bezisync deploy/helm/bezisync-agent
+      - name: Kubeconform (rendered manifests, three Kubernetes versions)
+        run: |
+          for k8s in 1.31.0 1.33.0 1.35.0; do
+            for chart in bezisync bezisync-agent; do
+              for values in "deploy/helm/$chart"/ci/*-values.yaml; do
+                helm template ci "deploy/helm/$chart" -f "$values" | kubeconform -strict -summary -kubernetes-version "$k8s"
+              done
+            done
+          done
+      - name: Chart READMEs are current (make chart-docs)
+        run: |
+          helm-docs --chart-search-root deploy/helm
+          git diff --exit-code -- deploy/helm/*/README.md \
+            || { echo "::error::a chart README is stale: run make chart-docs (it is generated from README.md.gotmpl and values.yaml)"; exit 1; }
+
+  kind:
+    name: Install on kind (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [default, external-postgres]
+    env:
+      VALUES: deploy/helm/bezisync/ci/${{ matrix.scenario }}-values.yaml
+      IMAGES: --set image.repository=bezisync-ci/backend --set image.tag=ci --set image.pullPolicy=Never --set webImage.repository=bezisync-ci/frontend --set webImage.tag=ci --set webImage.pullPolicy=Never
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+        with: { version: "${{ env.HELM_VERSION }}" }
+      - name: Build the images of this change
+        run: |
+          docker build -q -t bezisync-ci/backend:ci --build-arg COMMIT_SHA=${{ github.sha }} backend
+          docker build -q -t bezisync-ci/frontend:ci --build-arg COMMIT_SHA=${{ github.sha }} frontend
+      - uses: helm/kind-action@v1
+        with: { cluster_name: chart-ci }
+      - name: Load the images
+        run: kind load docker-image bezisync-ci/backend:ci bezisync-ci/frontend:ci --name chart-ci
+      - name: External PostgreSQL
+        if: matrix.scenario == 'external-postgres'
+        run: |
+          kubectl create deployment postgres-ci --image=postgres:17 --port=5432 -- \
+            docker-entrypoint.sh postgres -c wal_level=logical
+          kubectl set env deployment/postgres-ci POSTGRES_USER=bezisync POSTGRES_PASSWORD=ci-postgres-password POSTGRES_DB=bezisync
+          kubectl expose deployment postgres-ci --port=5432
+          kubectl rollout status deployment/postgres-ci --timeout=180s
+      - name: Install
+        run: |
+          # shellcheck disable=SC2086 # IMAGES is a list of flags
+          helm install bezisync deploy/helm/bezisync -f "$VALUES" $IMAGES --wait --timeout 8m
+      - name: helm test
+        run: helm test bezisync --logs
+      # An agent runtime, end to end: sign in as the bootstrap admin, add a Kubernetes runtime in
+      # agent mode, install the agent chart with its token and wait for the agent to report in.
+      - name: Agent (bezisync-agent chart)
+        if: matrix.scenario == 'default'
+        run: |
+          set -euo pipefail
+          kubectl port-forward svc/bezisync 18080:80 >/dev/null 2>&1 &
+          api=http://127.0.0.1:18080/api/v1
+          for _ in $(seq 30); do curl -fsS -o /dev/null "http://127.0.0.1:18080/healthz" && break; sleep 2; done
+          jar=$RUNNER_TEMP/jar
+          curl -fsS -c "$jar" -b "$jar" -H 'Content-Type: application/json' \
+            -d '{"email":"admin@bezisync.local","password":"ci-admin-password"}' "$api/auth/login" >/dev/null
+          csrf=$(awk '$6 == "bz_csrf" {print $7}' "$jar")
+          call() { curl -fsS -c "$jar" -b "$jar" -H 'Content-Type: application/json' -H "x-csrf-token: $csrf" "$@"; }
+          project=$(call "$api/auth/me" | jq -re '.projects[0].id')
+          runtime=$(call -X POST "$api/projects/$project/runtimes" \
+            -d '{"name":"kind-agent","kind":"kubernetes","mode":"agent","config":{"namespace":"agents"}}')
+          id=$(echo "$runtime" | jq -re .id)
+          token=$(echo "$runtime" | jq -re .agent_token)
+          helm install bezisync-agent deploy/helm/bezisync-agent -n agents --create-namespace \
+            -f deploy/helm/bezisync-agent/ci/default-values.yaml \
+            --set controlPlane.url=http://bezisync-api.default.svc:8000 --set token="$token" \
+            --set image.repository=bezisync-ci/backend --set image.tag=ci --set image.pullPolicy=Never \
+            --wait --timeout 4m
+          helm test bezisync-agent -n agents --logs
+          for _ in $(seq 60); do
+            version=$(call "$api/projects/$project/runtimes/$id" | jq -r '.agent_version // empty')
+            [ -n "$version" ] && { echo "The agent reported in (version $version)"; exit 0; }
+            sleep 2
+          done
+          echo "::error::the agent never reported to the control plane"
+          kubectl -n agents logs deploy/bezisync-agent --tail=100 || true
+          exit 1
+      - name: Upgrade in place (a values change rolls the pods), then helm test again
+        run: |
+          # shellcheck disable=SC2086 # IMAGES is a list of flags
+          helm upgrade bezisync deploy/helm/bezisync -f "$VALUES" $IMAGES \
+            --set-json 'extraEnv=[{"name":"BEZISYNC_LOG_LEVEL","value":"DEBUG"}]' --wait --timeout 8m
+          helm test bezisync --logs
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl describe pods -l app.kubernetes.io/instance=bezisync || true
+          kubectl logs -l app.kubernetes.io/instance=bezisync --all-containers --tail=200 || true

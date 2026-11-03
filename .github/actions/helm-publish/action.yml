@@ -1,0 +1,124 @@
+name: Publish a BeziSync Helm chart
+description: >-
+  Packages one chart from deploy/helm/ at the given version and appVersion, pushes it to
+  oci://ghcr.io/<owner>/charts, attests its provenance and smoke-checks it (pull and render).
+  Released versions are immutable: when the version already exists the push is skipped (a re-run
+  of a partly failed release completes instead of overwriting). Pre-releases (allow-overwrite)
+  replace their tag. The packaged Chart.yaml carries the source commit as the bezisync.io/revision
+  annotation, which the release checks before it ships a pre-release. Shared by build-branch.yml
+  and release.yml. The calling job needs packages: write, id-token: write and attestations: write.
+
+inputs:
+  chart:
+    description: Chart directory name under deploy/helm/ (bezisync or bezisync-agent).
+    required: true
+  version:
+    description: Chart version to publish (e.g. 0.1.0 or 0.1.0-pre).
+    required: true
+  app-version:
+    description: The app version the chart installs by default (e.g. 0.2.0 or 0.2.0-pre).
+    required: true
+  agent-chart-version:
+    description: For the bezisync chart, the bezisync-agent version its agent install commands pin ("" = the newest).
+    default: ""
+  revision:
+    description: The commit the chart is packaged from.
+    required: true
+  allow-overwrite:
+    description: Replace an existing version (pre-releases only).
+    default: "false"
+  token:
+    description: Token with packages:write for GHCR.
+    required: true
+
+outputs:
+  digest:
+    description: OCI digest of the chart pushed now ("" when the version already existed).
+    value: ${{ steps.digest.outputs.digest }}
+  skipped:
+    description: '"true" when the version already existed and nothing was pushed.'
+    value: ${{ steps.guard.outputs.skipped }}
+
+runs:
+  using: composite
+  steps:
+    - name: Registry login
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+      run: |
+        echo "repo=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts" >> "$GITHUB_ENV"
+        echo "$TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+    - name: Immutability guard
+      id: guard
+      shell: bash
+      env:
+        CHART: ${{ inputs.chart }}
+        VERSION: ${{ inputs.version }}
+        OVERWRITE: ${{ inputs.allow-overwrite }}
+      run: |
+        if [ "$OVERWRITE" != true ] && helm show chart "oci://$repo/$CHART" --version "$VERSION" >/dev/null 2>&1; then
+          echo "::warning::$CHART $VERSION is already published (versions are immutable): skipping the push"
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Package and push
+      id: push
+      if: steps.guard.outputs.skipped != 'true'
+      shell: bash
+      env:
+        CHART: ${{ inputs.chart }}
+        VERSION: ${{ inputs.version }}
+        APP_VERSION: ${{ inputs.app-version }}
+        AGENT: ${{ inputs.agent-chart-version }}
+        REVISION: ${{ inputs.revision }}
+      run: |
+        set -euo pipefail
+        work=$RUNNER_TEMP/helm-publish/$CHART
+        rm -rf "$work" && mkdir -p "$work" && cp -R "deploy/helm/$CHART/." "$work/"
+        file=$work/Chart.yaml
+        # The commit, and for the control plane the agent chart version its install commands pin.
+        if grep -q '^annotations:' "$file"; then
+          sed -i "/^annotations:/a\\  bezisync.io/revision: \"$REVISION\"" "$file"
+        else
+          printf 'annotations:\n  bezisync.io/revision: "%s"\n' "$REVISION" >> "$file"
+        fi
+        if [ -n "$AGENT" ]; then
+          sed -i "s|^  bezisync.io/agent-chart-version: .*|  bezisync.io/agent-chart-version: \"$AGENT\"|" "$file"
+        fi
+        helm package "$work" --version "$VERSION" --app-version "$APP_VERSION" --destination "$RUNNER_TEMP/helm-publish/out"
+        out=$(helm push "$RUNNER_TEMP/helm-publish/out/$CHART-$VERSION.tgz" "oci://$repo" 2>&1)
+        echo "$out"
+        digest=$(echo "$out" | awk '/^Digest:/ {print $2}')
+        [ -n "$digest" ] || { echo "::error::no digest in the helm push output"; exit 1; }
+        echo "digest=$digest" >> "$GITHUB_OUTPUT"
+    - name: Digest
+      id: digest
+      shell: bash
+      env:
+        PUSHED: ${{ steps.push.outputs.digest }}
+      run: echo "digest=$PUSHED" >> "$GITHUB_OUTPUT"
+    - name: Attest the chart
+      if: ${{ steps.guard.outputs.skipped != 'true' && !github.event.repository.private }}
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-name: ${{ env.repo }}/${{ inputs.chart }}
+        subject-digest: ${{ steps.digest.outputs.digest }}
+        push-to-registry: false
+    - name: Smoke check (pull and render the published chart)
+      shell: bash
+      env:
+        CHART: ${{ inputs.chart }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        dir=$RUNNER_TEMP/helm-smoke/$CHART && rm -rf "$dir" && mkdir -p "$dir"
+        helm pull "oci://$repo/$CHART" --version "$VERSION" --destination "$dir"
+        helm template smoke "$dir/$CHART-$VERSION.tgz" -f "deploy/helm/$CHART/ci/default-values.yaml" > /dev/null
+        {
+          echo "### Chart \`$CHART\` $VERSION"
+          echo '```bash'
+          echo "helm install $CHART oci://$repo/$CHART --version $VERSION"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"

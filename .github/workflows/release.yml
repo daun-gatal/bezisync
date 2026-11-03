@@ -1,0 +1,336 @@
+# Release: ships what preview holds, after a maintainer's approval. Run it from preview.
+#
+#   plan      release.sh --plan: an app release (changelog fragments: images, CLI and every chart),
+#             a chart-only release (a chart version not published yet) or nothing. Stops unless the
+#             -pre of everything it would ship was built from preview's latest commit (Build branch).
+#   ⏸ approval (environment release-approval): the summary shows the version, the notes and what
+#             was verified. Rejecting changes nothing.
+#   promote   app: release.sh writes CHANGELOG.md, the versions and the chart READMEs; commits
+#             "chore: release vX.Y.Z" to preview. Then main is fast-forwarded to preview.
+#   publish   images X.Y.Z + latest; charts at their versions; git tags vX.Y.Z and
+#             chart-<name>-vX.Y.Z; the GitHub Release (with the CLI); a Discussions post.
+#   cleanup   every -pre image and chart is deleted.
+#
+# Preview must not move between the plan and the promotion (that would ship untested commits):
+# the promotion refuses, and a new -pre and run are needed.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App version override (e.g. 1.0.0); empty = from the changelog fragments. Must match the Build branch run.
+        required: false
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  plan:
+    name: Plan and verify
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: read }
+    outputs:
+      kind: ${{ steps.plan.outputs.kind }}
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.plan.outputs.sha }}
+      charts: ${{ steps.plan.outputs.charts }}
+      charts_line: ${{ steps.plan.outputs.charts_line }}
+    steps:
+      - name: Run from preview
+        if: github.ref != 'refs/heads/preview'
+        run: |
+          echo "::error::run the Release workflow from preview (it releases what preview holds)"
+          exit 1
+      - uses: actions/checkout@v6
+        with: { ref: preview, fetch-depth: 0 }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: tools/go.mod, cache: false }
+      - uses: azure/setup-helm@v4
+        with: { version: v4.3.0 }
+      - name: Plan
+        id: plan
+        env:
+          OVERRIDE: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          plan=$(scripts/release.sh --plan ${OVERRIDE:+"$OVERRIDE"})
+          echo "$plan"
+          get() { echo "$plan" | sed -n "s/^$1=//p"; }
+          kind=$(get kind) version=$(get version) agent=$(get agent_chart)
+          [ "$kind" = app ] || version=$(scripts/release.sh --current)
+          charts=$(get charts | tr ' ' '\n' | jq -Rnc --arg app "$version" --arg agent "$agent" \
+            '[inputs | select(length > 0) | split("=") | {name: .[0], version: .[1], app: $app, agent: (if .[0] == "bezisync" then $agent else "" end)}]')
+          {
+            echo "kind=$kind"
+            echo "version=$version"
+            echo "sha=$(git rev-parse HEAD)"
+            echo "charts=$charts"
+            echo "charts_line=$(echo "$charts" | jq -r 'map("`\(.name)` \(.version)") | join(", ")')"
+          } >> "$GITHUB_OUTPUT"
+      - name: Nothing to release
+        if: steps.plan.outputs.kind == 'none'
+        run: |
+          echo "## Nothing to release: no changelog fragments and every chart version is published" >> "$GITHUB_STEP_SUMMARY"
+      - uses: docker/login-action@v3
+        if: steps.plan.outputs.kind != 'none'
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ github.token }}" }
+      - name: The tested -pre was built from preview's latest commit
+        if: steps.plan.outputs.kind != 'none'
+        env:
+          KIND: ${{ steps.plan.outputs.kind }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          SHA: ${{ steps.plan.outputs.sha }}
+          CHARTS: ${{ steps.plan.outputs.charts }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -uo pipefail
+          owner=${OWNER,,} status=0
+          fail() { echo "::error::$1 — run Build branch on preview, test it, then run Release again"; status=1; }
+          if [ "$KIND" = app ]; then
+            for image in bezisync bezisync-web; do
+              ref=ghcr.io/$owner/$image:$VERSION-pre
+              rev=$(docker buildx imagetools inspect --raw "$ref" 2>/dev/null | jq -r '.annotations["org.opencontainers.image.revision"] // empty')
+              if [ "$rev" = "$SHA" ]; then echo "✓ $ref (${SHA::7})"; else fail "$ref is missing or was built from ${rev:-an unknown commit}, not preview's ${SHA::7}"; fi
+            done
+          fi
+          for row in $(echo "$CHARTS" | jq -r '.[] | "\(.name)=\(.version)"'); do
+            chart=${row%=*} version=${row#*=}-pre
+            rev=$(helm show chart "oci://ghcr.io/$owner/charts/$chart" --version "$version" 2>/dev/null | sed -n 's/^ *bezisync.io\/revision: *"\{0,1\}\([0-9a-f]*\)"\{0,1\}$/\1/p')
+            if [ "$rev" = "$SHA" ]; then echo "✓ chart $chart $version (${SHA::7})"; else fail "chart $chart $version is missing or was built from ${rev:-an unknown commit}, not preview's ${SHA::7}"; fi
+          done
+          exit $status
+      - name: What this release ships (shown on the approval)
+        if: steps.plan.outputs.kind != 'none'
+        env:
+          KIND: ${{ steps.plan.outputs.kind }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          SHA: ${{ steps.plan.outputs.sha }}
+          CHARTS_LINE: ${{ steps.plan.outputs.charts_line }}
+          CHARTS: ${{ steps.plan.outputs.charts }}
+          OVERRIDE: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            if [ "$KIND" = app ]; then
+              echo "## Release v$VERSION from preview ${SHA::7}"
+              echo
+              echo "Images \`$VERSION\` + \`latest\`, the CLI, and charts: $CHARTS_LINE. The tested \`$VERSION-pre\` was built from this commit."
+              echo
+              scripts/release.sh ${OVERRIDE:+"$OVERRIDE"} >/dev/null
+              scripts/release.sh --notes "$VERSION"
+              git checkout -q -- . && git clean -fdq changelogs
+            else
+              echo "## Chart-only release from preview ${SHA::7}"
+              echo
+              echo "Charts: $CHARTS_LINE (the tested -pre was built from this commit)."
+              for chart in $(echo "$CHARTS" | jq -r '.[].name'); do
+                echo
+                scripts/release.sh --chart-notes "$chart"
+              done
+            fi
+            echo
+            echo "**Approve** \`release-approval\` to release it; **reject** to stop (nothing has changed)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    name: Promote (approval)
+    needs: plan
+    if: needs.plan.outputs.kind != 'none'
+    runs-on: ubuntu-latest
+    environment: release-approval
+    permissions: { contents: read }
+    outputs:
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      # RELEASE_SECRET: a fine-grained token (contents: read and write on this repository) that may
+      # push to preview and main past their rulesets.
+      - uses: actions/checkout@v6
+        with: { ref: preview, fetch-depth: 0, token: "${{ secrets.RELEASE_SECRET }}" }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: tools/go.mod, cache: false }
+      - name: Preview has not moved since the plan
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          if [ "$(git rev-parse HEAD)" != "$SHA" ]; then
+            echo "::error::preview moved since the plan (${SHA::7} → $(git rev-parse --short HEAD)): build preview again and rerun Release"
+            exit 1
+          fi
+      - name: Assemble the release (app releases)
+        if: needs.plan.outputs.kind == 'app'
+        env:
+          OVERRIDE: ${{ inputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          scripts/release.sh ${OVERRIDE:+"$OVERRIDE"}
+          [ "$(scripts/release.sh --current)" = "$VERSION" ] || { echo "::error::assembled $(scripts/release.sh --current), planned $VERSION"; exit 1; }
+          make chart-docs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A CHANGELOG.md changelogs/unreleased backend frontend deploy/helm
+          git commit -q -m "chore: release v$VERSION"
+      - name: Push preview and fast-forward main
+        id: push
+        run: |
+          set -euo pipefail
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            echo "::error::main is not an ancestor of preview: it must only ever move by releases"
+            exit 1
+          fi
+          # Both or neither: a plain (non-force) push, so a moved preview or main refuses.
+          git push --atomic origin HEAD:preview HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "main and preview are at $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+  images:
+    name: Images ${{ needs.plan.outputs.version }}
+    needs: [plan, promote]
+    if: needs.plan.outputs.kind == 'app'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: "${{ needs.promote.outputs.sha }}" }
+      - uses: ./.github/actions/build-images
+        with:
+          version: ${{ needs.plan.outputs.version }}
+          tags: ${{ needs.plan.outputs.version }} latest
+          revision: ${{ needs.promote.outputs.sha }}
+          token: ${{ github.token }}
+
+  charts:
+    name: Chart ${{ matrix.chart.name }} ${{ matrix.chart.version }}
+    needs: [plan, promote, images]
+    if: ${{ !cancelled() && needs.promote.result == 'success' && needs.images.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions: { contents: write, packages: write, id-token: write, attestations: write }
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: ${{ fromJSON(needs.plan.outputs.charts) }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: "${{ needs.promote.outputs.sha }}", fetch-depth: 0 }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: tools/go.mod, cache: false }
+      - uses: azure/setup-helm@v4
+        with: { version: v4.3.0 }
+      # Notes before the tag: they list the pull requests since the chart's previous release.
+      - name: Chart-only release notes
+        if: needs.plan.outputs.kind == 'charts'
+        env:
+          CHART: ${{ matrix.chart.name }}
+        run: scripts/release.sh --chart-notes "$CHART" > "$RUNNER_TEMP/notes.md"
+      - uses: ./.github/actions/helm-publish
+        with:
+          chart: ${{ matrix.chart.name }}
+          version: ${{ matrix.chart.version }}
+          app-version: ${{ matrix.chart.app }}
+          agent-chart-version: ${{ matrix.chart.agent }}
+          revision: ${{ needs.promote.outputs.sha }}
+          token: ${{ github.token }}
+      # The tag marks the version as published (release.sh counts it). A chart-only release gets a
+      # GitHub Release (not "latest": that stays the app's); an app release lists the charts in its own.
+      - name: Tag (and chart-only GitHub Release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KIND: ${{ needs.plan.outputs.kind }}
+          CHART: ${{ matrix.chart.name }}
+          VERSION: ${{ matrix.chart.version }}
+          SHA: ${{ needs.promote.outputs.sha }}
+        run: |
+          set -euo pipefail
+          tag=chart-$CHART-v$VERSION
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "$tag exists already"
+          elif [ "$KIND" = charts ]; then
+            gh release create "$tag" --target "$SHA" --latest=false --title "$CHART chart $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$SHA" >/dev/null
+          fi
+          echo "Tagged $tag" >> "$GITHUB_STEP_SUMMARY"
+
+  github-release:
+    name: GitHub Release v${{ needs.plan.outputs.version }}
+    needs: [plan, promote, images, charts]
+    if: ${{ !cancelled() && needs.plan.outputs.kind == 'app' && needs.images.result == 'success' && needs.charts.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions: { contents: write, id-token: write, attestations: write, discussions: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ needs.promote.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: "${{ needs.promote.outputs.sha }}" }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: backend/go.mod, cache-dependency-path: backend/go.sum }
+      - name: CLI for every platform
+        run: scripts/build-cli.sh "$VERSION"
+      - name: Attest the CLI archives
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v2
+        with: { subject-path: "dist/bezisync_*" }
+      - name: Release notes
+        env:
+          CHARTS_LINE: ${{ needs.plan.outputs.charts_line }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          owner=${OWNER,,}
+          {
+            scripts/release.sh --notes "$VERSION"
+            echo
+            echo "### Install"
+            echo "- Images: \`ghcr.io/$owner/bezisync:$VERSION\`, \`ghcr.io/$owner/bezisync-web:$VERSION\`"
+            echo "- Charts: $CHARTS_LINE (\`oci://ghcr.io/$owner/charts\`)"
+            echo "- CLI: the archives below (\`checksums.txt\`; \`gh attestation verify <file> --owner $owner\`)"
+          } > "$RUNNER_TEMP/notes.md"
+      - name: Tag and GitHub Release
+        run: |
+          gh release create "v$VERSION" --target "$SHA" --latest --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" dist/*
+          echo "Released v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+      # Needs Discussions with an "Announcements" category; a missing one only warns.
+      - name: Announce in Discussions
+        continue-on-error: true
+        env:
+          FIND: query($o:String!,$n:String!){repository(owner:$o,name:$n){id discussionCategories(first:25){nodes{id name}}}}
+          CREATE: mutation($r:ID!,$c:ID!,$t:String!,$b:String!){createDiscussion(input:{repositoryId:$r,categoryId:$c,title:$t,body:$b}){discussion{url}}}
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY%/*} name=${GITHUB_REPOSITORY#*/}
+          ids=$(gh api graphql -f query="$FIND" -f o="$owner" -f n="$name")
+          repo=$(echo "$ids" | jq -r .data.repository.id)
+          category=$(echo "$ids" | jq -r '.data.repository.discussionCategories.nodes[] | select(.name == "Announcements") | .id')
+          [ -n "$category" ] || { echo "::warning::no Announcements discussion category: skipped the post"; exit 0; }
+          body="$(cat "$RUNNER_TEMP/notes.md")"$'\n\n'"Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
+          gh api graphql -f query="$CREATE" \
+            -f r="$repo" -f c="$category" -f t="BeziSync v$VERSION" -f b="$body" --jq .data.createDiscussion.discussion.url
+
+  cleanup:
+    name: Delete the pre-releases
+    needs: [plan, charts, github-release]
+    if: ${{ !cancelled() && needs.charts.result == 'success' && (needs.plan.outputs.kind == 'charts' || needs.github-release.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions: { packages: write }
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [bezisync, bezisync-web, charts/bezisync, charts/bezisync-agent]
+    steps:
+      # A package that was never pre-released does not exist yet: nothing to delete.
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f
+        continue-on-error: true
+        with:
+          token: ${{ github.token }}
+          packages: ${{ matrix.package }}
+          delete-tags: "*-pre"
+          delete-untagged: true
