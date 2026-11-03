@@ -1,0 +1,622 @@
+{
+ "cases": [
+  {
+   "label": "owner",
+   "config": {
+    "host": "127.0.0.1",
+    "port": 25432,
+    "database": "contract_src",
+    "user": "bezisync",
+    "ssl_mode": "disable"
+   },
+   "secrets": {
+    "password": "bezisync"
+   },
+   "tables": [
+    "public.orders",
+    "public.nokey",
+    "public.ident",
+    "app.users",
+    "public.missing"
+   ],
+   "report": {
+    "ok": false,
+    "summary": "2 issues block deploy",
+    "checks": [
+     {
+      "code": "pg_network_reachable",
+      "title": "Reach the database",
+      "status": "pass",
+      "category": "network",
+      "message": "Connected to 127.0.0.1:25432 in 0 ms.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-network-reachable"
+     },
+     {
+      "code": "pg_login",
+      "title": "Sign in",
+      "status": "pass",
+      "category": "auth",
+      "message": "Signed in as bezisync.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-login"
+     },
+     {
+      "code": "pg_version",
+      "title": "PostgreSQL version",
+      "status": "pass",
+      "category": "cdc_setup",
+      "message": "PostgreSQL 17.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-version"
+     },
+     {
+      "code": "pg_wal_level",
+      "title": "Logical replication",
+      "status": "pass",
+      "category": "cdc_setup",
+      "message": "Logical replication is on.",
+      "technical": "wal_level = logical",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-wal-level"
+     },
+     {
+      "code": "pg_replication_role",
+      "title": "Replication permission",
+      "status": "pass",
+      "category": "permissions",
+      "message": "bezisync may stream changes.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-replication-role"
+     },
+     {
+      "code": "pg_capacity",
+      "title": "Replication capacity",
+      "status": "pass",
+      "category": "capacity",
+      "message": "Replication slots 0 of 10 used · WAL senders 0 of 10.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-capacity"
+     },
+     {
+      "code": "pg_create",
+      "title": "Manage publications",
+      "status": "pass",
+      "category": "permissions",
+      "message": "Can create the publication and the bezisync heartbeat schema.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-create"
+     },
+     {
+      "code": "pg_wal_retention",
+      "title": "WAL retention limit",
+      "status": "warn",
+      "category": "resilience",
+      "message": "If a pipeline stops, the database keeps WAL for it without limit.",
+      "technical": "max_slot_wal_keep_size = -1 (unbounded).",
+      "why": "A stopped pipeline's slot can fill the disk. BeziSync alerts on retained WAL; a cap protects the database but invalidates the slot (re-snapshot needed) when reached.",
+      "fix": {
+       "kind": "sql",
+       "code": "ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';\nSELECT pg_reload_conf();",
+       "restart_required": false,
+       "who": "DBA"
+      },
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-wal-retention"
+     },
+     {
+      "code": "pg_failover",
+      "title": "Failover safety",
+      "status": "pass",
+      "category": "resilience",
+      "message": "PostgreSQL 17 can synchronise slots to standbys (failover slots).",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-failover"
+     },
+     {
+      "code": "pg_tables_exist",
+      "title": "Selected tables exist",
+      "status": "fail",
+      "category": "tables",
+      "message": "Not found: public.missing.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": true,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-tables-exist"
+     },
+     {
+      "code": "pg_tables_keys",
+      "title": "Row keys",
+      "status": "warn",
+      "category": "tables",
+      "message": "No primary key on public.nokey: updates and deletes cannot be keyed.",
+      "technical": "Tables without PK and with REPLICA IDENTITY DEFAULT emit no before-image keys.",
+      "why": "",
+      "fix": {
+       "kind": "sql",
+       "code": "ALTER TABLE \"public\".\"nokey\" REPLICA IDENTITY FULL;",
+       "restart_required": false,
+       "who": "DBA"
+      },
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-tables-keys"
+     },
+     {
+      "code": "pg_tables_identity",
+      "title": "Replica identity",
+      "status": "fail",
+      "category": "tables",
+      "message": "REPLICA IDENTITY NOTHING on public.ident: updates/deletes are lost.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": true,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-tables-identity"
+     }
+    ],
+    "duration_ms": 76,
+    "checked_at": "2026-10-30T07:01:42.082741+00:00"
+   }
+  },
+  {
+   "label": "limited",
+   "config": {
+    "host": "127.0.0.1",
+    "port": 25432,
+    "database": "contract_src",
+    "user": "limited",
+    "ssl_mode": "disable"
+   },
+   "secrets": {
+    "password": "limited-pw"
+   },
+   "tables": [
+    "public.orders",
+    "public.nokey",
+    "public.ident",
+    "app.users",
+    "public.missing"
+   ],
+   "report": {
+    "ok": false,
+    "summary": "5 issues block deploy",
+    "checks": [
+     {
+      "code": "pg_network_reachable",
+      "title": "Reach the database",
+      "status": "pass",
+      "category": "network",
+      "message": "Connected to 127.0.0.1:25432 in 0 ms.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-network-reachable"
+     },
+     {
+      "code": "pg_login",
+      "title": "Sign in",
+      "status": "pass",
+      "category": "auth",
+      "message": "Signed in as limited.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-login"
+     },
+     {
+      "code": "pg_version",
+      "title": "PostgreSQL version",
+      "status": "pass",
+      "category": "cdc_setup",
+      "message": "PostgreSQL 17.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-version"
+     },
+     {
+      "code": "pg_wal_level",
+      "title": "Logical replication",
+      "status": "pass",
+      "category": "cdc_setup",
+      "message": "Logical replication is on.",
+      "technical": "wal_level = logical",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-wal-level"
+     },
+     {
+      "code": "pg_replication_role",
+      "title": "Replication permission",
+      "status": "fail",
+      "category": "permissions",
+      "message": "User limited is not allowed to stream changes.",
+      "technical": "The role needs the REPLICATION attribute (or rds_replication on RDS).",
+      "why": "",
+      "fix": {
+       "kind": "sql",
+       "code": "ALTER ROLE \"limited\" WITH REPLICATION;",
+       "restart_required": false,
+       "who": "DBA"
+      },
+      "blocking": true,
+      "doc": "checks/pg_replication_role"
+     },
+     {
+      "code": "pg_capacity",
+      "title": "Replication capacity",
+      "status": "pass",
+      "category": "capacity",
+      "message": "Replication slots 0 of 10 used · WAL senders 0 of 10.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-capacity"
+     },
+     {
+      "code": "pg_create",
+      "title": "Manage publications",
+      "status": "fail",
+      "category": "permissions",
+      "message": "limited cannot create the publication or the bezisync schema.",
+      "technical": "Needs CREATE on the database for CREATE PUBLICATION / CREATE SCHEMA bezisync.",
+      "why": "",
+      "fix": {
+       "kind": "sql",
+       "code": "GRANT CREATE ON DATABASE \"contract_src\" TO \"limited\";",
+       "restart_required": false,
+       "who": "DBA"
+      },
+      "blocking": true,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-create"
+     },
+     {
+      "code": "pg_wal_retention",
+      "title": "WAL retention limit",
+      "status": "warn",
+      "category": "resilience",
+      "message": "If a pipeline stops, the database keeps WAL for it without limit.",
+      "technical": "max_slot_wal_keep_size = -1 (unbounded).",
+      "why": "A stopped pipeline's slot can fill the disk. BeziSync alerts on retained WAL; a cap protects the database but invalidates the slot (re-snapshot needed) when reached.",
+      "fix": {
+       "kind": "sql",
+       "code": "ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';\nSELECT pg_reload_conf();",
+       "restart_required": false,
+       "who": "DBA"
+      },
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-wal-retention"
+     },
+     {
+      "code": "pg_failover",
+      "title": "Failover safety",
+      "status": "pass",
+      "category": "resilience",
+      "message": "PostgreSQL 17 can synchronise slots to standbys (failover slots).",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-failover"
+     },
+     {
+      "code": "pg_tables_exist",
+      "title": "Selected tables exist",
+      "status": "fail",
+      "category": "tables",
+      "message": "Not found: public.missing.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": true,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-tables-exist"
+     },
+     {
+      "code": "pg_tables_select",
+      "title": "Read access",
+      "status": "fail",
+      "category": "tables",
+      "message": "No SELECT permission on public.nokey, public.ident, app.users.",
+      "technical": "",
+      "why": "The initial snapshot reads existing rows with SELECT.",
+      "fix": {
+       "kind": "sql",
+       "code": "GRANT SELECT ON \"public\".\"nokey\" TO \"limited\";\nGRANT SELECT ON \"public\".\"ident\" TO \"limited\";\nGRANT SELECT ON \"app\".\"users\" TO \"limited\";",
+       "restart_required": false,
+       "who": "DBA"
+      },
+      "blocking": true,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-tables-select"
+     },
+     {
+      "code": "pg_tables_keys",
+      "title": "Row keys",
+      "status": "warn",
+      "category": "tables",
+      "message": "No primary key on public.nokey: updates and deletes cannot be keyed.",
+      "technical": "Tables without PK and with REPLICA IDENTITY DEFAULT emit no before-image keys.",
+      "why": "",
+      "fix": {
+       "kind": "sql",
+       "code": "ALTER TABLE \"public\".\"nokey\" REPLICA IDENTITY FULL;",
+       "restart_required": false,
+       "who": "DBA"
+      },
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-tables-keys"
+     },
+     {
+      "code": "pg_tables_identity",
+      "title": "Replica identity",
+      "status": "fail",
+      "category": "tables",
+      "message": "REPLICA IDENTITY NOTHING on public.ident: updates/deletes are lost.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": true,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-tables-identity"
+     },
+     {
+      "code": "pg_tables_owner",
+      "title": "Publication ownership",
+      "status": "warn",
+      "category": "tables",
+      "message": "BeziSync's user does not own some tables, so it cannot add them to the publication itself.",
+      "technical": "Not owned: public.nokey, public.ident, app.users, public.orders. A table owner must create the publication.",
+      "why": "",
+      "fix": {
+       "kind": "sql",
+       "code": "CREATE PUBLICATION <pipeline-publication> FOR TABLE \"public\".\"nokey\", \"public\".\"ident\", \"app\".\"users\", \"public\".\"orders\";",
+       "restart_required": false,
+       "who": "table owner"
+      },
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-tables-owner"
+     }
+    ],
+    "duration_ms": 66,
+    "checked_at": "2026-10-30T07:01:42.149839+00:00"
+   }
+  },
+  {
+   "label": "bad_password",
+   "config": {
+    "host": "127.0.0.1",
+    "port": 25432,
+    "database": "contract_src",
+    "user": "bezisync",
+    "ssl_mode": "disable"
+   },
+   "secrets": {
+    "password": "wrong"
+   },
+   "tables": null,
+   "report": {
+    "ok": false,
+    "summary": "1 issue blocks deploy",
+    "checks": [
+     {
+      "code": "pg_network_reachable",
+      "title": "Reach the database",
+      "status": "pass",
+      "category": "network",
+      "message": "Connected to 127.0.0.1:25432 in 0 ms.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-network-reachable"
+     },
+     {
+      "code": "pg_login",
+      "title": "Sign in",
+      "status": "fail",
+      "category": "auth",
+      "message": "The database rejected the password for bezisync.",
+      "technical": "connection failed: connection to server at \"127.0.0.1\", port 25432 failed: FATAL:  password authentication failed for user \"bezisync\"",
+      "why": "",
+      "fix": null,
+      "blocking": true,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-login"
+     }
+    ],
+    "duration_ms": 53,
+    "checked_at": "2026-10-30T07:01:42.203599+00:00"
+   }
+  },
+  {
+   "label": "bad_database",
+   "config": {
+    "host": "127.0.0.1",
+    "port": 25432,
+    "database": "nope_db",
+    "user": "bezisync",
+    "ssl_mode": "disable"
+   },
+   "secrets": {
+    "password": "bezisync"
+   },
+   "tables": null,
+   "report": {
+    "ok": false,
+    "summary": "1 issue blocks deploy",
+    "checks": [
+     {
+      "code": "pg_network_reachable",
+      "title": "Reach the database",
+      "status": "pass",
+      "category": "network",
+      "message": "Connected to 127.0.0.1:25432 in 0 ms.",
+      "technical": "",
+      "why": "",
+      "fix": null,
+      "blocking": false,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-network-reachable"
+     },
+     {
+      "code": "pg_login",
+      "title": "Sign in",
+      "status": "fail",
+      "category": "auth",
+      "message": "Database nope_db does not exist.",
+      "technical": "connection failed: connection to server at \"127.0.0.1\", port 25432 failed: FATAL:  database \"nope_db\" does not exist",
+      "why": "",
+      "fix": null,
+      "blocking": true,
+      "doc": "https://github.com/daun-gatal/bezisync/blob/main/docs/reference/checks.md#pg-login"
+     }
+    ],
+    "duration_ms": 46,
+    "checked_at": "2026-10-30T07:01:42.249984+00:00"
+   }
+  }
+ ],
+ "discovery": {
+  "tables": [
+   {
+    "schema": "app",
+    "name": "users",
+    "rows_estimate": null,
+    "bytes_estimate": 16384,
+    "primary_key": [
+     "user_id"
+    ],
+    "replica_identity": "default",
+    "columns": [
+     {
+      "name": "user_id",
+      "type": "uuid",
+      "nullable": false,
+      "pii": false
+     },
+     {
+      "name": "phone_number",
+      "type": "text",
+      "nullable": true,
+      "pii": true
+     },
+     {
+      "name": "birth_date",
+      "type": "date",
+      "nullable": true,
+      "pii": true
+     }
+    ],
+    "warnings": [],
+    "selectable": true
+   },
+   {
+    "schema": "public",
+    "name": "ident",
+    "rows_estimate": null,
+    "bytes_estimate": 8192,
+    "primary_key": [
+     "id"
+    ],
+    "replica_identity": "nothing",
+    "columns": [
+     {
+      "name": "id",
+      "type": "integer",
+      "nullable": false,
+      "pii": false
+     }
+    ],
+    "warnings": [
+     "REPLICA IDENTITY NOTHING — updates and deletes would be lost."
+    ],
+    "selectable": true
+   },
+   {
+    "schema": "public",
+    "name": "nokey",
+    "rows_estimate": null,
+    "bytes_estimate": 8192,
+    "primary_key": [],
+    "replica_identity": "default",
+    "columns": [
+     {
+      "name": "a",
+      "type": "integer",
+      "nullable": true,
+      "pii": false
+     },
+     {
+      "name": "b",
+      "type": "text",
+      "nullable": true,
+      "pii": false
+     }
+    ],
+    "warnings": [
+     "No primary key — updates and deletes can't be keyed (set REPLICA IDENTITY FULL)."
+    ],
+    "selectable": true
+   },
+   {
+    "schema": "public",
+    "name": "orders",
+    "rows_estimate": null,
+    "bytes_estimate": 16384,
+    "primary_key": [
+     "id"
+    ],
+    "replica_identity": "default",
+    "columns": [
+     {
+      "name": "id",
+      "type": "bigint",
+      "nullable": false,
+      "pii": false
+     },
+     {
+      "name": "email",
+      "type": "text",
+      "nullable": true,
+      "pii": true
+     },
+     {
+      "name": "total",
+      "type": "numeric",
+      "nullable": false,
+      "pii": false
+     }
+    ],
+    "warnings": [],
+    "selectable": true
+   }
+  ],
+  "truncated": false,
+  "discovered_at": "2026-10-30T07:01:42.321227+00:00"
+ }
+}

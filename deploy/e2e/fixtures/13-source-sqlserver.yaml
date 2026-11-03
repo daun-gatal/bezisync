@@ -1,0 +1,69 @@
+# SQL Server 2022 with CDC and SQL Server Agent. In-cluster: source-mssql.bezisync-e2e-data:1433; runner: bezisync-e2e-k3s:31433.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: source-mssql-init }
+data:
+  init.sql: |
+    CREATE DATABASE Shop;
+    GO
+    USE Shop;
+    EXEC sys.sp_cdc_enable_db;
+    CREATE TABLE dbo.orders (id INT IDENTITY PRIMARY KEY, status NVARCHAR(40) NOT NULL, email NVARCHAR(200), total DECIMAL(10,2));
+    INSERT INTO dbo.orders (status, email, total) VALUES ('NEW','a@example.com',1),('PAID','b@example.com',2);
+    EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'orders', @role_name = NULL, @supports_net_changes = 0;
+    CREATE LOGIN cdc_reader WITH PASSWORD = 'Cdc-reader-pw1!', CHECK_POLICY = OFF;
+    CREATE USER cdc_reader FOR LOGIN cdc_reader;
+    ALTER ROLE db_owner ADD MEMBER cdc_reader;
+    CREATE LOGIN e2e_writer WITH PASSWORD = 'E2e-writer-pw1!', CHECK_POLICY = OFF;
+    CREATE USER e2e_writer FOR LOGIN e2e_writer;
+    ALTER ROLE db_datawriter ADD MEMBER e2e_writer;
+    ALTER ROLE db_datareader ADD MEMBER e2e_writer;
+    GO
+  run.sh: |
+    set -e
+    /opt/mssql/bin/sqlservr &
+    until /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -Q "SELECT 1" >/dev/null 2>&1; do sleep 2; done
+    if ! /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -h -1 -Q "SET NOCOUNT ON; SELECT DB_ID('Shop')" | grep -q '[0-9]'; then
+      /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -i /init/init.sql
+    fi
+    # Enabling CDC on a table fails while SQL Server Agent is still starting (error 14258), and
+    # sqlcmd carries on past it: retry until dbo.orders is tracked.
+    until /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -d Shop -h -1 -Q "SET NOCOUNT ON; SELECT is_tracked_by_cdc FROM sys.tables WHERE name = 'orders'" | grep -q '^ *1'; do
+      /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -d Shop -Q "EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'orders', @role_name = NULL, @supports_net_changes = 0;" || true
+      sleep 3
+    done
+    touch /tmp/ready
+    wait
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: source-mssql }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: source-mssql } }
+  template:
+    metadata: { labels: { app: source-mssql, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-latest
+          command: [bash, /init/run.sh]
+          env:
+            - { name: ACCEPT_EULA, value: "Y" }
+            - { name: MSSQL_SA_PASSWORD, value: "Sa-password-e2e1!" }
+            - { name: MSSQL_AGENT_ENABLED, value: "true" }
+            - { name: MSSQL_PID, value: Developer }
+          ports: [{ containerPort: 1433 }]
+          readinessProbe: { exec: { command: [test, -f, /tmp/ready] }, periodSeconds: 3, failureThreshold: 100 }
+          resources: { requests: { memory: 2Gi } }
+          volumeMounts: [{ name: init, mountPath: /init }]
+      volumes: [{ name: init, configMap: { name: source-mssql-init } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: source-mssql }
+spec:
+  type: NodePort
+  selector: { app: source-mssql }
+  ports: [{ port: 1433, targetPort: 1433, nodePort: 31433 }]

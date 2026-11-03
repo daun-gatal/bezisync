@@ -1,0 +1,228 @@
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
+import { Plus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Empty, InlineError, Notice } from '@/components/ui/feedback';
+import { Check, Field, Input } from '@/components/ui/form';
+import { Card, QueryState } from '@/components/ui/layout';
+import { Select } from '@/components/ui/select';
+import { CheckList, reportBadge } from '@/components/CheckList';
+import { ConnectionDialog } from '@/features/connections/ConnectionDialog';
+import { allows, usePolicies } from '@/lib/policies';
+import { SchemaForm, cleanValues, defaultsOf, type FormValues, type JsonSchema } from '@/components/SchemaForm';
+import { DEFAULT_SINK_CAPS, sinkCapsOf, TYPE_LABEL, useCheckConnection, useConnections, useConnectorTypes, useDiscovery } from '@/lib/connections';
+import type { Pipeline } from '@/lib/pipelines';
+import { useProject } from '@/lib/session';
+import { deriveSinkOptions, fullSpec, sinkDestinationFor, sinkNamingError, type FullSpec } from '../spec';
+import { useSaveSpec, type StepHandle } from '../useSaveSpec';
+import { ConnectionCards, StepHeader } from './shared';
+
+type Format = FullSpec['sink']['format'];
+
+const FORMATS: { value: Format['type']; label: string; description: string }[] = [
+  { value: 'json', label: 'JSON', description: 'Plain JSON events. Debezium: JsonConverter' },
+  { value: 'avro', label: 'Avro', description: 'Compact, typed events. Needs a schema registry.' },
+  { value: 'protobuf', label: 'Protobuf', description: 'Typed events. Needs a schema registry.' },
+  { value: 'cloudevents', label: 'CloudEvents (JSON)', description: 'The CloudEvents envelope around each change.' },
+];
+
+/** Step 3: where changes go, how destinations are named, and the event format. */
+export function SinkStep({
+  pipeline,
+  handle,
+  onReady,
+  onBack,
+  onNext,
+}: {
+  pipeline: Pipeline;
+  handle: Ref<StepHandle>;
+  onReady: (ready: boolean) => void;
+  onBack: () => void;
+  onNext: () => void;
+}) {
+  const { project, can, expert } = useProject();
+  const connections = useConnections(project.id);
+  const check = useCheckConnection(project.id);
+  const spec = useMemo(() => fullSpec(pipeline.spec), [pipeline.spec]);
+  const [sinkId, setSinkId] = useState<string | undefined>(pipeline.sink?.id);
+  const [adding, setAdding] = useState(false);
+  const [naming, setNaming] = useState(spec.sink.naming);
+  const [format, setFormat] = useState<Format>(spec.sink.format);
+  const [options, setOptions] = useState<FormValues>(spec.sink.options);
+  const types = useConnectorTypes(project.id);
+  const { save, pending, error } = useSaveSpec(pipeline);
+  const policies = usePolicies(project.id).data;
+  const sinks = (connections.data ?? []).filter((c) => c.kind === 'sink' && (allows(policies?.allowed_sink_types, c.type) || c.id === pipeline.sink?.id));
+  const current = sinks.find((c) => c.id === sinkId);
+  const report = check.data && check.variables?.id === current?.id ? check.data : current?.last_check;
+  const caps = current ? sinkCapsOf(types.data, current.type) : DEFAULT_SINK_CAPS;
+  const optionsSchema = caps.options_schema as JsonSchema | null;
+  const tables = spec.source.tables.include;
+  const nameError = sinkNamingError(naming, caps, tables, pipeline.name);
+  const deployed = Boolean(pipeline.deployed_version);
+  const formats = FORMATS.filter((f) => caps.formats.includes(f.value));
+  // A sink with one format (Iceberg reads Kafka Connect structs) uses it whatever the spec says.
+  const forcedFormat = caps.formats.length === 1;
+  const registry = !forcedFormat && (format.type === 'avro' || format.type === 'protobuf');
+  const discovery = useDiscovery(project.id, pipeline.source.id);
+  const savedOptions = optionsSchema
+    ? deriveSinkOptions(cleanValues(optionsSchema, options), optionsSchema, tables, spec.keys ?? {}, discovery.data?.tables)
+    : spec.sink.options;
+
+  // Choosing another destination: start from its naming default (unless the user wrote their
+  // own), a format it takes and its option defaults.
+  const lastType = useRef(pipeline.sink?.type);
+  useEffect(() => {
+    if (!current || lastType.current === current.type || deployed) return;
+    const previous = sinkCapsOf(types.data, lastType.current);
+    lastType.current = current.type;
+    setNaming((n) => (n === previous.naming.default || n === DEFAULT_SINK_CAPS.naming.default ? caps.naming.default : n));
+    setFormat((f) => (caps.formats.includes(f.type) || forcedFormat ? f : { ...f, type: 'json' }));
+    setOptions(optionsSchema ? defaultsOf(optionsSchema) : {});
+  }, [current, caps, types.data, deployed, forcedFormat, optionsSchema]);
+  const missing = !sinkId
+    ? 'Choose a destination.'
+    : nameError
+      ? 'Fix the destination naming.'
+      : registry && !format.registry_url
+        ? 'Enter the schema registry URL.'
+        : null;
+  const body = () => ({ sink_id: sinkId, spec: { ...spec, sink: { ...spec.sink, naming, format, options: savedOptions } } });
+  const dirty = () =>
+    sinkId !== pipeline.sink?.id ||
+    naming !== spec.sink.naming ||
+    JSON.stringify(format) !== JSON.stringify(spec.sink.format) ||
+    JSON.stringify(savedOptions) !== JSON.stringify(spec.sink.options);
+  useImperativeHandle(handle, () => ({ dirty, commit: async () => (missing ? false : dirty() ? save(body()) : true) }));
+  const isReady = !missing;
+  useEffect(() => onReady(isReady), [isReady, onReady]);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <StepHeader
+        title="Where should changes go?"
+        description={caps.naming.single ? 'Every table goes to the one destination this connection names.' : 'Each table gets its own destination.'}
+      />
+      {policies?.allowed_sink_types ? (
+        <Notice tone="info">This project allows these destinations: {policies.allowed_sink_types.map((t) => TYPE_LABEL[t] ?? t).join(', ')}.</Notice>
+      ) : null}
+      {deployed ? <Notice tone="info">The destination of a deployed pipeline can’t change.</Notice> : null}
+      <QueryState query={connections} doing="Couldn’t load the destinations">
+        {() =>
+          sinks.length === 0 && !can('connection.manage') ? (
+            <Card>
+              <Empty title="No destinations available">Ask an editor or an Admin to add a destination.</Empty>
+            </Card>
+          ) : (
+            <ConnectionCards label="Destination" items={sinks} selected={sinkId} onSelect={(c) => setSinkId(c.id)} disabled={deployed} />
+          )
+        }
+      </QueryState>
+      {can('connection.manage') && !deployed ? (
+        <div>
+          <Button icon={<Plus />} onClick={() => setAdding(true)}>
+            Add a destination
+          </Button>
+        </div>
+      ) : null}
+      {current ? (
+        report && !report.ok ? (
+          <Card>
+            <CheckList report={report} expert={expert} subject={current.name} onRecheck={() => check.mutate({ id: current.id })} rechecking={check.isPending} />
+          </Card>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+            Last check: {reportBadge(report)}
+            <Button size="sm" variant="ghost" loading={check.isPending} onClick={() => check.mutate({ id: current.id })}>
+              Check again
+            </Button>
+          </div>
+        )
+      ) : null}
+      <InlineError error={check.error} doing="Couldn’t check the destination" />
+      <Card>
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
+          {caps.naming.single ? null : (
+            <Field
+              label="Destination naming"
+              error={nameError}
+              hint={
+                tables.length
+                  ? `Preview: ${tables
+                      .slice(0, 3)
+                      .map((t) => sinkDestinationFor(naming, t, pipeline.name, caps))
+                      .join(', ')}${tables.length > 3 ? ', …' : ''}`
+                  : 'Use {schema}, {table} and {pipeline}.'
+              }
+            >
+              {(id) => (
+                <Input id={id} className="font-mono" spellCheck={false} value={naming} invalid={Boolean(nameError)} onChange={(e) => setNaming(e.target.value)} />
+              )}
+            </Field>
+          )}
+          {forcedFormat ? null : (
+            <Field label="Event format">
+              {(id) => <Select id={id} value={format.type} onChange={(v) => setFormat({ ...format, type: v })} options={formats} />}
+            </Field>
+          )}
+          {registry ? (
+            <>
+              <Field label="Schema registry URL">
+                {(id) => (
+                  <Input
+                    id={id}
+                    value={format.registry_url ?? ''}
+                    placeholder="http://registry:8080/apis/registry/v2"
+                    onChange={(e) => setFormat({ ...format, registry_url: e.target.value || null })}
+                  />
+                )}
+              </Field>
+              <Field label="Registry">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={format.registry_kind}
+                    onChange={(v) => setFormat({ ...format, registry_kind: v as 'apicurio' | 'confluent' })}
+                    options={[
+                      { value: 'apicurio', label: 'Apicurio' },
+                      { value: 'confluent', label: 'Confluent' },
+                    ]}
+                  />
+                )}
+              </Field>
+            </>
+          ) : null}
+          {expert && !forcedFormat && format.type === 'json' ? (
+            <div className="col-span-full">
+              <Check
+                checked={format.include_schema}
+                onChange={(on) => setFormat({ ...format, include_schema: on })}
+                label="Embed the Kafka Connect schema in every event"
+              />
+            </div>
+          ) : null}
+        </div>
+      </Card>
+      {current && optionsSchema ? (
+        <Card title={`${TYPE_LABEL[current.type] ?? current.type} settings for this pipeline`}>
+          <SchemaForm idPrefix="sink-opt" schema={optionsSchema} values={options} onChange={setOptions} expert={expert} />
+        </Card>
+      ) : null}
+      <InlineError error={error} doing="Couldn’t save the destination" />
+      <div className="flex flex-wrap justify-between gap-3">
+        <Button onClick={onBack}>← Back</Button>
+        <Button variant="primary" disabled={Boolean(missing)} why={missing} loading={pending} onClick={onNext}>
+          Continue to transform →
+        </Button>
+      </div>
+      <ConnectionDialog
+        open={adding}
+        onOpenChange={setAdding}
+        kind="sink"
+        onSaved={(c) => {
+          setSinkId(c.id);
+          check.mutate({ id: c.id });
+        }}
+      />
+    </div>
+  );
+}

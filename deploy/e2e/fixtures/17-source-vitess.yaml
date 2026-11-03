@@ -1,0 +1,55 @@
+# Vitess test cluster (vttestserver: one VTGate, keyspace "shop" in two shards). In-cluster:
+# source-vitess.bezisync-e2e-data — gRPC 33575, MySQL 33577; runner: bezisync-e2e-k3s:32306 (MySQL).
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: source-vitess-init }
+data:
+  init.sql: |
+    CREATE TABLE orders (id BIGINT PRIMARY KEY, status VARCHAR(40) NOT NULL, email VARCHAR(200), total DECIMAL(10,2));
+    ALTER VSCHEMA ON orders ADD VINDEX hash(id) USING hash;
+    INSERT INTO orders (id, status, email, total) VALUES (1, 'NEW', 'a@example.com', 1), (2, 'PAID', 'b@example.com', 2), (3, 'NEW', 'c@example.com', 3);
+  run.sh: |
+    set -e
+    /vt/run.sh "8.0.40-Vitess" &
+    until mysql -h 127.0.0.1 -P 33577 -u root -e "SELECT 1" >/dev/null 2>&1; do sleep 2; done
+    until mysql -h 127.0.0.1 -P 33577 -u root -e "SHOW VITESS_TABLETS" 2>/dev/null | grep -c SERVING | grep -q 6; do sleep 2; done
+    mysql -h 127.0.0.1 -P 33577 -u root shop < /init/init.sql
+    touch /tmp/ready
+    wait
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: source-vitess }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: source-vitess } }
+  template:
+    metadata: { labels: { app: source-vitess, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: vitess
+          image: vitess/vttestserver:v22.0.2-mysql80@sha256:f6d273dd9ed6e2e1c9e8fd9909e13453d919ece82f099513ed38044316b23eb1
+          command: [bash, /init/run.sh]
+          env:
+            - { name: PORT, value: "33574" }
+            - { name: KEYSPACES, value: shop }
+            - { name: NUM_SHARDS, value: "2" }
+            - { name: MYSQL_BIND_HOST, value: 0.0.0.0 }
+            - { name: VTCOMBO_BIND_HOST, value: 0.0.0.0 }
+            - { name: MYSQL_MAX_CONNECTIONS, value: "1000" }
+          ports: [{ containerPort: 33575 }, { containerPort: 33577 }]
+          readinessProbe: { exec: { command: [test, -f, /tmp/ready] }, periodSeconds: 3, failureThreshold: 200 }
+          resources: { requests: { memory: 1Gi } }
+          volumeMounts: [{ name: init, mountPath: /init }]
+      volumes: [{ name: init, configMap: { name: source-vitess-init } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: source-vitess }
+spec:
+  type: NodePort
+  selector: { app: source-vitess }
+  ports:
+    - { name: grpc, port: 33575, targetPort: 33575, nodePort: 32575 }
+    - { name: mysql, port: 33577, targetPort: 33577, nodePort: 32306 }

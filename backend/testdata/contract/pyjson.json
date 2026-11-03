@@ -1,0 +1,124 @@
+{
+ "cases": [
+  {
+   "value_json": "null",
+   "dumps": "null",
+   "compact": "null"
+  },
+  {
+   "value_json": "true",
+   "dumps": "true",
+   "compact": "true"
+  },
+  {
+   "value_json": "0",
+   "dumps": "0",
+   "compact": "0"
+  },
+  {
+   "value_json": "-7",
+   "dumps": "-7",
+   "compact": "-7"
+  },
+  {
+   "value_json": "12345678901234567890",
+   "dumps": "12345678901234567890",
+   "compact": "12345678901234567890"
+  },
+  {
+   "value_json": "0.0",
+   "dumps": "0.0",
+   "compact": "0.0"
+  },
+  {
+   "value_json": "-0.0",
+   "dumps": "-0.0",
+   "compact": "-0.0"
+  },
+  {
+   "value_json": "10.0",
+   "dumps": "10.0",
+   "compact": "10.0"
+  },
+  {
+   "value_json": "1.5",
+   "dumps": "1.5",
+   "compact": "1.5"
+  },
+  {
+   "value_json": "0.1",
+   "dumps": "0.1",
+   "compact": "0.1"
+  },
+  {
+   "value_json": "1e+16",
+   "dumps": "1e+16",
+   "compact": "1e+16"
+  },
+  {
+   "value_json": "1000000000000000.0",
+   "dumps": "1000000000000000.0",
+   "compact": "1000000000000000.0"
+  },
+  {
+   "value_json": "123456789012345.6",
+   "dumps": "123456789012345.6",
+   "compact": "123456789012345.6"
+  },
+  {
+   "value_json": "0.0001",
+   "dumps": "0.0001",
+   "compact": "0.0001"
+  },
+  {
+   "value_json": "1e-05",
+   "dumps": "1e-05",
+   "compact": "1e-05"
+  },
+  {
+   "value_json": "1.5e-07",
+   "dumps": "1.5e-07",
+   "compact": "1.5e-07"
+  },
+  {
+   "value_json": "2.5e+300",
+   "dumps": "2.5e+300",
+   "compact": "2.5e+300"
+  },
+  {
+   "value_json": "-3.25",
+   "dumps": "-3.25",
+   "compact": "-3.25"
+  },
+  {
+   "value_json": "\"plain\"",
+   "dumps": "\"plain\"",
+   "compact": "\"plain\""
+  },
+  {
+   "value_json": "\"quote\\\" back\\\\ slash / nl\\n cr\\r tab\\t bs\\b ff\\f nul\\u0000 us\\u001f del\\u007f\"",
+   "dumps": "\"quote\\\" back\\\\ slash / nl\\n cr\\r tab\\t bs\\b ff\\f nul\\u0000 us\\u001f del\\u007f\"",
+   "compact": "\"quote\\\" back\\\\ slash / nl\\n cr\\r tab\\t bs\\b ff\\f nul\\u0000 us\\u001f del\\u007f\""
+  },
+  {
+   "value_json": "\"unicode \\u00e9 \\u00fc \\u00df \\u4e2d\\u6587 \\ud83d\\ude00 \\u2028\"",
+   "dumps": "\"unicode \\u00e9 \\u00fc \\u00df \\u4e2d\\u6587 \\ud83d\\ude00 \\u2028\"",
+   "compact": "\"unicode \\u00e9 \\u00fc \\u00df \\u4e2d\\u6587 \\ud83d\\ude00 \\u2028\""
+  },
+  {
+   "value_json": "[]",
+   "dumps": "[]",
+   "compact": "[]"
+  },
+  {
+   "value_json": "{}",
+   "dumps": "{}",
+   "compact": "{}"
+  },
+  {
+   "value_json": "{\"b\": 1, \"a\": [1, 2.0, \"x\"], \"c\": {\"z\": null, \"\\u00e9\": true, \"A\": false}}",
+   "dumps": "{\"a\": [1, 2.0, \"x\"], \"b\": 1, \"c\": {\"A\": false, \"z\": null, \"\\u00e9\": true}}",
+   "compact": "{\"a\":[1,2.0,\"x\"],\"b\":1,\"c\":{\"A\":false,\"z\":null,\"\\u00e9\":true}}"
+  }
+ ]
+}

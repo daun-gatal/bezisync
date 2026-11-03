@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bezisync.fullname" . }}-api
+  labels: {{- include "bezisync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api }
+  template:
+    metadata:
+      labels: {{- include "bezisync.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "bezisync.fullname" . }}-api
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "bezisync.podSecurityContext" (dict "root" . "base" .Values.podSecurityContext) | nindent 8 }}
+      initContainers:
+        - name: migrate
+          image: {{ include "bezisync.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [migrate]
+          env: {{- include "bezisync.env" . | nindent 12 }}
+          envFrom: {{- include "bezisync.envFrom" . | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+      containers:
+        - name: api
+          image: {{ include "bezisync.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [api, --port, "8000"]
+          env: {{- include "bezisync.env" . | nindent 12 }}
+          envFrom: {{- include "bezisync.envFrom" . | nindent 12 }}
+          ports: [{ name: http, containerPort: 8000 }]
+          readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 20 }
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bezisync.fullname" . }}-api
+  labels: {{- include "bezisync.labels" . | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api }
+  ports: [{ name: http, port: 8000, targetPort: http }]

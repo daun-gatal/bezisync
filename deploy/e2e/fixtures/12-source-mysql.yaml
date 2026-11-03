@@ -1,0 +1,43 @@
+# MySQL 8.4 with GTIDs. In-cluster: source-mysql.bezisync-e2e-data:3306; runner: bezisync-e2e-k3s:30306.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: source-mysql-init }
+data:
+  init.sql: |
+    CREATE DATABASE shop;
+    CREATE TABLE shop.orders (id INT AUTO_INCREMENT PRIMARY KEY, status VARCHAR(40) NOT NULL, email VARCHAR(200), total DECIMAL(10,2));
+    INSERT INTO shop.orders (status, email, total) VALUES ('NEW','a@example.com',1),('NEW','b@example.com',2),('PAID','c@example.com',3);
+    CREATE USER 'cdc_reader'@'%' IDENTIFIED BY 'cdc-reader-pw';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'cdc_reader'@'%';
+    GRANT ALL ON bezisync.* TO 'cdc_reader'@'%';
+    CREATE USER 'e2e_writer'@'%' IDENTIFIED BY 'e2e-writer-pw';
+    GRANT ALL ON shop.* TO 'e2e_writer'@'%';
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: source-mysql }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: source-mysql } }
+  template:
+    metadata: { labels: { app: source-mysql, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          args: [--gtid-mode=ON, --enforce-gtid-consistency=ON, --binlog-expire-logs-seconds=604800]
+          env:
+            - { name: MYSQL_ROOT_PASSWORD, value: mysql-root-pw }
+          ports: [{ containerPort: 3306 }]
+          readinessProbe: { exec: { command: [sh, -c, "mysql -uroot -pmysql-root-pw -e 'SELECT 1 FROM shop.orders LIMIT 1'"] }, periodSeconds: 3 }
+          volumeMounts: [{ name: init, mountPath: /docker-entrypoint-initdb.d }]
+      volumes: [{ name: init, configMap: { name: source-mysql-init } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: source-mysql }
+spec:
+  type: NodePort
+  selector: { app: source-mysql }
+  ports: [{ port: 3306, targetPort: 3306, nodePort: 30306 }]

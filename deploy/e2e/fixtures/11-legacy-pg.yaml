@@ -1,0 +1,28 @@
+# PostgreSQL that is NOT ready for CDC (wal_level=replica, user without REPLICATION):
+# drives the "actionable failure" journeys.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: legacy-pg }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: legacy-pg } }
+  template:
+    metadata: { labels: { app: legacy-pg, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          args: [-c, wal_level=replica]
+          env:
+            - { name: POSTGRES_PASSWORD, value: legacy-admin-pw }
+            - { name: POSTGRES_DB, value: legacy }
+            - { name: POSTGRES_USER, value: app_user }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe: { exec: { command: [pg_isready, -U, app_user, -d, legacy] }, periodSeconds: 3 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: legacy-pg }
+spec:
+  selector: { app: legacy-pg }
+  ports: [{ port: 5432, targetPort: 5432 }]

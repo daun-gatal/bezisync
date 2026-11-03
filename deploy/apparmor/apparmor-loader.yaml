@@ -1,0 +1,53 @@
+# Loads the bezisync-default AppArmor profile into every node's kernel. A kernel forgets its
+# profiles on reboot, so this runs on every boot (system-node-critical, so it starts first);
+# pods that reference the profile and start before it is loaded fail and are recreated by their
+# Deployment/StatefulSet until it is. The host's own apparmor_parser (through chroot) parses
+# it, so the profile always matches the host kernel's AppArmor ABI.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: bezisync-apparmor-loader
+  labels: { app.kubernetes.io/name: bezisync-apparmor-loader, app.kubernetes.io/part-of: bezisync }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: bezisync-apparmor-loader }
+  updateStrategy: { type: RollingUpdate }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bezisync-apparmor-loader, app.kubernetes.io/part-of: bezisync }
+    spec:
+      priorityClassName: system-node-critical
+      tolerations: [{ operator: Exists }]
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: loader
+          image: alpine:3.22
+          imagePullPolicy: IfNotPresent
+          command: [sh, -c]
+          args:
+            - |
+              set -u
+              # -r loads or replaces, so a changed profile applies without a reboot.
+              until chroot /host /usr/sbin/apparmor_parser -r </profiles/bezisync-default; do
+                echo "loading bezisync-default failed; retrying in 5s" >&2
+                sleep 5
+              done
+              echo "bezisync-default loaded"
+              while :; do sleep 3600; done
+          # Ready only while the kernel has the profile.
+          readinessProbe:
+            exec: { command: [grep, -q, "^bezisync-default ", /host/sys/kernel/security/apparmor/profiles] }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 5m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          # Loading kernel policy needs CAP_MAC_ADMIN and the host's securityfs.
+          securityContext: { privileged: true }
+          volumeMounts:
+            - { name: host, mountPath: /host }
+            - { name: profiles, mountPath: /profiles, readOnly: true }
+      volumes:
+        - { name: host, hostPath: { path: /, type: Directory } }
+        - { name: profiles, configMap: { name: bezisync-apparmor-profiles } }

@@ -1,0 +1,25 @@
+# Helm values for the disposable e2e cluster (scripts/e2e.sh). Never use in production.
+image: { repository: bezisync-local/backend, pullPolicy: Never }
+webImage: { repository: bezisync-local/frontend, pullPolicy: Never }
+environment: development
+publicUrl: http://bezisync-e2e-k3s:30080
+cookieSecure: false
+secrets:
+  masterKey: ZTJlLW9ubHktbWFzdGVyLWtleS0zMi1ieXRlcyEhISE=
+  bootstrapAdminPassword: e2e-admin-password
+api: { replicas: 1 }
+controller: { replicas: 2 }
+web: { replicas: 1 }
+service: { type: NodePort, nodePort: 30080 }
+postgres: { enabled: true, storage: 2Gi }
+# Agents run inside the cluster and dial the API service directly.
+agent: { url: "http://bezisync-api.bezisync-e2e.svc.cluster.local:8000", chart: deploy/helm/bezisync-agent }
+kubernetesRuntime: { enabled: true, namespaces: [bezisync-e2e-runtime] }
+extraEnv:
+  - { name: BEZISYNC_LOG_JSON, value: "false" }
+  - { name: BEZISYNC_CONTROLLER_TICK_SECONDS, value: "2" }
+  - { name: BEZISYNC_SCHEMA_CHECK_SECONDS, value: "10" }
+  - { name: BEZISYNC_CANARY_INTERVAL_SECONDS, value: "15" }
+  - { name: BEZISYNC_CANARY_TIMEOUT_SECONDS, value: "180" }
+  # The e2e data plane lives on cluster-internal addresses; allow them through the SSRF guard.
+  - { name: BEZISYNC_SSRF_ALLOW_CIDRS, value: '["10.0.0.0/8"]' }

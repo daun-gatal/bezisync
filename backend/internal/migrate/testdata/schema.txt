@@ -1,0 +1,531 @@
+agent_requests.args jsonb NO 
+agent_requests.created_at timestamp with time zone NO 
+agent_requests.id uuid NO 
+agent_requests.op character varying(32) NO 
+agent_requests.result jsonb YES 
+agent_requests.runtime_id uuid NO 
+agent_requests.state character varying(16) NO 
+agent_workloads.config_hash character varying(32) NO 
+agent_workloads.id uuid NO 
+agent_workloads.runtime_id uuid NO 
+agent_workloads.short_id character varying(32) NO 
+agent_workloads.spec_enc text NO 
+agent_workloads.updated_at timestamp with time zone NO 
+alert_channels.config jsonb NO 
+alert_channels.created_at timestamp with time zone NO 
+alert_channels.enabled boolean NO 
+alert_channels.id uuid NO 
+alert_channels.kind character varying(16) NO 
+alert_channels.last_delivery_at timestamp with time zone YES 
+alert_channels.last_error text YES 
+alert_channels.name character varying(100) NO 
+alert_channels.project_id uuid NO 
+alert_channels.secrets_enc text YES 
+alert_channels.updated_at timestamp with time zone NO 
+alert_rules.channel_ids jsonb NO 
+alert_rules.created_at timestamp with time zone NO 
+alert_rules.enabled boolean NO 
+alert_rules.for_seconds integer NO 
+alert_rules.id uuid NO 
+alert_rules.kind character varying(32) NO 
+alert_rules.match_labels jsonb NO 
+alert_rules.name character varying(200) NO 
+alert_rules.notify_owner boolean NO 
+alert_rules.params jsonb NO 
+alert_rules.project_id uuid NO 
+alert_rules.severity character varying(16) NO 
+alert_rules.updated_at timestamp with time zone NO 
+alerts.acknowledged_at timestamp with time zone YES 
+alerts.acknowledged_by character varying(320) YES 
+alerts.deliveries jsonb NO 
+alerts.fired_at timestamp with time zone YES 
+alerts.fix text NO 
+alerts.id uuid NO 
+alerts.last_seen_at timestamp with time zone NO 
+alerts.message text NO 
+alerts.pipeline_id uuid NO 
+alerts.project_id uuid NO 
+alerts.resolved_at timestamp with time zone YES 
+alerts.rule_id uuid NO 
+alerts.severity character varying(16) NO 
+alerts.started_at timestamp with time zone NO 
+alerts.state character varying(16) NO 
+alerts.title text NO 
+api_tokens.created_at timestamp with time zone NO 
+api_tokens.expires_at timestamp with time zone YES 
+api_tokens.id uuid NO 
+api_tokens.last_used_at timestamp with time zone YES 
+api_tokens.name character varying(200) NO 
+api_tokens.prefix character varying(16) NO 
+api_tokens.project_id uuid YES 
+api_tokens.read_only boolean NO 
+api_tokens.token_hash character varying(64) NO 
+api_tokens.updated_at timestamp with time zone NO 
+api_tokens.user_id uuid NO 
+change_requests.comment text NO 
+change_requests.created_at timestamp with time zone NO 
+change_requests.decided_at timestamp with time zone YES 
+change_requests.decided_by_id uuid YES 
+change_requests.force_reason text YES 
+change_requests.id uuid NO 
+change_requests.note text NO 
+change_requests.pipeline_id uuid NO 
+change_requests.preflight jsonb YES 
+change_requests.project_id uuid NO 
+change_requests.requested_by_id uuid YES 
+change_requests.state character varying(16) NO 
+change_requests.version_id uuid NO 
+connections.config jsonb NO 
+connections.created_at timestamp with time zone NO 
+connections.created_by_id uuid YES 
+connections.description text NO 
+connections.id uuid NO 
+connections.kind character varying(8) NO 
+connections.last_check jsonb YES 
+connections.last_check_ok boolean YES 
+connections.last_checked_at timestamp with time zone YES 
+connections.managed boolean NO 
+connections.name character varying(63) NO 
+connections.project_id uuid NO 
+connections.provider character varying(32) NO 
+connections.secrets_enc text YES 
+connections.type character varying(32) NO 
+connections.updated_at timestamp with time zone NO 
+connections.version integer NO 
+debezium_images.created_at timestamp with time zone NO 
+debezium_images.created_by_id uuid YES 
+debezium_images.deprecated boolean NO 
+debezium_images.id uuid NO 
+debezium_images.image character varying(300) NO 
+debezium_images.is_default boolean NO 
+debezium_images.label character varying(100) NO 
+debezium_images.notes text NO 
+debezium_images.updated_at timestamp with time zone NO 
+events.actor_id uuid YES 
+events.actor_label character varying(320) NO 
+events.audit boolean NO 
+events.details jsonb NO 
+events.id uuid NO 
+events.kind character varying(64) NO 
+events.occurred_at timestamp with time zone NO 
+events.project_id uuid YES 
+events.request_id character varying(64) YES 
+events.resource_id uuid YES 
+events.resource_type character varying(32) NO 
+events.summary text NO 
+feedback.created_at timestamp with time zone NO 
+feedback.email character varying(320) NO 
+feedback.id uuid NO 
+feedback.kind character varying(16) NO 
+feedback.message text NO 
+feedback.page character varying(500) NO 
+feedback.project_id uuid NO 
+feedback.resolved_at timestamp with time zone YES 
+feedback.resolved_by character varying(320) YES 
+feedback.user_agent character varying(300) NO 
+feedback.user_id uuid YES 
+instance_state.key character varying(64) NO 
+instance_state.updated_at timestamp with time zone NO 
+instance_state.value jsonb NO 
+jobs.attempts integer NO 
+jobs.created_at timestamp with time zone NO 
+jobs.error text YES 
+jobs.finished_at timestamp with time zone YES 
+jobs.id uuid NO 
+jobs.kind character varying(64) NO 
+jobs.locked_at timestamp with time zone YES 
+jobs.locked_by character varying(100) YES 
+jobs.max_attempts integer NO 
+jobs.payload jsonb NO 
+jobs.project_id uuid YES 
+jobs.resource_id uuid YES 
+jobs.result jsonb YES 
+jobs.run_after timestamp with time zone NO 
+jobs.state character varying(16) NO 
+memberships.can_approve boolean NO 
+memberships.created_at timestamp with time zone NO 
+memberships.granted_by_sso boolean NO false
+memberships.id uuid NO 
+memberships.project_id uuid NO 
+memberships.role character varying(16) NO 
+memberships.updated_at timestamp with time zone NO 
+memberships.user_id uuid NO 
+metric_samples.at timestamp with time zone NO 
+metric_samples.events_per_second double precision YES 
+metric_samples.events_total double precision YES 
+metric_samples.healthy boolean YES 
+metric_samples.id integer NO nextval('metric_samples_id_seq'::regclass)
+metric_samples.lag_ms double precision YES 
+metric_samples.pipeline_id uuid NO 
+metric_samples.queue_used_ratio double precision YES 
+metric_samples.resolution integer NO 
+metric_samples.source_retained_bytes double precision YES 
+notifications.body text NO 
+notifications.created_at timestamp with time zone NO 
+notifications.id uuid NO 
+notifications.kind character varying(32) NO 
+notifications.link character varying(500) NO 
+notifications.project_id uuid NO 
+notifications.read_at timestamp with time zone YES 
+notifications.title text NO 
+notifications.user_id uuid NO 
+oauth_clients.client_uri character varying(500) YES 
+oauth_clients.created_at timestamp with time zone NO 
+oauth_clients.decided_at timestamp with time zone YES 
+oauth_clients.decided_by_id uuid YES 
+oauth_clients.id character varying(64) NO 
+oauth_clients.last_used_at timestamp with time zone YES 
+oauth_clients.name character varying(200) NO 
+oauth_clients.redirect_uris jsonb NO 
+oauth_clients.status character varying(16) NO 
+oauth_grants.access_expires_at timestamp with time zone NO 
+oauth_grants.access_hash character varying(64) NO 
+oauth_grants.client_id character varying(64) NO 
+oauth_grants.created_at timestamp with time zone NO 
+oauth_grants.expires_at timestamp with time zone NO 
+oauth_grants.id uuid NO 
+oauth_grants.last_used_at timestamp with time zone YES 
+oauth_grants.previous_refresh_hash character varying(64) YES 
+oauth_grants.project_id uuid YES 
+oauth_grants.read_only boolean NO 
+oauth_grants.refresh_hash character varying(64) NO 
+oauth_grants.revoked_at timestamp with time zone YES 
+oauth_grants.user_id uuid NO 
+oauth_requests.client_id character varying(64) NO 
+oauth_requests.code_challenge character varying(128) NO 
+oauth_requests.code_hash character varying(64) YES 
+oauth_requests.created_at timestamp with time zone NO 
+oauth_requests.expires_at timestamp with time zone NO 
+oauth_requests.grant_days integer NO 
+oauth_requests.id uuid NO 
+oauth_requests.project_id uuid YES 
+oauth_requests.read_only boolean NO 
+oauth_requests.redirect_uri text NO 
+oauth_requests.resource character varying(500) YES 
+oauth_requests.state character varying(500) YES 
+oauth_requests.status character varying(16) NO 
+oauth_requests.user_id uuid YES 
+pipeline_templates.created_at timestamp with time zone NO 
+pipeline_templates.created_by_id uuid YES 
+pipeline_templates.description text NO 
+pipeline_templates.id uuid NO 
+pipeline_templates.name character varying(63) NO 
+pipeline_templates.project_id uuid NO 
+pipeline_templates.runtime_id uuid YES 
+pipeline_templates.sink_id uuid YES 
+pipeline_templates.spec jsonb NO 
+pipeline_templates.title character varying(200) NO 
+pipeline_templates.updated_at timestamp with time zone NO 
+pipeline_templates.version integer NO 
+pipeline_versions.created_at timestamp with time zone NO 
+pipeline_versions.created_by_id uuid YES 
+pipeline_versions.created_by_label character varying(320) NO 
+pipeline_versions.id uuid NO 
+pipeline_versions.note text NO 
+pipeline_versions.number integer NO 
+pipeline_versions.pipeline_id uuid NO 
+pipeline_versions.sealed_at timestamp with time zone YES 
+pipeline_versions.spec jsonb NO 
+pipeline_versions.spec_hash character varying(64) NO 
+pipelines.artifacts jsonb NO 
+pipelines.created_at timestamp with time zone NO 
+pipelines.created_by_id uuid YES 
+pipelines.current_version_id uuid YES 
+pipelines.deleted_at timestamp with time zone YES 
+pipelines.deployed_at timestamp with time zone YES 
+pipelines.deployed_image character varying(300) YES 
+pipelines.deployed_version_id uuid YES 
+pipelines.description text NO 
+pipelines.desired_state character varying(16) NO 
+pipelines.health character varying(16) NO 
+pipelines.id uuid NO 
+pipelines.labels jsonb NO 
+pipelines.lifecycle character varying(16) NO 
+pipelines.name character varying(63) NO 
+pipelines.owner character varying(200) NO 
+pipelines.project_id uuid NO 
+pipelines.runtime_id uuid YES 
+pipelines.sink_id uuid YES 
+pipelines.source_id uuid NO 
+pipelines.status jsonb NO 
+pipelines.updated_at timestamp with time zone NO 
+pipelines.version integer NO 
+projects.created_at timestamp with time zone NO 
+projects.description text NO 
+projects.id uuid NO 
+projects.is_sandbox boolean NO 
+projects.name character varying(200) NO 
+projects.policies jsonb NO '{}'::jsonb
+projects.slug character varying(63) NO 
+projects.updated_at timestamp with time zone NO 
+runtimes.agent_state jsonb YES 
+runtimes.agent_token_hash character varying(64) YES 
+runtimes.agent_version character varying(40) YES 
+runtimes.capacity jsonb YES 
+runtimes.config jsonb NO 
+runtimes.created_at timestamp with time zone NO 
+runtimes.default_image character varying(300) YES 
+runtimes.enabled boolean NO true
+runtimes.id uuid NO 
+runtimes.kind character varying(16) NO 
+runtimes.last_seen_at timestamp with time zone YES 
+runtimes.last_test jsonb YES 
+runtimes.mode character varying(16) NO 
+runtimes.name character varying(63) NO 
+runtimes.project_id uuid NO 
+runtimes.secrets_enc text YES 
+runtimes.updated_at timestamp with time zone NO 
+runtimes.version integer NO 
+schema_changes.after text YES 
+schema_changes.before text YES 
+schema_changes.breaking boolean NO 
+schema_changes.column character varying(300) YES 
+schema_changes.detected_at timestamp with time zone NO 
+schema_changes.id uuid NO 
+schema_changes.kind character varying(32) NO 
+schema_changes.pipeline_id uuid NO 
+schema_changes.reviewed_at timestamp with time zone YES 
+schema_changes.table character varying(300) NO 
+secret_stores.config jsonb NO 
+secret_stores.created_at timestamp with time zone NO 
+secret_stores.id uuid NO 
+secret_stores.kind character varying(16) NO 
+secret_stores.last_test jsonb YES 
+secret_stores.name character varying(63) NO 
+secret_stores.project_id uuid NO 
+secret_stores.secrets_enc text YES 
+secret_stores.secrets_updated_at timestamp with time zone YES 
+secret_stores.updated_at timestamp with time zone NO 
+secret_stores.version integer NO 
+sso_providers.allow_unverified_email boolean NO 
+sso_providers.client_id character varying(500) NO 
+sso_providers.client_secret_enc text YES 
+sso_providers.config jsonb NO '{}'::jsonb
+sso_providers.created_at timestamp with time zone NO 
+sso_providers.default_projects jsonb NO 
+sso_providers.default_role character varying(16) YES 
+sso_providers.enabled boolean NO 
+sso_providers.groups_claim character varying(100) NO 
+sso_providers.id uuid NO 
+sso_providers.issuer character varying(500) NO 
+sso_providers.kind character varying(16) NO 'oidc'::character varying
+sso_providers.label character varying(60) NO 
+sso_providers.last_test jsonb YES 
+sso_providers.role_rules jsonb NO 
+sso_providers.scopes jsonb NO 
+sso_providers.updated_at timestamp with time zone NO 
+sso_providers.version integer NO 
+sso_replays.expires_at timestamp with time zone NO 
+sso_replays.id character varying(300) NO 
+sso_requests.expires_at timestamp with time zone NO 
+sso_requests.id character varying(64) NO 
+sso_requests.next_path character varying(1000) NO 
+sso_requests.provider_id uuid NO 
+sso_requests.relay_hash character varying(64) NO 
+user_sessions.created_at timestamp with time zone NO 
+user_sessions.csrf_token character varying(64) NO 
+user_sessions.expires_at timestamp with time zone NO 
+user_sessions.id uuid NO 
+user_sessions.token_hash character varying(64) NO 
+user_sessions.updated_at timestamp with time zone NO 
+user_sessions.user_agent character varying(400) NO 
+user_sessions.user_id uuid NO 
+users.created_at timestamp with time zone NO 
+users.email character varying(320) NO 
+users.id uuid NO 
+users.is_active boolean NO 
+users.is_superuser boolean NO 
+users.last_login_at timestamp with time zone YES 
+users.muted_notifications jsonb NO '[]'::jsonb
+users.name character varying(200) NO 
+users.password_hash text YES 
+users.sso_subject character varying(400) YES 
+users.ui_mode character varying(16) NO 
+users.updated_at timestamp with time zone NO 
+agent_requests fk_agent_requests_runtime_id_runtimes FOREIGN KEY (runtime_id) REFERENCES runtimes(id) ON DELETE CASCADE
+agent_requests pk_agent_requests PRIMARY KEY (id)
+agent_workloads fk_agent_workloads_runtime_id_runtimes FOREIGN KEY (runtime_id) REFERENCES runtimes(id) ON DELETE CASCADE
+agent_workloads pk_agent_workloads PRIMARY KEY (id)
+agent_workloads uq_agent_workloads_runtime_id_short_id UNIQUE (runtime_id, short_id)
+alert_channels fk_alert_channels_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+alert_channels pk_alert_channels PRIMARY KEY (id)
+alert_rules fk_alert_rules_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+alert_rules pk_alert_rules PRIMARY KEY (id)
+alerts fk_alerts_pipeline_id_pipelines FOREIGN KEY (pipeline_id) REFERENCES pipelines(id) ON DELETE CASCADE
+alerts fk_alerts_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+alerts fk_alerts_rule_id_alert_rules FOREIGN KEY (rule_id) REFERENCES alert_rules(id) ON DELETE CASCADE
+alerts pk_alerts PRIMARY KEY (id)
+api_tokens fk_api_tokens_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+api_tokens fk_api_tokens_user_id_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+api_tokens pk_api_tokens PRIMARY KEY (id)
+api_tokens uq_api_tokens_token_hash UNIQUE (token_hash)
+change_requests fk_change_requests_decided_by_id_users FOREIGN KEY (decided_by_id) REFERENCES users(id) ON DELETE SET NULL
+change_requests fk_change_requests_pipeline_id_pipelines FOREIGN KEY (pipeline_id) REFERENCES pipelines(id) ON DELETE CASCADE
+change_requests fk_change_requests_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+change_requests fk_change_requests_requested_by_id_users FOREIGN KEY (requested_by_id) REFERENCES users(id) ON DELETE SET NULL
+change_requests fk_change_requests_version_id_pipeline_versions FOREIGN KEY (version_id) REFERENCES pipeline_versions(id) ON DELETE CASCADE
+change_requests pk_change_requests PRIMARY KEY (id)
+connections fk_connections_created_by_id_users FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL
+connections fk_connections_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+connections pk_connections PRIMARY KEY (id)
+connections uq_connections_project_id_name UNIQUE (project_id, name)
+debezium_images fk_debezium_images_created_by_id_users FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL
+debezium_images pk_debezium_images PRIMARY KEY (id)
+debezium_images uq_debezium_images_image UNIQUE (image)
+events fk_events_actor_id_users FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+events fk_events_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+events pk_events PRIMARY KEY (id)
+feedback fk_feedback_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+feedback fk_feedback_user_id_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+feedback pk_feedback PRIMARY KEY (id)
+instance_state pk_instance_state PRIMARY KEY (key)
+jobs fk_jobs_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+jobs pk_jobs PRIMARY KEY (id)
+memberships fk_memberships_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+memberships fk_memberships_user_id_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+memberships pk_memberships PRIMARY KEY (id)
+memberships uq_memberships_project_id_user_id UNIQUE (project_id, user_id)
+metric_samples fk_metric_samples_pipeline_id_pipelines FOREIGN KEY (pipeline_id) REFERENCES pipelines(id) ON DELETE CASCADE
+metric_samples pk_metric_samples PRIMARY KEY (id)
+notifications fk_notifications_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+notifications fk_notifications_user_id_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+notifications pk_notifications PRIMARY KEY (id)
+oauth_clients fk_oauth_clients_decided_by_id_users FOREIGN KEY (decided_by_id) REFERENCES users(id) ON DELETE SET NULL
+oauth_clients pk_oauth_clients PRIMARY KEY (id)
+oauth_grants fk_oauth_grants_client_id_oauth_clients FOREIGN KEY (client_id) REFERENCES oauth_clients(id) ON DELETE CASCADE
+oauth_grants fk_oauth_grants_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+oauth_grants fk_oauth_grants_user_id_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+oauth_grants pk_oauth_grants PRIMARY KEY (id)
+oauth_grants uq_oauth_grants_access_hash UNIQUE (access_hash)
+oauth_grants uq_oauth_grants_refresh_hash UNIQUE (refresh_hash)
+oauth_requests fk_oauth_requests_client_id_oauth_clients FOREIGN KEY (client_id) REFERENCES oauth_clients(id) ON DELETE CASCADE
+oauth_requests fk_oauth_requests_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+oauth_requests fk_oauth_requests_user_id_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+oauth_requests pk_oauth_requests PRIMARY KEY (id)
+oauth_requests uq_oauth_requests_code_hash UNIQUE (code_hash)
+pipeline_templates fk_pipeline_templates_created_by_id_users FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL
+pipeline_templates fk_pipeline_templates_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+pipeline_templates fk_pipeline_templates_runtime_id_runtimes FOREIGN KEY (runtime_id) REFERENCES runtimes(id) ON DELETE SET NULL
+pipeline_templates fk_pipeline_templates_sink_id_connections FOREIGN KEY (sink_id) REFERENCES connections(id) ON DELETE SET NULL
+pipeline_templates pk_pipeline_templates PRIMARY KEY (id)
+pipeline_templates uq_pipeline_templates_project_id_name UNIQUE (project_id, name)
+pipeline_versions fk_pipeline_versions_created_by_id_users FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL
+pipeline_versions fk_pipeline_versions_pipeline_id_pipelines FOREIGN KEY (pipeline_id) REFERENCES pipelines(id) ON DELETE CASCADE
+pipeline_versions pk_pipeline_versions PRIMARY KEY (id)
+pipeline_versions uq_pipeline_versions_pipeline_id_number UNIQUE (pipeline_id, number)
+pipelines fk_pipelines_created_by_id_users FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL
+pipelines fk_pipelines_current_version FOREIGN KEY (current_version_id) REFERENCES pipeline_versions(id)
+pipelines fk_pipelines_deployed_version FOREIGN KEY (deployed_version_id) REFERENCES pipeline_versions(id)
+pipelines fk_pipelines_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+pipelines fk_pipelines_runtime_id_runtimes FOREIGN KEY (runtime_id) REFERENCES runtimes(id)
+pipelines fk_pipelines_sink_id_connections FOREIGN KEY (sink_id) REFERENCES connections(id)
+pipelines fk_pipelines_source_id_connections FOREIGN KEY (source_id) REFERENCES connections(id)
+pipelines pk_pipelines PRIMARY KEY (id)
+projects pk_projects PRIMARY KEY (id)
+projects uq_projects_slug UNIQUE (slug)
+runtimes fk_runtimes_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+runtimes pk_runtimes PRIMARY KEY (id)
+runtimes uq_runtimes_agent_token_hash UNIQUE (agent_token_hash)
+runtimes uq_runtimes_project_id_name UNIQUE (project_id, name)
+schema_changes fk_schema_changes_pipeline_id_pipelines FOREIGN KEY (pipeline_id) REFERENCES pipelines(id) ON DELETE CASCADE
+schema_changes pk_schema_changes PRIMARY KEY (id)
+secret_stores fk_secret_stores_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+secret_stores pk_secret_stores PRIMARY KEY (id)
+secret_stores uq_secret_stores_project_id_name UNIQUE (project_id, name)
+sso_providers pk_sso_providers PRIMARY KEY (id)
+sso_providers uq_sso_providers_label UNIQUE (label)
+sso_replays pk_sso_replays PRIMARY KEY (id)
+sso_requests fk_sso_requests_provider_id_sso_providers FOREIGN KEY (provider_id) REFERENCES sso_providers(id) ON DELETE CASCADE
+sso_requests pk_sso_requests PRIMARY KEY (id)
+sso_requests uq_sso_requests_relay_hash UNIQUE (relay_hash)
+user_sessions fk_user_sessions_user_id_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+user_sessions pk_user_sessions PRIMARY KEY (id)
+user_sessions uq_user_sessions_token_hash UNIQUE (token_hash)
+users pk_users PRIMARY KEY (id)
+users uq_users_email UNIQUE (email)
+users uq_users_sso_subject UNIQUE (sso_subject)
+CREATE INDEX ix_agent_requests_pending ON public.agent_requests USING btree (runtime_id, state)
+CREATE INDEX ix_agent_workloads_runtime_id ON public.agent_workloads USING btree (runtime_id)
+CREATE INDEX ix_alert_channels_project_id ON public.alert_channels USING btree (project_id)
+CREATE INDEX ix_alert_rules_project_id ON public.alert_rules USING btree (project_id)
+CREATE INDEX ix_alerts_pipeline_id ON public.alerts USING btree (pipeline_id)
+CREATE INDEX ix_alerts_project_state ON public.alerts USING btree (project_id, state)
+CREATE INDEX ix_api_tokens_user_id ON public.api_tokens USING btree (user_id)
+CREATE INDEX ix_change_requests_pipeline_id ON public.change_requests USING btree (pipeline_id)
+CREATE INDEX ix_change_requests_project_state ON public.change_requests USING btree (project_id, state)
+CREATE INDEX ix_connections_project_id ON public.connections USING btree (project_id)
+CREATE INDEX ix_events_project_time ON public.events USING btree (project_id, occurred_at)
+CREATE INDEX ix_events_resource ON public.events USING btree (resource_type, resource_id)
+CREATE INDEX ix_feedback_resolved_created ON public.feedback USING btree (resolved_at, created_at)
+CREATE INDEX ix_jobs_ready ON public.jobs USING btree (state, run_after)
+CREATE INDEX ix_jobs_resource_id ON public.jobs USING btree (resource_id)
+CREATE INDEX ix_memberships_project_id ON public.memberships USING btree (project_id)
+CREATE INDEX ix_memberships_user_id ON public.memberships USING btree (user_id)
+CREATE INDEX ix_metric_samples_pipeline_at ON public.metric_samples USING btree (pipeline_id, at)
+CREATE INDEX ix_notifications_user_project ON public.notifications USING btree (user_id, project_id, created_at)
+CREATE INDEX ix_oauth_grants_user_id ON public.oauth_grants USING btree (user_id)
+CREATE INDEX ix_oauth_requests_expires_at ON public.oauth_requests USING btree (expires_at)
+CREATE INDEX ix_pipelines_lifecycle ON public.pipelines USING btree (lifecycle)
+CREATE INDEX ix_pipelines_project_id ON public.pipelines USING btree (project_id)
+CREATE INDEX ix_pipelines_runtime_id ON public.pipelines USING btree (runtime_id)
+CREATE INDEX ix_pipelines_sink_id ON public.pipelines USING btree (sink_id)
+CREATE INDEX ix_pipelines_source_id ON public.pipelines USING btree (source_id)
+CREATE INDEX ix_pipeline_templates_project_id ON public.pipeline_templates USING btree (project_id)
+CREATE INDEX ix_pipeline_versions_pipeline_id ON public.pipeline_versions USING btree (pipeline_id)
+CREATE INDEX ix_runtimes_project_id ON public.runtimes USING btree (project_id)
+CREATE INDEX ix_schema_changes_pipeline_detected ON public.schema_changes USING btree (pipeline_id, detected_at)
+CREATE INDEX ix_secret_stores_project_id ON public.secret_stores USING btree (project_id)
+CREATE INDEX ix_sso_replays_expires_at ON public.sso_replays USING btree (expires_at)
+CREATE INDEX ix_user_sessions_user_id ON public.user_sessions USING btree (user_id)
+CREATE UNIQUE INDEX pk_agent_requests ON public.agent_requests USING btree (id)
+CREATE UNIQUE INDEX pk_agent_workloads ON public.agent_workloads USING btree (id)
+CREATE UNIQUE INDEX pk_alert_channels ON public.alert_channels USING btree (id)
+CREATE UNIQUE INDEX pk_alert_rules ON public.alert_rules USING btree (id)
+CREATE UNIQUE INDEX pk_alerts ON public.alerts USING btree (id)
+CREATE UNIQUE INDEX pk_api_tokens ON public.api_tokens USING btree (id)
+CREATE UNIQUE INDEX pk_change_requests ON public.change_requests USING btree (id)
+CREATE UNIQUE INDEX pk_connections ON public.connections USING btree (id)
+CREATE UNIQUE INDEX pk_debezium_images ON public.debezium_images USING btree (id)
+CREATE UNIQUE INDEX pk_events ON public.events USING btree (id)
+CREATE UNIQUE INDEX pk_feedback ON public.feedback USING btree (id)
+CREATE UNIQUE INDEX pk_instance_state ON public.instance_state USING btree (key)
+CREATE UNIQUE INDEX pk_jobs ON public.jobs USING btree (id)
+CREATE UNIQUE INDEX pk_memberships ON public.memberships USING btree (id)
+CREATE UNIQUE INDEX pk_metric_samples ON public.metric_samples USING btree (id)
+CREATE UNIQUE INDEX pk_notifications ON public.notifications USING btree (id)
+CREATE UNIQUE INDEX pk_oauth_clients ON public.oauth_clients USING btree (id)
+CREATE UNIQUE INDEX pk_oauth_grants ON public.oauth_grants USING btree (id)
+CREATE UNIQUE INDEX pk_oauth_requests ON public.oauth_requests USING btree (id)
+CREATE UNIQUE INDEX pk_pipelines ON public.pipelines USING btree (id)
+CREATE UNIQUE INDEX pk_pipeline_templates ON public.pipeline_templates USING btree (id)
+CREATE UNIQUE INDEX pk_pipeline_versions ON public.pipeline_versions USING btree (id)
+CREATE UNIQUE INDEX pk_projects ON public.projects USING btree (id)
+CREATE UNIQUE INDEX pk_runtimes ON public.runtimes USING btree (id)
+CREATE UNIQUE INDEX pk_schema_changes ON public.schema_changes USING btree (id)
+CREATE UNIQUE INDEX pk_secret_stores ON public.secret_stores USING btree (id)
+CREATE UNIQUE INDEX pk_sso_providers ON public.sso_providers USING btree (id)
+CREATE UNIQUE INDEX pk_sso_replays ON public.sso_replays USING btree (id)
+CREATE UNIQUE INDEX pk_sso_requests ON public.sso_requests USING btree (id)
+CREATE UNIQUE INDEX pk_user_sessions ON public.user_sessions USING btree (id)
+CREATE UNIQUE INDEX pk_users ON public.users USING btree (id)
+CREATE UNIQUE INDEX uq_agent_workloads_runtime_id_short_id ON public.agent_workloads USING btree (runtime_id, short_id)
+CREATE UNIQUE INDEX uq_alerts_open ON public.alerts USING btree (rule_id, pipeline_id) WHERE ((state)::text <> 'resolved'::text)
+CREATE UNIQUE INDEX uq_api_tokens_token_hash ON public.api_tokens USING btree (token_hash)
+CREATE UNIQUE INDEX uq_connections_project_id_name ON public.connections USING btree (project_id, name)
+CREATE UNIQUE INDEX uq_debezium_images_image ON public.debezium_images USING btree (image)
+CREATE UNIQUE INDEX uq_memberships_project_id_user_id ON public.memberships USING btree (project_id, user_id)
+CREATE UNIQUE INDEX uq_oauth_grants_access_hash ON public.oauth_grants USING btree (access_hash)
+CREATE UNIQUE INDEX uq_oauth_grants_refresh_hash ON public.oauth_grants USING btree (refresh_hash)
+CREATE UNIQUE INDEX uq_oauth_requests_code_hash ON public.oauth_requests USING btree (code_hash)
+CREATE UNIQUE INDEX uq_pipelines_project_name_live ON public.pipelines USING btree (project_id, name) WHERE (deleted_at IS NULL)
+CREATE UNIQUE INDEX uq_pipeline_templates_project_id_name ON public.pipeline_templates USING btree (project_id, name)
+CREATE UNIQUE INDEX uq_pipeline_versions_pipeline_id_number ON public.pipeline_versions USING btree (pipeline_id, number)
+CREATE UNIQUE INDEX uq_projects_slug ON public.projects USING btree (slug)
+CREATE UNIQUE INDEX uq_runtimes_agent_token_hash ON public.runtimes USING btree (agent_token_hash)
+CREATE UNIQUE INDEX uq_runtimes_project_id_name ON public.runtimes USING btree (project_id, name)
+CREATE UNIQUE INDEX uq_secret_stores_project_id_name ON public.secret_stores USING btree (project_id, name)
+CREATE UNIQUE INDEX uq_sso_providers_label ON public.sso_providers USING btree (label)
+CREATE UNIQUE INDEX uq_sso_requests_relay_hash ON public.sso_requests USING btree (relay_hash)
+CREATE UNIQUE INDEX uq_users_email ON public.users USING btree (email)
+CREATE UNIQUE INDEX uq_user_sessions_token_hash ON public.user_sessions USING btree (token_hash)
+CREATE UNIQUE INDEX uq_users_sso_subject ON public.users USING btree (sso_subject)

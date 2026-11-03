@@ -1,0 +1,80 @@
+# Lakehouse destinations. RustFS (S3-compatible, with its built-in Iceberg REST catalog "S3
+# Tables"): rustfs:9000, buckets "lake" (a table bucket: catalog http://rustfs:9000/iceberg,
+# warehouse "lake", SigV4 service s3) and "warehouse" (files of the REST catalog below).
+# iceberg-rest:8181 is Apache Iceberg's REST catalog fixture (in-memory catalog) writing to
+# s3://warehouse/ in RustFS. Credentials: lake-admin / lake-secret-123.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: rustfs }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: rustfs } }
+  template:
+    metadata: { labels: { app: rustfs, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: rustfs
+          image: rustfs/rustfs:1.0.4
+          env:
+            - { name: RUSTFS_ACCESS_KEY, value: lake-admin }
+            - { name: RUSTFS_SECRET_KEY, value: lake-secret-123 }
+          ports: [{ containerPort: 9000 }]
+          volumeMounts: [{ name: data, mountPath: /data }]
+          readinessProbe: { tcpSocket: { port: 9000 }, periodSeconds: 3 }
+        # Creates the buckets and turns "lake" into a table bucket, then reports ready.
+        - name: buckets
+          image: curlimages/curl:8.11.1
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              S3=http://127.0.0.1:9000; AUTH="lake-admin:lake-secret-123"
+              H="x-amz-content-sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              until curl -s -o /dev/null "$S3"; do sleep 1; done
+              for b in lake warehouse; do
+                curl -s -o /dev/null --aws-sigv4 aws:amz:us-east-1:s3 --user "$AUTH" -H "$H" -X PUT "$S3/$b"
+              done
+              curl -sf --aws-sigv4 aws:amz:us-east-1:s3 --user "$AUTH" -H "$H" -X PUT "$S3/iceberg/v1/buckets/lake"
+              touch /tmp/ready
+              exec sleep infinity
+          readinessProbe: { exec: { command: [test, -f, /tmp/ready] }, periodSeconds: 3 }
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: rustfs }
+spec:
+  selector: { app: rustfs }
+  ports: [{ port: 9000, targetPort: 9000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: iceberg-rest }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: iceberg-rest } }
+  template:
+    metadata: { labels: { app: iceberg-rest, app.bezisync.io/fixture: "true" } }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: rest
+          image: apache/iceberg-rest-fixture:1.10.1
+          env:
+            - { name: CATALOG_WAREHOUSE, value: "s3://warehouse/" }
+            - { name: CATALOG_IO__IMPL, value: org.apache.iceberg.aws.s3.S3FileIO }
+            - { name: CATALOG_S3_ENDPOINT, value: "http://rustfs:9000" }
+            - { name: CATALOG_S3_PATH__STYLE__ACCESS, value: "true" }
+            - { name: AWS_ACCESS_KEY_ID, value: lake-admin }
+            - { name: AWS_SECRET_ACCESS_KEY, value: lake-secret-123 }
+            - { name: AWS_REGION, value: us-east-1 }
+          ports: [{ containerPort: 8181 }]
+          readinessProbe: { httpGet: { path: /v1/config, port: 8181 }, periodSeconds: 3 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: iceberg-rest }
+spec:
+  selector: { app: iceberg-rest }
+  ports: [{ port: 8181, targetPort: 8181 }]

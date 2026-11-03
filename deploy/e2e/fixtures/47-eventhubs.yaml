@@ -1,0 +1,44 @@
+# Azure Event Hubs emulator (with Azurite for its storage): eventhubs:5672 (AMQP, no TLS),
+# namespace emulatorNs1 with hub "bezisync" (2 partitions). Connection string:
+# Endpoint=sb://eventhubs.bezisync-e2e-data.svc.cluster.local;SharedAccessKeyName=RootManageSharedAccessKey;
+# SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: eventhubs-config }
+data:
+  Config.json: |
+    {"UserConfig": {"NamespaceConfig": [{"Type": "EventHub", "Name": "emulatorNs1",
+      "Entities": [{"Name": "bezisync", "PartitionCount": "2", "ConsumerGroups": []}]}],
+      "LoggingConfig": {"Type": "Console"}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: eventhubs }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: eventhubs } }
+  template:
+    metadata: { labels: { app: eventhubs, app.bezisync.io/fixture: "true" } }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: azurite
+          image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+          args: [azurite, --blobHost, 0.0.0.0, --queueHost, 0.0.0.0, --tableHost, 0.0.0.0, --skipApiVersionCheck]
+        - name: emulator
+          image: mcr.microsoft.com/azure-messaging/eventhubs-emulator:2.2.1
+          env:
+            - { name: BLOB_SERVER, value: 127.0.0.1 }
+            - { name: METADATA_SERVER, value: 127.0.0.1 }
+            - { name: ACCEPT_EULA, value: "Y" }
+          ports: [{ containerPort: 5672 }]
+          volumeMounts: [{ name: config, mountPath: /Eventhubs_Emulator/ConfigFiles/Config.json, subPath: Config.json }]
+          readinessProbe: { tcpSocket: { port: 5672 }, periodSeconds: 3 }
+      volumes: [{ name: config, configMap: { name: eventhubs-config } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: eventhubs }
+spec:
+  selector: { app: eventhubs }
+  ports: [{ port: 5672, targetPort: 5672 }]

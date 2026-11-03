@@ -1,0 +1,144 @@
+# BeziSync demo stack: the control plane plus a sample shop database (with live orders) and
+# Kafka. On first start BeziSync creates a "Sandbox" project wired to them, with a local Docker
+# runtime and a ready template — create your first pipeline in a couple of minutes.
+#
+#   docker compose -f deploy/compose/docker-compose.yml up -d --build
+#   open http://localhost:8080   (admin@bezisync.local / bezisync-demo)
+#   docker compose -f deploy/compose/docker-compose.yml down -v
+#
+# For evaluation only: fixed demo secrets, no TLS, and the controller gets the Docker socket
+# (root-equivalent on this host). Use the Helm chart for real installs.
+name: bezisync-demo
+
+x-bezisync: &bezisync
+  image: ${BEZISYNC_IMAGE:-ghcr.io/daun-gatal/bezisync:latest}
+  build: ../../backend
+  restart: unless-stopped
+  environment: &env
+    BEZISYNC_DATABASE_URL: postgresql+psycopg://bezisync:bezisync@postgres:5432/bezisync
+    BEZISYNC_MASTER_KEY: ${BEZISYNC_MASTER_KEY:-ZGVtby1vbmx5LW1hc3Rlci1rZXktMzItYnl0ZXMhISE=}
+    BEZISYNC_PUBLIC_URL: http://localhost:${BEZISYNC_DEMO_PORT:-8080}
+    BEZISYNC_COOKIE_SECURE: "false"
+    BEZISYNC_ENVIRONMENT: development
+    BEZISYNC_LOG_JSON: "false"
+    BEZISYNC_BOOTSTRAP_ADMIN_PASSWORD: ${BEZISYNC_ADMIN_PASSWORD:-bezisync-demo}
+    # The demo services live on private Docker addresses.
+    BEZISYNC_SSRF_ALLOW_CIDRS: '["172.16.0.0/12","192.168.0.0/16","10.0.0.0/8"]'
+    BEZISYNC_SANDBOX_SOURCE_HOST: demo-shop
+    BEZISYNC_SANDBOX_SOURCE_PASSWORD: cdc-reader-pw
+    BEZISYNC_SANDBOX_KAFKA_BOOTSTRAP: kafka:9092
+    BEZISYNC_SANDBOX_DOCKER_NETWORK: bezisync-demo
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment: { POSTGRES_USER: bezisync, POSTGRES_PASSWORD: bezisync, POSTGRES_DB: bezisync }
+    volumes: [metadata:/var/lib/postgresql/data]
+    healthcheck: { test: [CMD, pg_isready, -U, bezisync], interval: 3s, retries: 30 }
+
+  demo-shop:
+    image: postgres:17
+    restart: unless-stopped
+    environment: { POSTGRES_USER: shop_admin, POSTGRES_PASSWORD: shop-admin-pw, POSTGRES_DB: shop }
+    # The init script is written by the container itself, so the stack also works against a
+    # remote Docker daemon (no bind-mounted files).
+    entrypoint:
+      - bash
+      - -c
+      - |
+        cat > /docker-entrypoint-initdb.d/shop.sql <<'SQL'
+        CREATE ROLE cdc_reader LOGIN REPLICATION PASSWORD 'cdc-reader-pw';
+        GRANT CREATE ON DATABASE shop TO cdc_reader;
+        CREATE SCHEMA shop AUTHORIZATION cdc_reader;
+        SET ROLE cdc_reader;
+        CREATE TABLE shop.customers (id serial PRIMARY KEY, name text NOT NULL, email text, phone text);
+        CREATE TABLE shop.orders (id serial PRIMARY KEY, customer_id int REFERENCES shop.customers(id), status text NOT NULL, total numeric(10,2), created_at timestamptz DEFAULT now());
+        INSERT INTO shop.customers (name, email, phone) SELECT 'Customer ' || g, 'c' || g || '@example.com', '+1555' || g FROM generate_series(1, 50) g;
+        INSERT INTO shop.orders (customer_id, status, total) SELECT 1 + (g % 50), 'NEW', g FROM generate_series(1, 200) g;
+        RESET ROLE;
+        CREATE ROLE shop_app LOGIN PASSWORD 'shop-app-pw';
+        GRANT USAGE ON SCHEMA shop TO shop_app;
+        GRANT ALL ON ALL TABLES IN SCHEMA shop TO shop_app;
+        GRANT ALL ON ALL SEQUENCES IN SCHEMA shop TO shop_app;
+        SQL
+        exec docker-entrypoint.sh postgres -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10
+    volumes: [shop:/var/lib/postgresql/data]
+    healthcheck: { test: [CMD, pg_isready, -U, shop_admin, -d, shop], interval: 3s, retries: 30 }
+
+  # Keeps the shop busy: a new order every two seconds, and some status updates.
+  shop-traffic:
+    image: postgres:17
+    restart: unless-stopped
+    depends_on: { demo-shop: { condition: service_healthy } }
+    environment: { PGPASSWORD: shop-app-pw }
+    entrypoint:
+      - bash
+      - -c
+      - |
+        until psql -h demo-shop -U shop_app -d shop -c 'select 1' >/dev/null 2>&1; do sleep 2; done
+        while true; do
+          psql -q -h demo-shop -U shop_app -d shop -c "
+            INSERT INTO shop.orders (customer_id, status, total) VALUES (1 + floor(random() * 50)::int, 'NEW', round((random() * 200)::numeric, 2));
+            UPDATE shop.orders SET status = 'SHIPPED' WHERE id = (SELECT id FROM shop.orders WHERE status = 'NEW' ORDER BY random() LIMIT 1);"
+          sleep 2
+        done
+
+  kafka:
+    image: apache/kafka:4.3.2
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_HEAP_OPTS: -Xmx512m -Xms256m
+
+  migrate:
+    <<: *bezisync
+    restart: "no"
+    command: [migrate]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  api:
+    <<: *bezisync
+    command: [api, --port, "8000"]
+    # The API tests the Docker runtime (preflight) and reads connector logs through it.
+    user: "0"
+    volumes: [/var/run/docker.sock:/var/run/docker.sock]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    healthcheck:
+      test: [CMD, bezisync, healthcheck, --url, "http://127.0.0.1:8000/readyz"]
+      interval: 5s
+      retries: 30
+
+  controller:
+    <<: *bezisync
+    command: [controller]
+    # The Docker runtime starts one Debezium Server container per pipeline on this host.
+    user: "0"
+    volumes: [/var/run/docker.sock:/var/run/docker.sock]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  web:
+    image: ${BEZISYNC_WEB_IMAGE:-ghcr.io/daun-gatal/bezisync-web:latest}
+    build: ../../frontend
+    restart: unless-stopped
+    environment: { BEZISYNC_API_UPSTREAM: http://api:8000 }
+    ports: ["${BEZISYNC_DEMO_PORT:-8080}:8080"]
+    depends_on: { api: { condition: service_healthy } }
+
+networks:
+  default:
+    # Fixed name: connectors started by the Docker runtime join it to reach the demo services.
+    name: bezisync-demo
+
+volumes:
+  metadata: {}
+  shop: {}

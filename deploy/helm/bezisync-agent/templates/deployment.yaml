@@ -1,0 +1,47 @@
+{{- if not .Values.controlPlane.url }}{{ fail "controlPlane.url is required" }}{{ end }}
+{{- if not (has .Values.kind (list "kubernetes" "docker")) }}{{ fail "kind must be kubernetes or docker" }}{{ end }}
+{{- if and (eq .Values.kind "docker") (not .Values.docker.host) }}{{ fail "docker.host is required when kind=docker" }}{{ end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent.fullname" . }}
+  labels: {{- include "agent.labels" . | nindent 4 }}
+spec:
+  replicas: 1          # one agent per runtime; Recreate avoids two agents converging at once
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/name: bezisync-agent }
+  template:
+    metadata:
+      labels: {{- include "agent.labels" . | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "agent.fullname" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: agent
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [agent]
+          env:
+            - { name: BEZISYNC_AGENT_URL, value: {{ .Values.controlPlane.url | quote }} }
+            - { name: BEZISYNC_AGENT_KIND, value: {{ .Values.kind | quote }} }
+            - { name: BEZISYNC_AGENT_INSECURE, value: {{ .Values.controlPlane.insecure | quote }} }
+            - name: BEZISYNC_AGENT_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            {{- if eq .Values.kind "docker" }}
+            - { name: BEZISYNC_AGENT_DOCKER_HOST, value: {{ .Values.docker.host | quote }} }
+            - { name: BEZISYNC_AGENT_DOCKER_NETWORK, value: {{ .Values.docker.network | quote }} }
+            - { name: BEZISYNC_AGENT_DOCKER_IMAGE_PULL_TIMEOUT, value: {{ .Values.docker.imagePullTimeout | quote }} }
+            {{- end }}
+            - { name: BEZISYNC_LOG_JSON, value: "true" }
+          envFrom:
+            - secretRef: { name: {{ include "agent.secretName" . }} }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]

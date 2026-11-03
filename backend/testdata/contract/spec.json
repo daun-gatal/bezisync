@@ -1,0 +1,1522 @@
+{
+ "cases": [
+  {
+   "input": {},
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "b4124e8cb9321b5ff5ab4d4f3ec38a5ee019189e643dab8e89992d70a90151e3",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": false,
+    "notes": [
+     "No changes."
+    ]
+   }
+  },
+  {
+   "input": {
+    "source": {
+     "tables": {
+      "include": [
+       "public.b",
+       "public.a"
+      ]
+     },
+     "columns": {
+      "public.a": {
+       "mask": [
+        "email"
+       ]
+      }
+     }
+    }
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": [
+       "public.a",
+       "public.b"
+      ]
+     },
+     "columns": {
+      "public.a": {
+       "mask": [
+        "email"
+       ],
+       "exclude": []
+      }
+     }
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "078546b1cab933ebfcfbd2009f2db2d53679f866b3319d95727ad65586c6821b",
+   "summary_first": {
+    "tables_added": [
+     "public.a",
+     "public.b"
+    ],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [
+     "public.a",
+     "public.b"
+    ],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "Adds 2 table(s); an incremental snapshot copies only their existing rows while other tables keep streaming.",
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "source": {
+     "tables": {
+      "include": [
+       "bad"
+      ]
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "source",
+      "tables",
+      "include"
+     ],
+     "type": "value_error",
+     "msg": "Value error, tables must look like schema.table: bad"
+    }
+   ]
+  },
+  {
+   "input": {
+    "source": {
+     "tables": {
+      "include": [
+       "a.b",
+       "a.b"
+      ]
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "source",
+      "tables",
+      "include"
+     ],
+     "type": "value_error",
+     "msg": "Value error, duplicate tables"
+    }
+   ]
+  },
+  {
+   "input": {
+    "source": {
+     "tables": {
+      "include": [
+       "x",
+       "y",
+       "z",
+       "w",
+       "v",
+       "u",
+       "t"
+      ]
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "source",
+      "tables",
+      "include"
+     ],
+     "type": "value_error",
+     "msg": "Value error, tables must look like schema.table: x, y, z, w, v"
+    }
+   ]
+  },
+  {
+   "input": {
+    "source": {
+     "columns": {
+      "public.zzz": {
+       "exclude": [
+        "c"
+       ]
+      }
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [],
+     "type": "value_error",
+     "msg": "Value error, column rules for tables that are not captured: public.zzz"
+    }
+   ]
+  },
+  {
+   "input": {
+    "source": {
+     "columns": {
+      "public.zzz": "nope"
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "source",
+      "columns",
+      "public.zzz"
+     ],
+     "type": "model_type",
+     "msg": "Input should be a valid dictionary or instance of ColumnRules"
+    }
+   ]
+  },
+  {
+   "input": {
+    "source": "nope"
+   },
+   "errors": [
+    {
+     "loc": [
+      "source"
+     ],
+     "type": "model_type",
+     "msg": "Input should be a valid dictionary or instance of SourceSpec"
+    }
+   ]
+  },
+  {
+   "input": {
+    "source": {
+     "tables": {
+      "include": "public.a"
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "source",
+      "tables",
+      "include"
+     ],
+     "type": "list_type",
+     "msg": "Input should be a valid list"
+    }
+   ]
+  },
+  {
+   "input": {
+    "source": {
+     "tables": {
+      "include": [
+       1
+      ]
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "source",
+      "tables",
+      "include",
+      "0"
+     ],
+     "type": "string_type",
+     "msg": "Input should be a valid string"
+    }
+   ]
+  },
+  {
+   "input": {
+    "sink": {
+     "naming": "cdc.{schema}"
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "sink",
+      "naming"
+     ],
+     "type": "value_error",
+     "msg": "Value error, naming must contain {table}"
+    }
+   ]
+  },
+  {
+   "input": {
+    "sink": {
+     "naming": "cdc.{nope}.{table}.{x}"
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "sink",
+      "naming"
+     ],
+     "type": "value_error",
+     "msg": "Value error, unknown placeholders: {nope}, {x}"
+    }
+   ]
+  },
+  {
+   "input": {
+    "sink": {
+     "naming": "cdc {table}"
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "sink",
+      "naming"
+     ],
+     "type": "value_error",
+     "msg": "Value error, use letters, digits, '.', '_', '-' and placeholders only"
+    }
+   ]
+  },
+  {
+   "input": {
+    "sink": {
+     "naming": "{pipeline}.{table}",
+     "format": {
+      "type": "avro",
+      "registry_url": "http://r:8080",
+      "registry_kind": "confluent"
+     },
+     "options": {
+      "partitions": 3,
+      "x": {
+       "y": 1.5
+      }
+     }
+    }
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "{pipeline}.{table}",
+     "format": {
+      "type": "avro",
+      "include_schema": false,
+      "registry_url": "http://r:8080",
+      "registry_kind": "confluent"
+     },
+     "options": {
+      "partitions": 3,
+      "x": {
+       "y": 1.5
+      }
+     }
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "a55f65224632e78d348752f9d708acd2afa1964368712f0034eeec6b818b2fc5",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": true,
+    "format_changed": true,
+    "restarts_connector": true,
+    "notes": [
+     "Events go to new destination names; consumers of the old names stop receiving data.",
+     "Event format changes; make sure consumers can read the new format.",
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "sink": {
+     "format": {
+      "type": "xml"
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "sink",
+      "format",
+      "type"
+     ],
+     "type": "literal_error",
+     "msg": "Input should be 'json', 'avro', 'protobuf' or 'cloudevents'"
+    }
+   ]
+  },
+  {
+   "input": {
+    "snapshot": {
+     "mode": "never"
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "snapshot",
+      "mode"
+     ],
+     "type": "literal_error",
+     "msg": "Input should be 'initial', 'no_data', 'when_needed', 'initial_only' or 'always'"
+    }
+   ]
+  },
+  {
+   "input": {
+    "snapshot": {
+     "chunk_size": 10,
+     "fetch_size": 2000000,
+     "delay_seconds": -1
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "snapshot",
+      "chunk_size"
+     ],
+     "type": "greater_than_equal",
+     "msg": "Input should be greater than or equal to 64"
+    },
+    {
+     "loc": [
+      "snapshot",
+      "fetch_size"
+     ],
+     "type": "less_than_equal",
+     "msg": "Input should be less than or equal to 1000000"
+    },
+    {
+     "loc": [
+      "snapshot",
+      "delay_seconds"
+     ],
+     "type": "greater_than_equal",
+     "msg": "Input should be greater than or equal to 0"
+    }
+   ]
+  },
+  {
+   "input": {
+    "snapshot": {
+     "chunk_size": "2048",
+     "window": "22:00-06:00"
+    }
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 2048,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": "22:00-06:00"
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "181e67be29cedf99eae0e33c884ea57f9fe63a014128514c421a409557bc6bba",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "snapshot": {
+     "window": "2200-0600"
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "snapshot",
+      "window"
+     ],
+     "type": "string_pattern_mismatch",
+     "msg": "String should match pattern '^\\d{2}:\\d{2}-\\d{2}:\\d{2}$'"
+    }
+   ]
+  },
+  {
+   "input": {
+    "snapshot": {
+     "chunk_size": 100.5
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "snapshot",
+      "chunk_size"
+     ],
+     "type": "int_from_float",
+     "msg": "Input should be a valid integer, got a number with a fractional part"
+    }
+   ]
+  },
+  {
+   "input": {
+    "transforms": []
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "734ce000e02a804350e6e25aee2abc5684d5befb26afd532c4418ca34bbeb65a",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "transforms": [
+     {
+      "type": "filter",
+      "condition": "value.op == 'c'"
+     },
+     {
+      "type": "outbox",
+      "delete_handling": "drop",
+      "add_fields": []
+     }
+    ]
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "filter",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": "value.op == 'c'"
+     },
+     {
+      "type": "outbox",
+      "delete_handling": "drop",
+      "add_fields": [],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "8c3aaf08afe5e5950e4351ef37477e86ddf6d0c2602d5f98827e27d4852cb45f",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "transforms": [
+     {}
+    ]
+   },
+   "errors": [
+    {
+     "loc": [
+      "transforms",
+      "0",
+      "type"
+     ],
+     "type": "missing",
+     "msg": "Field required"
+    }
+   ]
+  },
+  {
+   "input": {
+    "transforms": [
+     {
+      "type": "unwrap",
+      "extra": 1
+     }
+    ]
+   },
+   "errors": [
+    {
+     "loc": [
+      "transforms",
+      "0",
+      "extra"
+     ],
+     "type": "extra_forbidden",
+     "msg": "Extra inputs are not permitted"
+    }
+   ]
+  },
+  {
+   "input": {
+    "policies": {
+     "resources": "large",
+     "errors": {
+      "retries": 5,
+      "on_poison_event": "skip"
+     },
+     "source_retained_limit_gb": 2.5,
+     "delivery_canary": true
+    }
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "large",
+     "errors": {
+      "retries": 5,
+      "on_poison_event": "skip"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 2.5,
+     "delivery_canary": true
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "298466a7e7eaf4d0ca888a88520068a31ba701b2f45132489d7d5fbcb5d193b6",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "policies": {
+     "source_retained_limit_gb": 0
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "policies",
+      "source_retained_limit_gb"
+     ],
+     "type": "greater_than",
+     "msg": "Input should be greater than 0"
+    }
+   ]
+  },
+  {
+   "input": {
+    "policies": {
+     "source_retained_limit_gb": 20000,
+     "latency_target_seconds": 0,
+     "heartbeat_seconds": 4000
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "policies",
+      "heartbeat_seconds"
+     ],
+     "type": "less_than_equal",
+     "msg": "Input should be less than or equal to 3600"
+    },
+    {
+     "loc": [
+      "policies",
+      "latency_target_seconds"
+     ],
+     "type": "greater_than_equal",
+     "msg": "Input should be greater than or equal to 1"
+    },
+    {
+     "loc": [
+      "policies",
+      "source_retained_limit_gb"
+     ],
+     "type": "less_than_equal",
+     "msg": "Input should be less than or equal to 10000"
+    }
+   ]
+  },
+  {
+   "input": {
+    "policies": {
+     "errors": {
+      "retries": -2
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "policies",
+      "errors",
+      "retries"
+     ],
+     "type": "greater_than_equal",
+     "msg": "Input should be greater than or equal to -1"
+    }
+   ]
+  },
+  {
+   "input": {
+    "policies": {
+     "source_retained_limit_gb": 7
+    }
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 7.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "8ad528dd666d8068b0dcbe0b5d83476a7f21b1e1e40c027dae6086bfd5d54c97",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "debezium_image": "quay.io/debezium/server:3.7.0.Final"
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": "quay.io/debezium/server:3.7.0.Final",
+    "advanced": {}
+   },
+   "hash": "9947c45335b0d2c6dff8798d44e670a09dea422898a9a98b09d0cebbab99d699",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "debezium_image": "bad image"
+   },
+   "errors": [
+    {
+     "loc": [
+      "debezium_image"
+     ],
+     "type": "string_pattern_mismatch",
+     "msg": "String should match pattern '^[\\w.\\-/:@]+$'"
+    }
+   ]
+  },
+  {
+   "input": {
+    "debezium_image": null,
+    "advanced": {
+     "debezium.source.x": "1",
+     "a": "b"
+    }
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {
+     "debezium.source.x": "1",
+     "a": "b"
+    }
+   },
+   "hash": "8e79e89bf6984ff72df5e412dc222cc620bdee1cbf062e7804d6b0515a205b9d",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "advanced": {
+     "k": 1
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "advanced",
+      "k"
+     ],
+     "type": "string_type",
+     "msg": "Input should be a valid string"
+    }
+   ]
+  },
+  {
+   "input": {
+    "unknown": 1
+   },
+   "errors": [
+    {
+     "loc": [
+      "unknown"
+     ],
+     "type": "extra_forbidden",
+     "msg": "Extra inputs are not permitted"
+    }
+   ]
+  },
+  {
+   "input": {
+    "snapshot": {
+     "delay_seconds": true
+    }
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 1,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": false
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "16da3a72548bcddd8b2db7a9786d44b2557a475e52449f900e7831f2dcd28059",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "policies": {
+     "delivery_canary": "yes"
+    }
+   },
+   "dump": {
+    "source": {
+     "tables": {
+      "include": []
+     },
+     "columns": {}
+    },
+    "sink": {
+     "naming": "cdc.{schema}.{table}",
+     "format": {
+      "type": "json",
+      "include_schema": false,
+      "registry_url": null,
+      "registry_kind": "apicurio"
+     },
+     "options": {}
+    },
+    "snapshot": {
+     "mode": "initial",
+     "chunk_size": 1024,
+     "fetch_size": 10000,
+     "delay_seconds": 0,
+     "window": null
+    },
+    "transforms": [
+     {
+      "type": "unwrap",
+      "delete_handling": "rewrite",
+      "add_fields": [
+       "op",
+       "source.ts_ms"
+      ],
+      "condition": null
+     }
+    ],
+    "policies": {
+     "heartbeat_seconds": 10,
+     "resources": "small",
+     "errors": {
+      "retries": -1,
+      "on_poison_event": "fail"
+     },
+     "latency_target_seconds": 60,
+     "source_retained_limit_gb": 10.0,
+     "delivery_canary": true
+    },
+    "debezium_image": null,
+    "advanced": {}
+   },
+   "hash": "46267d7f86bfabd79a32bf12a9f0c3ecc1aa013fe5f019dedab2273ad51f3628",
+   "summary_first": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "First deploy. Copy existing rows first, then stream changes."
+    ]
+   },
+   "summary_vs_default": {
+    "tables_added": [],
+    "tables_removed": [],
+    "snapshot_mode_changed": false,
+    "naming_changed": false,
+    "format_changed": false,
+    "restarts_connector": true,
+    "notes": [
+     "The connector restarts from its stored position; no data is lost."
+    ]
+   }
+  },
+  {
+   "input": {
+    "source": {
+     "tables": {
+      "include": [
+       "public.ü"
+      ]
+     }
+    }
+   },
+   "errors": [
+    {
+     "loc": [
+      "source",
+      "tables",
+      "include"
+     ],
+     "type": "value_error",
+     "msg": "Value error, tables must look like schema.table: public.ü"
+    }
+   ]
+  },
+  {
+   "input": "not an object",
+   "errors": [
+    {
+     "loc": [],
+     "type": "model_type",
+     "msg": "Input should be a valid dictionary or instance of PipelineSpec"
+    }
+   ]
+  }
+ ]
+}

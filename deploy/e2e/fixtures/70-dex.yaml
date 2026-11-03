@@ -1,0 +1,46 @@
+# OpenID Connect provider for the SSO journey. The mock connector signs in
+# "Kilgore Trout" <kilgore@kilgore.trout> (groups: authors) without a form.
+# The issuer is the in-cluster name; the e2e browser maps it to the k3s node (NodePort 30556).
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: dex }
+data:
+  config.yaml: |
+    issuer: http://dex.bezisync-e2e-data.svc.cluster.local:30556/dex
+    storage: { type: memory }
+    web: { http: 0.0.0.0:30556 }
+    oauth2: { skipApprovalScreen: true }
+    staticClients:
+      - id: bezisync
+        secret: dex-e2e-secret
+        name: BeziSync
+        redirectURIs: ["http://bezisync-e2e-k3s:30080/api/v1/auth/oidc/callback"]
+    connectors:
+      - { type: mockCallback, id: mock, name: Example IdP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: dex }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: dex } }
+  template:
+    metadata: { labels: { app: dex, app.bezisync.io/fixture: "true" } }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.44.0
+          args: [dex, serve, /etc/dex/config.yaml]
+          ports: [{ containerPort: 30556 }]
+          readinessProbe: { httpGet: { path: /dex/healthz, port: 30556 }, periodSeconds: 3 }
+          volumeMounts: [{ name: config, mountPath: /etc/dex }]
+      volumes: [{ name: config, configMap: { name: dex } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: dex }
+spec:
+  type: NodePort
+  selector: { app: dex }
+  ports: [{ port: 30556, targetPort: 30556, nodePort: 30556 }]

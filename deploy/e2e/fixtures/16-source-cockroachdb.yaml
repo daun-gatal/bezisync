@@ -1,0 +1,56 @@
+# CockroachDB single node (insecure) with rangefeeds on, a CDC user and sample tables.
+# In-cluster: source-cockroachdb.bezisync-e2e-data:26257; runner: bezisync-e2e-k3s:32657.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: source-cockroachdb-init }
+data:
+  init.sql: |
+    SET CLUSTER SETTING kv.rangefeed.enabled = true;
+    CREATE DATABASE IF NOT EXISTS shop;
+    CREATE TABLE IF NOT EXISTS shop.public.orders (id INT8 PRIMARY KEY DEFAULT unique_rowid(), status STRING NOT NULL, email STRING,
+      total DECIMAL(10,2), created TIMESTAMPTZ DEFAULT now());
+    CREATE TABLE IF NOT EXISTS shop.public.nokey (a INT8, b STRING);
+    INSERT INTO shop.public.orders (status, email, total) VALUES ('NEW', 'a@example.com', 1), ('PAID', 'b@example.com', 2);
+    CREATE USER IF NOT EXISTS cdc_reader;
+    GRANT CHANGEFEED, SELECT ON TABLE shop.public.orders TO cdc_reader;
+    GRANT SELECT ON TABLE shop.public.nokey TO cdc_reader;
+    GRANT CREATE ON DATABASE shop TO cdc_reader;
+    GRANT SYSTEM VIEWCLUSTERSETTING TO cdc_reader;
+    CREATE USER IF NOT EXISTS e2e_writer;
+    GRANT INSERT, SELECT, UPDATE ON TABLE shop.public.orders TO e2e_writer;
+  run.sh: |
+    set -e
+    cockroach start-single-node --insecure --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080 --store=type=mem,size=1GiB &
+    until cockroach sql --insecure -e "SELECT 1" >/dev/null 2>&1; do sleep 1; done
+    # SET CLUSTER SETTING cannot run inside the multi-statement transaction of one -e.
+    while IFS= read -r stmt; do [ -n "$stmt" ] && cockroach sql --insecure -e "$stmt"; done < <(tr '\n' ' ' < /init/init.sql | sed 's/;/;\n/g')
+    touch /tmp/ready
+    wait
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: source-cockroachdb }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: source-cockroachdb } }
+  template:
+    metadata: { labels: { app: source-cockroachdb, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: cockroachdb
+          image: cockroachdb/cockroach:v25.2.4
+          command: [bash, /init/run.sh]
+          ports: [{ containerPort: 26257 }]
+          readinessProbe: { exec: { command: [test, -f, /tmp/ready] }, periodSeconds: 3, failureThreshold: 100 }
+          resources: { requests: { memory: 1Gi } }
+          volumeMounts: [{ name: init, mountPath: /init }]
+      volumes: [{ name: init, configMap: { name: source-cockroachdb-init } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: source-cockroachdb }
+spec:
+  type: NodePort
+  selector: { app: source-cockroachdb }
+  ports: [{ port: 26257, targetPort: 26257, nodePort: 32657 }]

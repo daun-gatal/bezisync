@@ -1,0 +1,1902 @@
+{
+ "metrics": [
+  {
+   "text": "debezium_metrics_Connected{context=\"streaming\",server=\"x\"} 1.0\ndebezium_metrics_SnapshotRunning{context=\"snapshot\"} 0.0\ndebezium_metrics_SnapshotCompleted{context=\"snapshot\"} 1.0\ndebezium_metrics_TotalTableCount{context=\"snapshot\"} 3.0\ndebezium_metrics_RemainingTableCount{context=\"snapshot\"} NaN\ndebezium_metrics_RowsScanned{context=\"snapshot\",table=\"a\"} 1234.9\ndebezium_metrics_MilliSecondsBehindSource{context=\"streaming\"} -1.0\ndebezium_metrics_MilliSecondsSinceLastEvent{context=\"streaming\"} 250.0\ndebezium_metrics_TotalNumberOfEventsSeen{context=\"streaming\"} 1e3\ndebezium_metrics_QueueRemainingCapacity{context=\"streaming\"} 8192\ndebezium_metrics_QueueTotalCapacity{context=\"streaming\"} 8192\n# HELP something\ngarbage line",
+   "parsed": {
+    "connected": true,
+    "snapshot_running": false,
+    "snapshot_completed": true,
+    "snapshot_tables_total": 3,
+    "snapshot_rows_scanned": 1234,
+    "ms_since_last_event": 250.0,
+    "events_seen_streaming": 1000.0,
+    "queue_remaining": 8192.0,
+    "queue_total": 8192.0
+   }
+  },
+  {
+   "text": "",
+   "parsed": {}
+  },
+  {
+   "text": "debezium_metrics_Connected{context=\"streaming\"} 0",
+   "parsed": {
+    "connected": false
+   }
+  }
+ ],
+ "diagnose": [
+  {
+   "logs": "",
+   "reason": null
+  },
+  {
+   "logs": "2024-01-01 10:00:00,000 INFO  [io] started\n",
+   "reason": null
+  },
+  {
+   "logs": "2024-01-01 10:00:00,000 ERROR [io] boom\nCaused by: java.net.ConnectException: refused something\n",
+   "reason": {
+    "code": "connector_error",
+    "message": "Caused by: java.net.ConnectException: refused something",
+    "fix": "",
+    "severity": "error"
+   }
+  },
+  {
+   "logs": "x FATAL: password authentication failed for user cdc",
+   "reason": {
+    "code": "source_auth",
+    "message": "The source rejected the connector's credentials.",
+    "fix": "The password was probably rotated. Update the connection's secret, then restart.",
+    "severity": "error"
+   }
+  },
+  {
+   "logs": "2024-01-01 10:00:00,000 WARN  [vertx] Thread blocked\njava.lang.Exception: stack\n\tat x\n",
+   "reason": null
+  },
+  {
+   "logs": "2024-01-01 10:00:00,000 ERROR [io] first error\n2024-01-01 10:00:01,000 ERROR [io] second Exception here\n",
+   "reason": {
+    "code": "connector_error",
+    "message": "2024-01-01 10:00:01,000 ERROR [io] second Exception here",
+    "fix": "",
+    "severity": "error"
+   }
+  },
+  {
+   "logs": "requested WAL segment 0000001 has already been removed",
+   "reason": {
+    "code": "wal_removed",
+    "message": "The database removed WAL the pipeline still needed; changes were lost.",
+    "fix": "Re-snapshot the pipeline (reset offsets). Raise max_slot_wal_keep_size to avoid this.",
+    "severity": "error"
+   }
+  },
+  {
+   "logs": "Topic cdc.x not present in metadata after 60000 ms",
+   "reason": {
+    "code": "sink_topic",
+    "message": "The destination topic does not exist or the connector may not write to it.",
+    "fix": "Create the topic or grant Write/Create on it, or enable 'Create topics automatically'.",
+    "severity": "error"
+   }
+  },
+  {
+   "logs": "java.lang.OutOfMemoryError: Java heap space",
+   "reason": {
+    "code": "oom",
+    "message": "The connector ran out of memory.",
+    "fix": "Choose a larger resource preset or lower the batch size.",
+    "severity": "error"
+   }
+  },
+  {
+   "logs": "Connection to db:5432 refused",
+   "reason": {
+    "code": "network",
+    "message": "The connector could not reach the source, destination or state database.",
+    "fix": "Check that the runtime can reach the hosts (firewall, security groups).",
+    "severity": "error"
+   }
+  },
+  {
+   "logs": "ERROR yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+   "reason": {
+    "code": "connector_error",
+    "message": "ERROR yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "fix": "",
+    "severity": "error"
+   }
+  }
+ ],
+ "derive": [
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": false,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    }
+   },
+   "verdict": {
+    "lifecycle": "draft",
+    "health": "unknown",
+    "summary": "Not deployed yet.",
+    "reasons": []
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    },
+    "runtime_error": "timeout",
+    "last_lifecycle": "streaming"
+   },
+   "verdict": {
+    "lifecycle": "streaming",
+    "health": "unknown",
+    "summary": "Runtime unreachable — status unknown.",
+    "reasons": [
+     {
+      "code": "runtime_unreachable",
+      "message": "BeziSync cannot reach the runtime: timeout",
+      "fix": "Check the runtime under Settings → Runtimes.",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    },
+    "runtime_error": "timeout",
+    "last_lifecycle": "paused"
+   },
+   "verdict": {
+    "lifecycle": "deploying",
+    "health": "unknown",
+    "summary": "Runtime unreachable — status unknown.",
+    "reasons": [
+     {
+      "code": "runtime_unreachable",
+      "message": "BeziSync cannot reach the runtime: timeout",
+      "fix": "Check the runtime under Settings → Runtimes.",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "paused",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    },
+    "runtime_error": "timeout"
+   },
+   "verdict": {
+    "lifecycle": "paused",
+    "health": "unknown",
+    "summary": "Runtime unreachable — status unknown.",
+    "reasons": [
+     {
+      "code": "runtime_unreachable",
+      "message": "BeziSync cannot reach the runtime: timeout",
+      "fix": "Check the runtime under Settings → Runtimes.",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "paused",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    }
+   },
+   "verdict": {
+    "lifecycle": "paused",
+    "health": "unknown",
+    "summary": "Paused.",
+    "reasons": [
+     {
+      "code": "paused",
+      "message": "Paused. The source keeps retaining changes until the pipeline resumes.",
+      "fix": "",
+      "severity": "info"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "paused",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    },
+    "source_risk": {
+     "code": "source_wal",
+     "message": "Retains 12 GB",
+     "fix": "Drop the slot",
+     "severity": "warn"
+    }
+   },
+   "verdict": {
+    "lifecycle": "paused",
+    "health": "at_risk",
+    "summary": "Paused.",
+    "reasons": [
+     {
+      "code": "paused",
+      "message": "Paused. The source keeps retaining changes until the pipeline resumes.",
+      "fix": "",
+      "severity": "info"
+     },
+     {
+      "code": "source_wal",
+      "message": "Retains 12 GB",
+      "fix": "Drop the slot",
+      "severity": "warn"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T11:58:00+00:00",
+    "phase": null,
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    }
+   },
+   "verdict": {
+    "lifecycle": "deploying",
+    "health": "unknown",
+    "summary": "Starting the connector…",
+    "reasons": []
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "missing",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    }
+   },
+   "verdict": {
+    "lifecycle": "failed",
+    "health": "down",
+    "summary": "The connector has not started.",
+    "reasons": [
+     {
+      "code": "not_started",
+      "message": "The connector has not started.",
+      "fix": "",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "failed",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    },
+    "workload_reason": "ImagePullBackOff"
+   },
+   "verdict": {
+    "lifecycle": "failed",
+    "health": "down",
+    "summary": "The runtime cannot start the connector: ImagePullBackOff",
+    "reasons": [
+     {
+      "code": "workload_failed",
+      "message": "The runtime cannot start the connector: ImagePullBackOff",
+      "fix": "",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "restarting",
+    "restarts": 4,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    }
+   },
+   "verdict": {
+    "lifecycle": "failed",
+    "health": "down",
+    "summary": "The connector keeps restarting (4 restarts).",
+    "reasons": [
+     {
+      "code": "crashing",
+      "message": "The connector keeps restarting (4 restarts).",
+      "fix": "",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "restarting",
+    "restarts": 4,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    },
+    "logs": "x FATAL: password authentication failed for user cdc"
+   },
+   "verdict": {
+    "lifecycle": "failed",
+    "health": "down",
+    "summary": "The source rejected the connector's credentials.",
+    "reasons": [
+     {
+      "code": "source_auth",
+      "message": "The source rejected the connector's credentials.",
+      "fix": "The password was probably rotated. Update the connection's secret, then restart.",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T11:58:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": false,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    }
+   },
+   "verdict": {
+    "lifecycle": "deploying",
+    "health": "unknown",
+    "summary": "Connector starting…",
+    "reasons": []
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": false,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    }
+   },
+   "verdict": {
+    "lifecycle": "failed",
+    "health": "down",
+    "summary": "Debezium Server reports DOWN.",
+    "reasons": [
+     {
+      "code": "health_down",
+      "message": "Debezium Server reports DOWN.",
+      "fix": "",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T11:58:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": false,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    },
+    "logs": "Topic cdc.x not present in metadata after 60000 ms"
+   },
+   "verdict": {
+    "lifecycle": "failed",
+    "health": "down",
+    "summary": "The destination topic does not exist or the connector may not write to it.",
+    "reasons": [
+     {
+      "code": "sink_topic",
+      "message": "The destination topic does not exist or the connector may not write to it.",
+      "fix": "Create the topic or grant Write/Create on it, or enable 'Create topics automatically'.",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T11:58:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": null
+   },
+   "verdict": {
+    "lifecycle": "deploying",
+    "health": "unknown",
+    "summary": "Connector starting…",
+    "reasons": []
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": null,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    }
+   },
+   "verdict": {
+    "lifecycle": "streaming",
+    "health": "unknown",
+    "summary": "Running — no metrics.",
+    "reasons": [
+     {
+      "code": "no_metrics",
+      "message": "Running, but no metrics were received.",
+      "fix": "",
+      "severity": "warn"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": true,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": null,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": null,
+     "queue_total": null
+    }
+   },
+   "verdict": {
+    "lifecycle": "snapshotting",
+    "health": "healthy",
+    "summary": "Copying existing rows.",
+    "reasons": []
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T11:58:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": false,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": null,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": null,
+     "queue_total": null
+    }
+   },
+   "verdict": {
+    "lifecycle": "deploying",
+    "health": "unknown",
+    "summary": "Connecting to the source…",
+    "reasons": []
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": false,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": null,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": null,
+     "queue_total": null
+    }
+   },
+   "verdict": {
+    "lifecycle": "failed",
+    "health": "down",
+    "summary": "The connector is not connected to the source.",
+    "reasons": [
+     {
+      "code": "not_connected",
+      "message": "The connector is not connected to the source.",
+      "fix": "",
+      "severity": "error"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T11:58:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": null,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": null,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": null,
+     "queue_total": null
+    }
+   },
+   "verdict": {
+    "lifecycle": "deploying",
+    "health": "healthy",
+    "summary": "Starting…",
+    "reasons": []
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": null,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": null,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": null,
+     "queue_total": null
+    }
+   },
+   "verdict": {
+    "lifecycle": "streaming",
+    "health": "healthy",
+    "summary": "Streaming changes.",
+    "reasons": []
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 2,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 120000,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": 10,
+     "queue_total": 1000
+    },
+    "source_risk": {
+     "code": "source_wal",
+     "message": "Retains 12 GB",
+     "fix": "Drop the slot",
+     "severity": "warn"
+    }
+   },
+   "verdict": {
+    "lifecycle": "streaming",
+    "health": "at_risk",
+    "summary": "Streaming changes.",
+    "reasons": [
+     {
+      "code": "lagging",
+      "message": "120 s behind the source (target 60 s).",
+      "fix": "",
+      "severity": "warn"
+     },
+     {
+      "code": "queue_full",
+      "message": "The internal queue is almost full: the destination is slower than the source.",
+      "fix": "Check destination throughput, or choose a larger resource preset.",
+      "severity": "warn"
+     },
+     {
+      "code": "restarted",
+      "message": "Restarted 2 time(s) since deploy.",
+      "fix": "",
+      "severity": "info"
+     },
+     {
+      "code": "source_wal",
+      "message": "Retains 12 GB",
+      "fix": "Drop the slot",
+      "severity": "warn"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "now": "2026-01-01T12:00:00+00:00",
+    "deployed": true,
+    "desired": "running",
+    "deployed_at": "2026-01-01T10:00:00+00:00",
+    "phase": "running",
+    "restarts": 0,
+    "health_up": true,
+    "metrics": {
+     "connected": true,
+     "snapshot_running": null,
+     "snapshot_completed": null,
+     "snapshot_tables_total": null,
+     "snapshot_tables_remaining": null,
+     "snapshot_rows_scanned": null,
+     "ms_behind_source": 1500,
+     "ms_since_last_event": null,
+     "events_seen_streaming": null,
+     "events_seen_snapshot": null,
+     "queue_remaining": null,
+     "queue_total": null
+    },
+    "latency_target_ms": 1000
+   },
+   "verdict": {
+    "lifecycle": "streaming",
+    "health": "lagging",
+    "summary": "Streaming changes.",
+    "reasons": [
+     {
+      "code": "lagging",
+      "message": "2 s behind the source (target 1 s).",
+      "fix": "",
+      "severity": "warn"
+     }
+    ]
+   }
+  }
+ ],
+ "human_bytes": [
+  {
+   "in": null,
+   "out": "unknown"
+  },
+  {
+   "in": 0,
+   "out": "0 B"
+  },
+  {
+   "in": 1,
+   "out": "1 B"
+  },
+  {
+   "in": 1023,
+   "out": "1023 B"
+  },
+  {
+   "in": 1024,
+   "out": "1.0 KB"
+  },
+  {
+   "in": 1536,
+   "out": "1.5 KB"
+  },
+  {
+   "in": 10239,
+   "out": "10.0 KB"
+  },
+  {
+   "in": 10240,
+   "out": "10 KB"
+  },
+  {
+   "in": 5000000.0,
+   "out": "4.8 MB"
+  },
+  {
+   "in": 3300000000.0,
+   "out": "3.1 GB"
+  },
+  {
+   "in": 7000000000000.0,
+   "out": "6.4 TB"
+  },
+  {
+   "in": 9000000000000000.0,
+   "out": "8185 TB"
+  },
+  {
+   "in": 2.5,
+   "out": "2 B"
+  }
+ ],
+ "windows": [
+  {
+   "window": "22:00-06:00",
+   "at": "2026-01-01T23:30:00+00:00",
+   "contains": true,
+   "next": null
+  },
+  {
+   "window": "22:00-06:00",
+   "at": "2026-01-01T06:00:00+00:00",
+   "contains": false,
+   "next": "2026-01-01T22:00:00+00:00"
+  },
+  {
+   "window": "22:00-06:00",
+   "at": "2026-01-01T12:00:00+00:00",
+   "contains": false,
+   "next": "2026-01-01T22:00:00+00:00"
+  },
+  {
+   "window": "01:00-03:00",
+   "at": "2026-01-01T00:59:59.999999+00:00",
+   "contains": false,
+   "next": "2026-01-01T01:00:00+00:00"
+  },
+  {
+   "window": "01:00-03:00",
+   "at": "2026-01-01T03:00:00+00:00",
+   "contains": false,
+   "next": "2026-01-02T01:00:00+00:00"
+  },
+  {
+   "window": "01:00-03:00",
+   "at": "2026-01-01T02:00:00+00:00",
+   "contains": true,
+   "next": null
+  },
+  {
+   "window": "05:00-05:00",
+   "at": "2026-01-01T05:00:00+00:00",
+   "contains": false,
+   "next": "2026-01-02T05:00:00+00:00"
+  },
+  {
+   "window": "23:59-00:01",
+   "at": "2026-01-01T00:00:30+00:00",
+   "contains": true,
+   "next": null
+  }
+ ],
+ "schema": [
+  {
+   "table": "public.a",
+   "kind": "column_dropped",
+   "column": "y",
+   "before": "int",
+   "after": null,
+   "breaking": true,
+   "describe": "public.a.y dropped (was int)"
+  },
+  {
+   "table": "public.a",
+   "kind": "column_added",
+   "column": "z",
+   "before": null,
+   "after": "jsonb",
+   "breaking": false,
+   "describe": "public.a.z added (jsonb)"
+  },
+  {
+   "table": "public.a",
+   "kind": "type_changed",
+   "column": "id",
+   "before": "int",
+   "after": "bigint",
+   "breaking": true,
+   "describe": "public.a.id changed type int → bigint"
+  },
+  {
+   "table": "public.a",
+   "kind": "nullability_changed",
+   "column": "x",
+   "before": null,
+   "after": "NOT NULL",
+   "breaking": false,
+   "describe": "public.a.x is now NOT NULL"
+  },
+  {
+   "table": "public.b",
+   "kind": "table_missing",
+   "column": null,
+   "before": null,
+   "after": null,
+   "breaking": true,
+   "describe": "public.b no longer exists"
+  },
+  {
+   "table": "public.c",
+   "kind": "column_added",
+   "column": "k",
+   "before": null,
+   "after": "uuid",
+   "breaking": false,
+   "describe": "public.c.k added (uuid)"
+  }
+ ],
+ "policies": [
+  {
+   "policies": {},
+   "spec": {},
+   "kw": {},
+   "dump": {
+    "allowed_runtime_ids": null,
+    "allowed_source_types": null,
+    "allowed_sink_types": null,
+    "allowed_snapshot_modes": null,
+    "max_resources": null,
+    "require_pii_masking": false,
+    "allow_force_deploy": true,
+    "max_pipelines_per_source": null,
+    "require_approval": false
+   },
+   "checks": [
+    {
+     "code": "policy_ok",
+     "title": "Project policies",
+     "status": "pass",
+     "category": "policy",
+     "message": "Meets every project policy.",
+     "technical": "",
+     "why": "",
+     "fix": null,
+     "blocking": false,
+     "doc": ""
+    }
+   ]
+  },
+  {
+   "policies": {
+    "allowed_runtime_ids": [
+     "00000000-0000-0000-0000-000000000001"
+    ],
+    "allowed_source_types": [
+     "mysql"
+    ],
+    "allowed_sink_types": [
+     "http"
+    ]
+   },
+   "spec": {},
+   "kw": {},
+   "dump": {
+    "allowed_runtime_ids": [
+     "00000000-0000-0000-0000-000000000001"
+    ],
+    "allowed_source_types": [
+     "mysql"
+    ],
+    "allowed_sink_types": [
+     "http"
+    ],
+    "allowed_snapshot_modes": null,
+    "max_resources": null,
+    "require_pii_masking": false,
+    "allow_force_deploy": true,
+    "max_pipelines_per_source": null,
+    "require_approval": false
+   },
+   "checks": [
+    {
+     "code": "policy_runtime",
+     "title": "Runtime",
+     "status": "fail",
+     "category": "policy",
+     "message": "This project does not allow pipelines on that runtime.",
+     "technical": "",
+     "why": "",
+     "fix": {
+      "kind": "text",
+      "code": "Ask an Admin to change the policy under Settings → Policies.",
+      "restart_required": false,
+      "who": "Admin"
+     },
+     "blocking": true,
+     "doc": ""
+    },
+    {
+     "code": "policy_source_type",
+     "title": "Source type",
+     "status": "fail",
+     "category": "policy",
+     "message": "This project does not allow postgresql sources.",
+     "technical": "",
+     "why": "",
+     "fix": {
+      "kind": "text",
+      "code": "Ask an Admin to change the policy under Settings → Policies.",
+      "restart_required": false,
+      "who": "Admin"
+     },
+     "blocking": true,
+     "doc": ""
+    },
+    {
+     "code": "policy_sink_type",
+     "title": "Destination type",
+     "status": "fail",
+     "category": "policy",
+     "message": "This project does not allow kafka destinations.",
+     "technical": "",
+     "why": "",
+     "fix": {
+      "kind": "text",
+      "code": "Ask an Admin to change the policy under Settings → Policies.",
+      "restart_required": false,
+      "who": "Admin"
+     },
+     "blocking": true,
+     "doc": ""
+    }
+   ]
+  },
+  {
+   "policies": {
+    "allowed_snapshot_modes": [
+     "no_data",
+     "when_needed"
+    ],
+    "max_resources": "small"
+   },
+   "spec": {
+    "policies": {
+     "resources": "large"
+    }
+   },
+   "kw": {},
+   "dump": {
+    "allowed_runtime_ids": null,
+    "allowed_source_types": null,
+    "allowed_sink_types": null,
+    "allowed_snapshot_modes": [
+     "no_data",
+     "when_needed"
+    ],
+    "max_resources": "small",
+    "require_pii_masking": false,
+    "allow_force_deploy": true,
+    "max_pipelines_per_source": null,
+    "require_approval": false
+   },
+   "checks": [
+    {
+     "code": "policy_snapshot_mode",
+     "title": "Snapshot mode",
+     "status": "fail",
+     "category": "policy",
+     "message": "Snapshot mode 'initial' is not allowed here. Allowed: no_data, when_needed.",
+     "technical": "",
+     "why": "",
+     "fix": {
+      "kind": "text",
+      "code": "Pick an allowed snapshot mode in the pipeline settings.",
+      "restart_required": false,
+      "who": "You"
+     },
+     "blocking": true,
+     "doc": ""
+    },
+    {
+     "code": "policy_resources",
+     "title": "Resources",
+     "status": "fail",
+     "category": "policy",
+     "message": "The 'large' preset exceeds this project's limit (small).",
+     "technical": "",
+     "why": "",
+     "fix": {
+      "kind": "text",
+      "code": "Choose small or smaller.",
+      "restart_required": false,
+      "who": "You"
+     },
+     "blocking": true,
+     "doc": ""
+    }
+   ]
+  },
+  {
+   "policies": {
+    "require_pii_masking": true
+   },
+   "spec": {
+    "source": {
+     "tables": {
+      "include": [
+       "public.u",
+       "public.v"
+      ]
+     },
+     "columns": {
+      "public.u": {
+       "mask": [
+        "email"
+       ]
+      }
+     }
+    }
+   },
+   "kw": {
+    "pii_columns": {
+     "public.v": [
+      "phone"
+     ],
+     "public.u": [
+      "email",
+      "ssn"
+     ]
+    }
+   },
+   "dump": {
+    "allowed_runtime_ids": null,
+    "allowed_source_types": null,
+    "allowed_sink_types": null,
+    "allowed_snapshot_modes": null,
+    "max_resources": null,
+    "require_pii_masking": true,
+    "allow_force_deploy": true,
+    "max_pipelines_per_source": null,
+    "require_approval": false
+   },
+   "checks": [
+    {
+     "code": "policy_pii_unmasked",
+     "title": "Personal data",
+     "status": "fail",
+     "category": "policy",
+     "message": "These columns look like personal data and must be masked or excluded: public.u.ssn, public.v.phone.",
+     "technical": "",
+     "why": "",
+     "fix": {
+      "kind": "text",
+      "code": "In Tables, mask or exclude each listed column.",
+      "restart_required": false,
+      "who": "You"
+     },
+     "blocking": true,
+     "doc": ""
+    }
+   ]
+  },
+  {
+   "policies": {
+    "max_pipelines_per_source": 2
+   },
+   "spec": {},
+   "kw": {
+    "other_pipelines_on_source": 2
+   },
+   "dump": {
+    "allowed_runtime_ids": null,
+    "allowed_source_types": null,
+    "allowed_sink_types": null,
+    "allowed_snapshot_modes": null,
+    "max_resources": null,
+    "require_pii_masking": false,
+    "allow_force_deploy": true,
+    "max_pipelines_per_source": 2,
+    "require_approval": false
+   },
+   "checks": [
+    {
+     "code": "policy_source_budget",
+     "title": "Pipelines per source",
+     "status": "fail",
+     "category": "policy",
+     "message": "The source already feeds 2 pipeline(s); this project allows 2. Each one holds a replication slot or log reader on the database.",
+     "technical": "",
+     "why": "",
+     "fix": {
+      "kind": "text",
+      "code": "Reuse an existing pipeline (add tables to it) or ask an admin to raise the limit.",
+      "restart_required": false,
+      "who": "You"
+     },
+     "blocking": true,
+     "doc": ""
+    }
+   ]
+  },
+  {
+   "policies": {
+    "max_pipelines_per_source": 2
+   },
+   "spec": {},
+   "kw": {
+    "other_pipelines_on_source": 1
+   },
+   "dump": {
+    "allowed_runtime_ids": null,
+    "allowed_source_types": null,
+    "allowed_sink_types": null,
+    "allowed_snapshot_modes": null,
+    "max_resources": null,
+    "require_pii_masking": false,
+    "allow_force_deploy": true,
+    "max_pipelines_per_source": 2,
+    "require_approval": false
+   },
+   "checks": [
+    {
+     "code": "policy_ok",
+     "title": "Project policies",
+     "status": "pass",
+     "category": "policy",
+     "message": "Meets every project policy.",
+     "technical": "",
+     "why": "",
+     "fix": null,
+     "blocking": false,
+     "doc": ""
+    }
+   ]
+  }
+ ],
+ "bad_policies": [
+  {
+   "input": {
+    "max_resources": "huge"
+   },
+   "errors": [
+    {
+     "loc": [
+      "max_resources"
+     ],
+     "type": "literal_error",
+     "msg": "Input should be 'small', 'medium' or 'large'"
+    }
+   ]
+  },
+  {
+   "input": {
+    "max_pipelines_per_source": 0
+   },
+   "errors": [
+    {
+     "loc": [
+      "max_pipelines_per_source"
+     ],
+     "type": "greater_than_equal",
+     "msg": "Input should be greater than or equal to 1"
+    }
+   ]
+  },
+  {
+   "input": {
+    "allowed_runtime_ids": [
+     "x"
+    ]
+   },
+   "errors": [
+    {
+     "loc": [
+      "allowed_runtime_ids",
+      "0"
+     ],
+     "type": "uuid_parsing",
+     "msg": "Input should be a valid UUID, invalid character: found `x` at 0"
+    }
+   ]
+  },
+  {
+   "input": {
+    "nope": 1
+   },
+   "errors": [
+    {
+     "loc": [
+      "nope"
+     ],
+     "type": "extra_forbidden",
+     "msg": "Extra inputs are not permitted"
+    }
+   ]
+  },
+  {
+   "input": {
+    "require_approval": "maybe"
+   },
+   "errors": [
+    {
+     "loc": [
+      "require_approval"
+     ],
+     "type": "bool_parsing",
+     "msg": "Input should be a valid boolean, unable to interpret input"
+    }
+   ]
+  }
+ ],
+ "manifests": [
+  {
+   "text": "apiVersion: bezisync.io/v1\nkind: Pipeline\nmetadata: {name: orders-cdc, owner: team, labels: {team: pay}}\nspec:\n  source: {connection: orders-pg, tables: {include: [public.orders]}}\n  sink: {connection: k, naming: 'x.{table}'}\n  runtime: prod\n  snapshot: {mode: no_data}\n  debeziumImage: quay.io/debezium/server:3.6\n",
+   "parsed": [
+    {
+     "name": "orders-cdc",
+     "description": "",
+     "owner": "team",
+     "labels": {
+      "team": "pay"
+     },
+     "source": "orders-pg",
+     "sink": "k",
+     "runtime": "prod",
+     "spec": {
+      "source": {
+       "tables": {
+        "include": [
+         "public.orders"
+        ]
+       },
+       "columns": {}
+      },
+      "sink": {
+       "naming": "x.{table}",
+       "format": {
+        "type": "json",
+        "include_schema": false,
+        "registry_url": null,
+        "registry_kind": "apicurio"
+       },
+       "options": {}
+      },
+      "snapshot": {
+       "mode": "no_data",
+       "chunk_size": 1024,
+       "fetch_size": 10000,
+       "delay_seconds": 0,
+       "window": null
+      },
+      "transforms": [
+       {
+        "type": "unwrap",
+        "delete_handling": "rewrite",
+        "add_fields": [
+         "op",
+         "source.ts_ms"
+        ],
+        "condition": null
+       }
+      ],
+      "policies": {
+       "heartbeat_seconds": 10,
+       "resources": "small",
+       "errors": {
+        "retries": -1,
+        "on_poison_event": "fail"
+       },
+       "latency_target_seconds": 60,
+       "source_retained_limit_gb": 10.0,
+       "delivery_canary": false
+      },
+      "debezium_image": "quay.io/debezium/server:3.6",
+      "advanced": {}
+     }
+    }
+   ]
+  },
+  {
+   "text": "apiVersion: v2\nkind: Job\nmetadata: {name: Bad_Name, extra: 1}\nspec: {}\n",
+   "error": {
+    "message": "Not a valid pipeline manifest.",
+    "errors": [
+     {
+      "loc": [
+       "apiVersion"
+      ],
+      "message": "Value error, apiVersion must be bezisync.io/v1"
+     },
+     {
+      "loc": [
+       "kind"
+      ],
+      "message": "Value error, kind must be Pipeline"
+     },
+     {
+      "loc": [
+       "metadata",
+       "name"
+      ],
+      "message": "String should match pattern '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'"
+     },
+     {
+      "loc": [
+       "metadata",
+       "extra"
+      ],
+      "message": "Extra inputs are not permitted"
+     }
+    ]
+   }
+  },
+  {
+   "text": "apiVersion: bezisync.io/v1\nkind: Pipeline\nmetadata: {name: a}\nspec: {source: {tables: {include: [x.y]}}}\n",
+   "error": {
+    "message": "spec.source.connection (the source connection's name) is required.",
+    "errors": []
+   }
+  },
+  {
+   "text": "apiVersion: bezisync.io/v1\nkind: Pipeline\nmetadata: {name: a}\nspec: {source: {connection: s}, runtime: 5}\n",
+   "error": {
+    "message": "spec.runtime must be a runtime name.",
+    "errors": []
+   }
+  },
+  {
+   "text": "apiVersion: bezisync.io/v1\nkind: Pipeline\nmetadata: {name: a}\nspec: {source: {connection: s}, snapshot: {mode: x}, extra: 1}\n",
+   "error": {
+    "message": "The pipeline spec is invalid.",
+    "errors": [
+     {
+      "loc": [
+       "spec",
+       "snapshot",
+       "mode"
+      ],
+      "message": "Input should be 'initial', 'no_data', 'when_needed', 'initial_only' or 'always'"
+     },
+     {
+      "loc": [
+       "spec",
+       "extra"
+      ],
+      "message": "Extra inputs are not permitted"
+     }
+    ]
+   }
+  },
+  {
+   "text": "apiVersion: bezisync.io/v1\nkind: Pipeline\nmetadata: {name: a}\n",
+   "error": {
+    "message": "Not a valid pipeline manifest.",
+    "errors": [
+     {
+      "loc": [
+       "spec"
+      ],
+      "message": "Field required"
+     }
+    ]
+   }
+  },
+  {
+   "text": "- 1\n- 2\n",
+   "error": {
+    "message": "Each document must be a mapping with apiVersion, kind, metadata and spec.",
+    "errors": []
+   }
+  },
+  {
+   "text": "",
+   "error": {
+    "message": "The document is empty.",
+    "errors": []
+   }
+  },
+  {
+   "text": "a: [1\n",
+   "error": {
+    "message": "Not valid YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 1, column 4:\n    a: [1\n       ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 2, column 1:\n    \n    ^",
+    "errors": []
+   }
+  }
+ ],
+ "to_yaml": {
+  "spec_a": {
+   "source": {
+    "tables": {
+     "include": [
+      "public.a",
+      "public.b"
+     ]
+    },
+    "columns": {}
+   },
+   "sink": {
+    "naming": "cdc.{schema}.{table}",
+    "format": {
+     "type": "json",
+     "include_schema": false,
+     "registry_url": null,
+     "registry_kind": "apicurio"
+    },
+    "options": {}
+   },
+   "snapshot": {
+    "mode": "initial",
+    "chunk_size": 1024,
+    "fetch_size": 10000,
+    "delay_seconds": 0,
+    "window": null
+   },
+   "transforms": [
+    {
+     "type": "unwrap",
+     "delete_handling": "rewrite",
+     "add_fields": [
+      "op",
+      "source.ts_ms"
+     ],
+     "condition": null
+    }
+   ],
+   "policies": {
+    "heartbeat_seconds": 10,
+    "resources": "small",
+    "errors": {
+     "retries": -1,
+     "on_poison_event": "fail"
+    },
+    "latency_target_seconds": 60,
+    "source_retained_limit_gb": 10.0,
+    "delivery_canary": false
+   },
+   "debezium_image": "img:1",
+   "advanced": {}
+  },
+  "spec_b": {
+   "source": {
+    "tables": {
+     "include": [
+      "public.a",
+      "public.c"
+     ]
+    },
+    "columns": {
+     "public.c": {
+      "mask": [
+       "email"
+      ],
+      "exclude": [
+       "x"
+      ]
+     }
+    }
+   },
+   "sink": {
+    "naming": "cdc.{pipeline}.{table}",
+    "format": {
+     "type": "json",
+     "include_schema": false,
+     "registry_url": null,
+     "registry_kind": "apicurio"
+    },
+    "options": {
+     "acks": "all",
+     "compression": "zstd"
+    }
+   },
+   "snapshot": {
+    "mode": "initial",
+    "chunk_size": 1024,
+    "fetch_size": 10000,
+    "delay_seconds": 0,
+    "window": null
+   },
+   "transforms": [
+    {
+     "type": "unwrap",
+     "delete_handling": "rewrite",
+     "add_fields": [
+      "op",
+      "source.ts_ms"
+     ],
+     "condition": null
+    }
+   ],
+   "policies": {
+    "heartbeat_seconds": 10,
+    "resources": "small",
+    "errors": {
+     "retries": -1,
+     "on_poison_event": "fail"
+    },
+    "latency_target_seconds": 60,
+    "source_retained_limit_gb": 10.0,
+    "delivery_canary": false
+   },
+   "debezium_image": null,
+   "advanced": {
+    "debezium.source.poll.interval.ms": "500"
+   }
+  },
+  "yaml": "apiVersion: bezisync.io/v1\nkind: Pipeline\nmetadata:\n  name: p1\n  project: default\n  description: d\n  owner: me\n  labels:\n    a: b\n    team: x\nspec:\n  runtime: rt\n  source:\n    connection: pg\n    tables:\n      include:\n      - public.a\n      - public.b\n    columns: {}\n  sink:\n    connection: kafka\n    naming: cdc.{schema}.{table}\n    format:\n      type: json\n      include_schema: false\n      registry_url: null\n      registry_kind: apicurio\n    options: {}\n  snapshot:\n    mode: initial\n    chunk_size: 1024\n    fetch_size: 10000\n    delay_seconds: 0\n    window: null\n  transforms:\n  - type: unwrap\n    delete_handling: rewrite\n    add_fields:\n    - op\n    - source.ts_ms\n    condition: null\n  policies:\n    heartbeat_seconds: 10\n    resources: small\n    errors:\n      retries: -1\n      on_poison_event: fail\n    latency_target_seconds: 60\n    source_retained_limit_gb: 10.0\n    delivery_canary: false\n  advanced: {}\n  debeziumImage: img:1\n---\napiVersion: bezisync.io/v1\nkind: Pipeline\nmetadata:\n  name: p2\n  project: default\nspec:\n  source:\n    connection: pg\n    tables:\n      include:\n      - public.a\n      - public.c\n    columns:\n      public.c:\n        mask:\n        - email\n        exclude:\n        - x\n  sink:\n    naming: cdc.{pipeline}.{table}\n    format:\n      type: json\n      include_schema: false\n      registry_url: null\n      registry_kind: apicurio\n    options:\n      acks: all\n      compression: zstd\n  snapshot:\n    mode: initial\n    chunk_size: 1024\n    fetch_size: 10000\n    delay_seconds: 0\n    window: null\n  transforms:\n  - type: unwrap\n    delete_handling: rewrite\n    add_fields:\n    - op\n    - source.ts_ms\n    condition: null\n  policies:\n    heartbeat_seconds: 10\n    resources: small\n    errors:\n      retries: -1\n      on_poison_event: fail\n    latency_target_seconds: 60\n    source_retained_limit_gb: 10.0\n    delivery_canary: false\n  advanced:\n    debezium.source.poll.interval.ms: '500'\n"
+ },
+ "spec_diff": {
+  "new": [
+   "--- v0",
+   "+++ v1",
+   "@@ -0,0 +1,38 @@",
+   "+source:",
+   "+  tables:",
+   "+    include:",
+   "+    - public.a",
+   "+    - public.b",
+   "+  columns: {}",
+   "+sink:",
+   "+  naming: cdc.{schema}.{table}",
+   "+  format:",
+   "+    type: json",
+   "+    include_schema: false",
+   "+    registry_url: null",
+   "+    registry_kind: apicurio",
+   "+  options: {}",
+   "+snapshot:",
+   "+  mode: initial",
+   "+  chunk_size: 1024",
+   "+  fetch_size: 10000",
+   "+  delay_seconds: 0",
+   "+  window: null",
+   "+transforms:",
+   "+- type: unwrap",
+   "+  delete_handling: rewrite",
+   "+  add_fields:",
+   "+  - op",
+   "+  - source.ts_ms",
+   "+  condition: null",
+   "+policies:",
+   "+  heartbeat_seconds: 10",
+   "+  resources: small",
+   "+  errors:",
+   "+    retries: -1",
+   "+    on_poison_event: fail",
+   "+  latency_target_seconds: 60",
+   "+  source_retained_limit_gb: 10.0",
+   "+  delivery_canary: false",
+   "+debezium_image: img:1",
+   "+advanced: {}"
+  ],
+  "change": [
+   "--- v1",
+   "+++ v2",
+   "@@ -2,16 +2,23 @@",
+   "   tables:",
+   "     include:",
+   "     - public.a",
+   "-    - public.b",
+   "-  columns: {}",
+   "+    - public.c",
+   "+  columns:",
+   "+    public.c:",
+   "+      mask:",
+   "+      - email",
+   "+      exclude:",
+   "+      - x",
+   " sink:",
+   "-  naming: cdc.{schema}.{table}",
+   "+  naming: cdc.{pipeline}.{table}",
+   "   format:",
+   "     type: json",
+   "     include_schema: false",
+   "     registry_url: null",
+   "     registry_kind: apicurio",
+   "-  options: {}",
+   "+  options:",
+   "+    acks: all",
+   "+    compression: zstd",
+   " snapshot:",
+   "   mode: initial",
+   "   chunk_size: 1024",
+   "@@ -34,5 +41,6 @@",
+   "   latency_target_seconds: 60",
+   "   source_retained_limit_gb: 10.0",
+   "   delivery_canary: false",
+   "-debezium_image: img:1",
+   "-advanced: {}",
+   "+debezium_image: null",
+   "+advanced:",
+   "+  debezium.source.poll.interval.ms: '500'"
+  ],
+  "same": []
+ }
+}

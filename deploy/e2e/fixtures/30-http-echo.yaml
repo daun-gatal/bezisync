@@ -1,0 +1,62 @@
+# Records every POST (alert webhooks, HTTP sink events). GET /requests returns them,
+# DELETE /requests clears. In-cluster: http-echo.bezisync-e2e-data:8080; runner: bezisync-e2e-k3s:30808.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: http-echo }
+data:
+  echo.js: |
+    // Records every POST; GET /requests[/<path>] returns them, DELETE /requests clears them.
+    const http = require("node:http");
+    const MAX = Number(process.env.MAX_REQUESTS || 2000);
+    let requests = [];
+    http.createServer((req, res) => {
+      if (req.method === "POST") {
+        const chunks = [];
+        req.on("data", (c) => chunks.push(c));
+        req.on("end", () => {
+          const headers = {};
+          for (const [k, v] of Object.entries(req.headers)) headers[k.toLowerCase()] = Array.isArray(v) ? v.join(", ") : v;
+          requests.push({ path: req.url, headers, body: Buffer.concat(chunks).toString("utf8") });
+          if (requests.length > MAX) requests = requests.slice(-MAX);
+          res.writeHead(200).end();
+        });
+      } else if (req.method === "GET") {
+        const prefix = req.url.replace("/requests", "") || "/";
+        const body = JSON.stringify(requests.filter((r) => r.path.startsWith(prefix)));
+        res.writeHead(200, { "content-type": "application/json" }).end(body);
+      } else if (req.method === "DELETE") {
+        requests = [];
+        res.writeHead(204).end();
+      } else if (req.method === "OPTIONS") { // BeziSync's connection check
+        res.writeHead(204, { allow: "GET, POST, DELETE, OPTIONS" }).end();
+      } else {
+        res.writeHead(405).end();
+      }
+    }).listen(8080, "0.0.0.0");
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: http-echo }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: http-echo } }
+  template:
+    metadata: { labels: { app: http-echo, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: echo
+          image: node:24-alpine
+          command: [node, /app/echo.js]
+          env: [{ name: MAX_REQUESTS, value: "5000" }]
+          ports: [{ containerPort: 8080 }]
+          readinessProbe: { tcpSocket: { port: 8080 }, periodSeconds: 2 }
+          volumeMounts: [{ name: app, mountPath: /app }]
+      volumes: [{ name: app, configMap: { name: http-echo } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: http-echo }
+spec:
+  type: NodePort
+  selector: { app: http-echo }
+  ports: [{ port: 8080, targetPort: 8080, nodePort: 30808 }]

@@ -1,0 +1,1187 @@
+{
+ "sections": [
+  "Common",
+  "PostgreSQL",
+  "MySQL / MariaDB",
+  "SQL Server",
+  "MongoDB",
+  "Kafka",
+  "HTTP",
+  "Google Pub/Sub",
+  "AWS Kinesis",
+  "Redis Streams",
+  "NATS JetStream",
+  "Deploy",
+  "Secret stores",
+  "Project policies"
+ ],
+ "entries": [
+  {
+   "code": "pg_login",
+   "section": "PostgreSQL",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": [
+    "# pg_hba.conf\nhostssl {database} {user} <runtime-cidr> scram-sha-256\nhostssl replication  <runtime-cidr> scram-sha-256"
+   ]
+  },
+  {
+   "code": "pg_tls",
+   "section": "PostgreSQL",
+   "titles": [
+    "TLS"
+   ],
+   "whys": [
+    "Check the TLS mode and CA certificate for this database."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_ssh",
+   "section": "PostgreSQL",
+   "titles": [
+    "SSH tunnel"
+   ],
+   "whys": [
+    "A connection through a bastion needs the SSH user and private key."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_ssh_reachable",
+   "section": "PostgreSQL",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_ssh_unreachable",
+   "section": "PostgreSQL",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_ssh_blocked",
+   "section": "PostgreSQL",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_ssh_tunnel",
+   "section": "PostgreSQL",
+   "titles": [
+    "SSH tunnel"
+   ],
+   "whys": [
+    "Connectors reach the database through this bastion, exactly like this check.",
+    "Fails when the bastion refuses the key, its host key does not match the pinned one, or it cannot reach the database (AllowTcpForwarding must be on).",
+    "Warns while the bastion's host key is not pinned: pin it (ssh-keyscan) so nobody can impersonate the bastion."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_network_reachable",
+   "section": "PostgreSQL",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_network_unreachable",
+   "section": "PostgreSQL",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_network_blocked",
+   "section": "PostgreSQL",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_version",
+   "section": "PostgreSQL",
+   "titles": [
+    "PostgreSQL version"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "pg_wal_level",
+   "section": "PostgreSQL",
+   "titles": [
+    "Logical replication"
+   ],
+   "whys": [
+    "Debezium reads changes from the database log. The setting needs a restart, so plan it."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_replication_role",
+   "section": "PostgreSQL",
+   "titles": [
+    "Replication permission"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "pg_create",
+   "section": "PostgreSQL",
+   "titles": [
+    "Manage publications"
+   ],
+   "whys": [],
+   "fixes": [
+    "GRANT CREATE ON DATABASE {db} TO {user};"
+   ]
+  },
+  {
+   "code": "pg_failover",
+   "section": "PostgreSQL",
+   "titles": [
+    "Failover safety"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "pg_tables",
+   "section": "PostgreSQL",
+   "titles": [
+    "Selected tables"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "pg_capacity",
+   "section": "PostgreSQL",
+   "titles": [
+    "Replication capacity"
+   ],
+   "whys": [],
+   "fixes": [
+    "-- drop slots nobody uses:\nSELECT slot_name, active FROM pg_replication_slots;\n-- or raise the limits (restart required):\nALTER SYSTEM SET max_replication_slots = 20;\nALTER SYSTEM SET max_wal_senders = 20;"
+   ]
+  },
+  {
+   "code": "pg_wal_retention",
+   "section": "PostgreSQL",
+   "titles": [
+    "WAL retention limit"
+   ],
+   "whys": [
+    "A stopped pipeline's slot can fill the disk. BeziSync alerts on retained WAL; a cap protects the database but invalidates the slot (re-snapshot needed) when reached."
+   ],
+   "fixes": [
+    "ALTER SYSTEM SET max_slot_wal_keep_size = '50GB';\nSELECT pg_reload_conf();"
+   ]
+  },
+  {
+   "code": "pg_tables_exist",
+   "section": "PostgreSQL",
+   "titles": [
+    "Selected tables exist"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "pg_tables_select",
+   "section": "PostgreSQL",
+   "titles": [
+    "Read access"
+   ],
+   "whys": [
+    "The initial snapshot reads existing rows with SELECT."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "pg_tables_keys",
+   "section": "PostgreSQL",
+   "titles": [
+    "Row keys"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "pg_tables_identity",
+   "section": "PostgreSQL",
+   "titles": [
+    "Replica identity"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "pg_tables_owner",
+   "section": "PostgreSQL",
+   "titles": [
+    "Publication ownership"
+   ],
+   "whys": [],
+   "fixes": [
+    "CREATE PUBLICATION <pipeline-publication> FOR TABLE ;"
+   ]
+  },
+  {
+   "code": "mysql_version",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Server version"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mysql_ssh",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "SSH tunnel"
+   ],
+   "whys": [
+    "A connection through a bastion needs the SSH user and private key."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mysql_ssh_reachable",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mysql_ssh_unreachable",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mysql_ssh_blocked",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mysql_ssh_tunnel",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "SSH tunnel"
+   ],
+   "whys": [
+    "Connectors reach the database through this bastion, exactly like this check.",
+    "Fails when the bastion refuses the key, its host key does not match the pinned one, or it cannot reach the database (AllowTcpForwarding must be on).",
+    "Warns while the bastion's host key is not pinned: pin it (ssh-keyscan) so nobody can impersonate the bastion."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mysql_network_reachable",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mysql_network_unreachable",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mysql_network_blocked",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mysql_binlog",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Binary log"
+   ],
+   "whys": [],
+   "fixes": [
+    "# my.cnf\n[mysqld]\nlog_bin = mysql-bin\nserver_id = 1\nbinlog_format = ROW"
+   ]
+  },
+  {
+   "code": "mysql_binlog_format",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Row-based binlog"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mysql_gtid",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Failover safety"
+   ],
+   "whys": [],
+   "fixes": [
+    "SET GLOBAL enforce_gtid_consistency = ON;\nSET GLOBAL gtid_mode = OFF_PERMISSIVE;\nSET GLOBAL gtid_mode = ON_PERMISSIVE;\nSET GLOBAL gtid_mode = ON;"
+   ]
+  },
+  {
+   "code": "mysql_grants",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Permissions"
+   ],
+   "whys": [],
+   "fixes": [
+    "GRANT {REQUIRED_PRIVILEGES} ON *.* TO '{user}'@'%';\nGRANT ALL ON {MANAGED_DB}.* TO '{user}'@'%';"
+   ]
+  },
+  {
+   "code": "mysql_retention",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Binlog retention"
+   ],
+   "whys": [],
+   "fixes": [
+    "SET GLOBAL binlog_expire_logs_seconds = 604800;  -- 7 days",
+    "CALL mysql.rds_set_configuration('binlog retention hours', 72);"
+   ]
+  },
+  {
+   "code": "mysql_tables",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Selected tables"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mysql_login",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mysql_row_image",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Full row images"
+   ],
+   "whys": [],
+   "fixes": [
+    "SET GLOBAL binlog_row_image = 'FULL';"
+   ]
+  },
+  {
+   "code": "mysql_tables_exist",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Selected tables exist"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mysql_tables_keys",
+   "section": "MySQL / MariaDB",
+   "titles": [
+    "Row keys"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mssql_ssh",
+   "section": "SQL Server",
+   "titles": [
+    "SSH tunnel"
+   ],
+   "whys": [
+    "A connection through a bastion needs the SSH user and private key."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_ssh_reachable",
+   "section": "SQL Server",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_ssh_unreachable",
+   "section": "SQL Server",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_ssh_blocked",
+   "section": "SQL Server",
+   "titles": [
+    "Reach the SSH bastion"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_ssh_tunnel",
+   "section": "SQL Server",
+   "titles": [
+    "SSH tunnel"
+   ],
+   "whys": [
+    "Connectors reach the database through this bastion, exactly like this check.",
+    "Fails when the bastion refuses the key, its host key does not match the pinned one, or it cannot reach the database (AllowTcpForwarding must be on).",
+    "Warns while the bastion's host key is not pinned: pin it (ssh-keyscan) so nobody can impersonate the bastion."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_network_reachable",
+   "section": "SQL Server",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_network_unreachable",
+   "section": "SQL Server",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_network_blocked",
+   "section": "SQL Server",
+   "titles": [
+    "Reach the database"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_cdc_db",
+   "section": "SQL Server",
+   "titles": [
+    "Change data capture"
+   ],
+   "whys": [
+    "Debezium reads SQL Server's CDC change tables."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mssql_permissions",
+   "section": "SQL Server",
+   "titles": [
+    "Permissions"
+   ],
+   "whys": [],
+   "fixes": [
+    "ALTER ROLE db_owner ADD MEMBER {user};"
+   ]
+  },
+  {
+   "code": "mssql_tables",
+   "section": "SQL Server",
+   "titles": [
+    "Selected tables"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mssql_login",
+   "section": "SQL Server",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mssql_tables_exist",
+   "section": "SQL Server",
+   "titles": [
+    "Selected tables exist"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mssql_tables_cdc",
+   "section": "SQL Server",
+   "titles": [
+    "CDC on tables"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mssql_tables_keys",
+   "section": "SQL Server",
+   "titles": [
+    "Row keys"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mssql_agent",
+   "section": "SQL Server",
+   "titles": [
+    "SQL Server Agent"
+   ],
+   "whys": [],
+   "fixes": [
+    "Start the SQL Server Agent service (and set it to start automatically)."
+   ]
+  },
+  {
+   "code": "mongo_version",
+   "section": "MongoDB",
+   "titles": [
+    "MongoDB version"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mongo_topology",
+   "section": "MongoDB",
+   "titles": [
+    "Change streams available"
+   ],
+   "whys": [],
+   "fixes": [
+    "mongod --replSet rs0 …\nmongosh --eval 'rs.initiate()'"
+   ]
+  },
+  {
+   "code": "mongo_change_stream",
+   "section": "MongoDB",
+   "titles": [
+    "Read change streams"
+   ],
+   "whys": [],
+   "fixes": [
+    "db.grantRolesToUser('<user>', [{ role: 'read', db: '<database>' }, { role: 'readAnyDatabase', db: 'admin' }])"
+   ]
+  },
+  {
+   "code": "mongo_network_reachable",
+   "section": "MongoDB",
+   "titles": [
+    "Reach MongoDB"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mongo_network_unreachable",
+   "section": "MongoDB",
+   "titles": [
+    "Reach MongoDB"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mongo_network_blocked",
+   "section": "MongoDB",
+   "titles": [
+    "Reach MongoDB"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "mongo_login",
+   "section": "MongoDB",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mongo_collections_exist",
+   "section": "MongoDB",
+   "titles": [
+    "Selected collections exist"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "mongo_connect",
+   "section": "MongoDB",
+   "titles": [
+    "Connect"
+   ],
+   "whys": [
+    "For replica sets, every member's advertised hostname must resolve from the runtime."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "kafka_network",
+   "section": "Kafka",
+   "titles": [
+    "Reach brokers"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "kafka_auth",
+   "section": "Kafka",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "kafka_network_reachable",
+   "section": "Kafka",
+   "titles": [
+    "Reach {b}:{b}"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "kafka_network_unreachable",
+   "section": "Kafka",
+   "titles": [
+    "Reach {b}:{b}"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "kafka_network_blocked",
+   "section": "Kafka",
+   "titles": [
+    "Reach {b}:{b}"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "kafka_replication",
+   "section": "Kafka",
+   "titles": [
+    "Replication factor"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "kafka_create_topics",
+   "section": "Kafka",
+   "titles": [
+    "Create topics"
+   ],
+   "whys": [
+    "Turn off 'Create topics automatically' if topics are provisioned another way."
+   ],
+   "fixes": [
+    "kafka-acls --bootstrap-server <broker> --add --allow-principal User: --operation Create --operation Write --operation Describe --topic '*' --resource-pattern-type literal"
+   ]
+  },
+  {
+   "code": "kafka_bootstrap",
+   "section": "Kafka",
+   "titles": [
+    "Broker list"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "http_network_reachable",
+   "section": "HTTP",
+   "titles": [
+    "Reach the endpoint"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "http_network_unreachable",
+   "section": "HTTP",
+   "titles": [
+    "Reach the endpoint"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "http_network_blocked",
+   "section": "HTTP",
+   "titles": [
+    "Reach the endpoint"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "http_status",
+   "section": "HTTP",
+   "titles": [
+    "Endpoint answers"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "pubsub_auth",
+   "section": "Google Pub/Sub",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": [
+    "gcloud projects add-iam-policy-binding {project_id} --member=serviceAccount:<sa-email> --role=roles/pubsub.editor"
+   ]
+  },
+  {
+   "code": "kinesis_auth",
+   "section": "AWS Kinesis",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": [
+    "Allow kinesis:ListStreams, kinesis:DescribeStreamSummary, kinesis:CreateStream, kinesis:PutRecord, kinesis:PutRecords for the BeziSync and runtime principals."
+   ]
+  },
+  {
+   "code": "kinesis_connect",
+   "section": "AWS Kinesis",
+   "titles": [
+    "Reach Kinesis"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "redis_network_reachable",
+   "section": "Redis Streams",
+   "titles": [
+    "Reach Redis"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "redis_network_unreachable",
+   "section": "Redis Streams",
+   "titles": [
+    "Reach Redis"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "redis_network_blocked",
+   "section": "Redis Streams",
+   "titles": [
+    "Reach Redis"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "redis_auth",
+   "section": "Redis Streams",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "redis_write",
+   "section": "Redis Streams",
+   "titles": [
+    "Write streams"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "redis_memory",
+   "section": "Redis Streams",
+   "titles": [
+    "Memory headroom"
+   ],
+   "whys": [
+    "Set a stream length limit or add memory."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "redis_connect",
+   "section": "Redis Streams",
+   "titles": [
+    "Talk to Redis"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "nats_network_reachable",
+   "section": "NATS JetStream",
+   "titles": [
+    "Reach NATS"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "nats_network_unreachable",
+   "section": "NATS JetStream",
+   "titles": [
+    "Reach NATS"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "nats_network_blocked",
+   "section": "NATS JetStream",
+   "titles": [
+    "Reach NATS"
+   ],
+   "whys": [
+    "The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "nats_jetstream",
+   "section": "NATS JetStream",
+   "titles": [
+    "JetStream available"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "runtime_capacity",
+   "section": "Deploy",
+   "titles": [
+    "Runtime capacity"
+   ],
+   "whys": [
+    "The connector may stay pending until resources free up."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "runtime_disabled",
+   "section": "Deploy",
+   "titles": [
+    "Runtime {name}"
+   ],
+   "whys": [
+    "An admin disabled (cordoned) this runtime. Pipelines already running there keep running."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "runtime_ready",
+   "section": "Deploy",
+   "titles": [
+    "Runtime {name}"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "config_valid",
+   "section": "Deploy",
+   "titles": [
+    "Configuration"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "debezium_image_deprecated",
+   "section": "Deploy",
+   "titles": [
+    "Debezium version"
+   ],
+   "whys": [
+    "Your Admins marked this image deprecated; move to one they offer."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "delivery_canary_unavailable",
+   "section": "Deploy",
+   "titles": [
+    "Delivery canary"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "debezium_image_unlisted",
+   "section": "Deploy",
+   "titles": [
+    "Debezium version"
+   ],
+   "whys": [
+    "Your Admins keep a catalog of tested Debezium Server images; this one is not among them."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "checked_from_control_plane",
+   "section": "Deploy",
+   "titles": [
+    "Checked from BeziSync"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "policy_pii_unknown",
+   "section": "Deploy",
+   "titles": [
+    "Personal data"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "secret_ref_unresolved",
+   "section": "Secret stores",
+   "titles": [
+    "Secrets from the secret store"
+   ],
+   "whys": [
+    "The connection takes a secret from an external store, and reading it failed."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "policy_runtime",
+   "section": "Project policies",
+   "titles": [
+    "Runtime"
+   ],
+   "whys": [
+    "This project does not allow pipelines on that runtime."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "policy_source_type",
+   "section": "Project policies",
+   "titles": [
+    "Source type"
+   ],
+   "whys": [
+    "This project does not allow {source_type} sources."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "policy_sink_type",
+   "section": "Project policies",
+   "titles": [
+    "Destination type"
+   ],
+   "whys": [
+    "This project does not allow {sink_type} destinations."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "policy_snapshot_mode",
+   "section": "Project policies",
+   "titles": [
+    "Snapshot mode"
+   ],
+   "whys": [
+    "Snapshot mode '{mode}' is not allowed here. Allowed: {allowed_snapshot_modes}."
+   ],
+   "fixes": [
+    "Pick an allowed snapshot mode in the pipeline settings."
+   ]
+  },
+  {
+   "code": "policy_resources",
+   "section": "Project policies",
+   "titles": [
+    "Resources"
+   ],
+   "whys": [
+    "The '{size}' preset exceeds this project's limit ({max_resources})."
+   ],
+   "fixes": [
+    "Choose {max_resources} or smaller."
+   ]
+  },
+  {
+   "code": "policy_source_budget",
+   "section": "Project policies",
+   "titles": [
+    "Pipelines per source"
+   ],
+   "whys": [
+    "The source already feeds {other_pipelines_on_source} pipeline(s); this project allows {limit}. Each one holds a replication slot or log reader on the database."
+   ],
+   "fixes": [
+    "Reuse an existing pipeline (add tables to it) or ask an admin to raise the limit."
+   ]
+  },
+  {
+   "code": "policy_ok",
+   "section": "Project policies",
+   "titles": [
+    "Project policies"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "policy_pii_unmasked",
+   "section": "Project policies",
+   "titles": [
+    "Personal data"
+   ],
+   "whys": [
+    "These columns look like personal data and must be masked or excluded: {unprotected}."
+   ],
+   "fixes": [
+    "In Tables, mask or exclude each listed column."
+   ]
+  }
+ ],
+ "markdown": "# Preflight check reference\n\nEvery check BeziSync runs on connections, runtimes and deployments. Generated from the\nsource by `bezisync check-docs` — do not edit by hand. In the UI each check links here.\n\n## PostgreSQL\n\n<a id=\"pg-capacity\"></a>\n### `pg_capacity`\n\n**Replication capacity**\n\nFix:\n\n```\n-- drop slots nobody uses:\nSELECT slot_name, active FROM pg_replication_slots;\n-- or raise the limits (restart required):\nALTER SYSTEM SET max_replication_slots = 20;\nALTER SYSTEM SET max_wal_senders = 20;\n```\n\n<a id=\"pg-create\"></a>\n### `pg_create`\n\n**Manage publications**\n\nFix:\n\n```\nGRANT CREATE ON DATABASE {db} TO {user};\n```\n\n<a id=\"pg-failover\"></a>\n### `pg_failover`\n\n**Failover safety**\n\n<a id=\"pg-login\"></a>\n### `pg_login`\n\n**Sign in**\n\nFix:\n\n```\n# pg_hba.conf\nhostssl {database} {user} <runtime-cidr> scram-sha-256\nhostssl replication  <runtime-cidr> scram-sha-256\n```\n\n<a id=\"pg-network-blocked\"></a>\n### `pg_network_blocked`\n\n**Reach the database**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"pg-network-reachable\"></a>\n### `pg_network_reachable`\n\n**Reach the database**\n\n- Why: The host answered on the port.\n\n<a id=\"pg-network-unreachable\"></a>\n### `pg_network_unreachable`\n\n**Reach the database**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"pg-replication-role\"></a>\n### `pg_replication_role`\n\n**Replication permission**\n\n<a id=\"pg-ssh\"></a>\n### `pg_ssh`\n\n**SSH tunnel**\n\n- Why: A connection through a bastion needs the SSH user and private key.\n\n<a id=\"pg-ssh-blocked\"></a>\n### `pg_ssh_blocked`\n\n**Reach the SSH bastion**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"pg-ssh-reachable\"></a>\n### `pg_ssh_reachable`\n\n**Reach the SSH bastion**\n\n- Why: The host answered on the port.\n\n<a id=\"pg-ssh-tunnel\"></a>\n### `pg_ssh_tunnel`\n\n**SSH tunnel**\n\n- Why: Connectors reach the database through this bastion, exactly like this check.\n- Why: Fails when the bastion refuses the key, its host key does not match the pinned one, or it cannot reach the database (AllowTcpForwarding must be on).\n- Why: Warns while the bastion's host key is not pinned: pin it (ssh-keyscan) so nobody can impersonate the bastion.\n\n<a id=\"pg-ssh-unreachable\"></a>\n### `pg_ssh_unreachable`\n\n**Reach the SSH bastion**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"pg-tables\"></a>\n### `pg_tables`\n\n**Selected tables**\n\n<a id=\"pg-tables-exist\"></a>\n### `pg_tables_exist`\n\n**Selected tables exist**\n\n<a id=\"pg-tables-identity\"></a>\n### `pg_tables_identity`\n\n**Replica identity**\n\n<a id=\"pg-tables-keys\"></a>\n### `pg_tables_keys`\n\n**Row keys**\n\n<a id=\"pg-tables-owner\"></a>\n### `pg_tables_owner`\n\n**Publication ownership**\n\nFix:\n\n```\nCREATE PUBLICATION <pipeline-publication> FOR TABLE ;\n```\n\n<a id=\"pg-tables-select\"></a>\n### `pg_tables_select`\n\n**Read access**\n\n- Why: The initial snapshot reads existing rows with SELECT.\n\n<a id=\"pg-tls\"></a>\n### `pg_tls`\n\n**TLS**\n\n- Why: Check the TLS mode and CA certificate for this database.\n\n<a id=\"pg-version\"></a>\n### `pg_version`\n\n**PostgreSQL version**\n\n<a id=\"pg-wal-level\"></a>\n### `pg_wal_level`\n\n**Logical replication**\n\n- Why: Debezium reads changes from the database log. The setting needs a restart, so plan it.\n\n<a id=\"pg-wal-retention\"></a>\n### `pg_wal_retention`\n\n**WAL retention limit**\n\n- Why: A stopped pipeline's slot can fill the disk. BeziSync alerts on retained WAL; a cap protects the database but invalidates the slot (re-snapshot needed) when reached.\n\nFix:\n\n```\nALTER SYSTEM SET max_slot_wal_keep_size = '50GB';\nSELECT pg_reload_conf();\n```\n\n## MySQL / MariaDB\n\n<a id=\"mysql-binlog\"></a>\n### `mysql_binlog`\n\n**Binary log**\n\nFix:\n\n```\n# my.cnf\n[mysqld]\nlog_bin = mysql-bin\nserver_id = 1\nbinlog_format = ROW\n```\n\n<a id=\"mysql-binlog-format\"></a>\n### `mysql_binlog_format`\n\n**Row-based binlog**\n\n<a id=\"mysql-grants\"></a>\n### `mysql_grants`\n\n**Permissions**\n\nFix:\n\n```\nGRANT {REQUIRED_PRIVILEGES} ON *.* TO '{user}'@'%';\nGRANT ALL ON {MANAGED_DB}.* TO '{user}'@'%';\n```\n\n<a id=\"mysql-gtid\"></a>\n### `mysql_gtid`\n\n**Failover safety**\n\nFix:\n\n```\nSET GLOBAL enforce_gtid_consistency = ON;\nSET GLOBAL gtid_mode = OFF_PERMISSIVE;\nSET GLOBAL gtid_mode = ON_PERMISSIVE;\nSET GLOBAL gtid_mode = ON;\n```\n\n<a id=\"mysql-login\"></a>\n### `mysql_login`\n\n**Sign in**\n\n<a id=\"mysql-network-blocked\"></a>\n### `mysql_network_blocked`\n\n**Reach the database**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"mysql-network-reachable\"></a>\n### `mysql_network_reachable`\n\n**Reach the database**\n\n- Why: The host answered on the port.\n\n<a id=\"mysql-network-unreachable\"></a>\n### `mysql_network_unreachable`\n\n**Reach the database**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"mysql-retention\"></a>\n### `mysql_retention`\n\n**Binlog retention**\n\nFix:\n\n```\nSET GLOBAL binlog_expire_logs_seconds = 604800;  -- 7 days\n```\n\nFix:\n\n```\nCALL mysql.rds_set_configuration('binlog retention hours', 72);\n```\n\n<a id=\"mysql-row-image\"></a>\n### `mysql_row_image`\n\n**Full row images**\n\nFix:\n\n```\nSET GLOBAL binlog_row_image = 'FULL';\n```\n\n<a id=\"mysql-ssh\"></a>\n### `mysql_ssh`\n\n**SSH tunnel**\n\n- Why: A connection through a bastion needs the SSH user and private key.\n\n<a id=\"mysql-ssh-blocked\"></a>\n### `mysql_ssh_blocked`\n\n**Reach the SSH bastion**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"mysql-ssh-reachable\"></a>\n### `mysql_ssh_reachable`\n\n**Reach the SSH bastion**\n\n- Why: The host answered on the port.\n\n<a id=\"mysql-ssh-tunnel\"></a>\n### `mysql_ssh_tunnel`\n\n**SSH tunnel**\n\n- Why: Connectors reach the database through this bastion, exactly like this check.\n- Why: Fails when the bastion refuses the key, its host key does not match the pinned one, or it cannot reach the database (AllowTcpForwarding must be on).\n- Why: Warns while the bastion's host key is not pinned: pin it (ssh-keyscan) so nobody can impersonate the bastion.\n\n<a id=\"mysql-ssh-unreachable\"></a>\n### `mysql_ssh_unreachable`\n\n**Reach the SSH bastion**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"mysql-tables\"></a>\n### `mysql_tables`\n\n**Selected tables**\n\n<a id=\"mysql-tables-exist\"></a>\n### `mysql_tables_exist`\n\n**Selected tables exist**\n\n<a id=\"mysql-tables-keys\"></a>\n### `mysql_tables_keys`\n\n**Row keys**\n\n<a id=\"mysql-version\"></a>\n### `mysql_version`\n\n**Server version**\n\n## SQL Server\n\n<a id=\"mssql-agent\"></a>\n### `mssql_agent`\n\n**SQL Server Agent**\n\nFix:\n\n```\nStart the SQL Server Agent service (and set it to start automatically).\n```\n\n<a id=\"mssql-cdc-db\"></a>\n### `mssql_cdc_db`\n\n**Change data capture**\n\n- Why: Debezium reads SQL Server's CDC change tables.\n\n<a id=\"mssql-login\"></a>\n### `mssql_login`\n\n**Sign in**\n\n<a id=\"mssql-network-blocked\"></a>\n### `mssql_network_blocked`\n\n**Reach the database**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"mssql-network-reachable\"></a>\n### `mssql_network_reachable`\n\n**Reach the database**\n\n- Why: The host answered on the port.\n\n<a id=\"mssql-network-unreachable\"></a>\n### `mssql_network_unreachable`\n\n**Reach the database**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"mssql-permissions\"></a>\n### `mssql_permissions`\n\n**Permissions**\n\nFix:\n\n```\nALTER ROLE db_owner ADD MEMBER {user};\n```\n\n<a id=\"mssql-ssh\"></a>\n### `mssql_ssh`\n\n**SSH tunnel**\n\n- Why: A connection through a bastion needs the SSH user and private key.\n\n<a id=\"mssql-ssh-blocked\"></a>\n### `mssql_ssh_blocked`\n\n**Reach the SSH bastion**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"mssql-ssh-reachable\"></a>\n### `mssql_ssh_reachable`\n\n**Reach the SSH bastion**\n\n- Why: The host answered on the port.\n\n<a id=\"mssql-ssh-tunnel\"></a>\n### `mssql_ssh_tunnel`\n\n**SSH tunnel**\n\n- Why: Connectors reach the database through this bastion, exactly like this check.\n- Why: Fails when the bastion refuses the key, its host key does not match the pinned one, or it cannot reach the database (AllowTcpForwarding must be on).\n- Why: Warns while the bastion's host key is not pinned: pin it (ssh-keyscan) so nobody can impersonate the bastion.\n\n<a id=\"mssql-ssh-unreachable\"></a>\n### `mssql_ssh_unreachable`\n\n**Reach the SSH bastion**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"mssql-tables\"></a>\n### `mssql_tables`\n\n**Selected tables**\n\n<a id=\"mssql-tables-cdc\"></a>\n### `mssql_tables_cdc`\n\n**CDC on tables**\n\n<a id=\"mssql-tables-exist\"></a>\n### `mssql_tables_exist`\n\n**Selected tables exist**\n\n<a id=\"mssql-tables-keys\"></a>\n### `mssql_tables_keys`\n\n**Row keys**\n\n## MongoDB\n\n<a id=\"mongo-change-stream\"></a>\n### `mongo_change_stream`\n\n**Read change streams**\n\nFix:\n\n```\ndb.grantRolesToUser('<user>', [{ role: 'read', db: '<database>' }, { role: 'readAnyDatabase', db: 'admin' }])\n```\n\n<a id=\"mongo-collections-exist\"></a>\n### `mongo_collections_exist`\n\n**Selected collections exist**\n\n<a id=\"mongo-connect\"></a>\n### `mongo_connect`\n\n**Connect**\n\n- Why: For replica sets, every member's advertised hostname must resolve from the runtime.\n\n<a id=\"mongo-login\"></a>\n### `mongo_login`\n\n**Sign in**\n\n<a id=\"mongo-network-blocked\"></a>\n### `mongo_network_blocked`\n\n**Reach MongoDB**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"mongo-network-reachable\"></a>\n### `mongo_network_reachable`\n\n**Reach MongoDB**\n\n- Why: The host answered on the port.\n\n<a id=\"mongo-network-unreachable\"></a>\n### `mongo_network_unreachable`\n\n**Reach MongoDB**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"mongo-topology\"></a>\n### `mongo_topology`\n\n**Change streams available**\n\nFix:\n\n```\nmongod --replSet rs0 …\nmongosh --eval 'rs.initiate()'\n```\n\n<a id=\"mongo-version\"></a>\n### `mongo_version`\n\n**MongoDB version**\n\n## Kafka\n\n<a id=\"kafka-auth\"></a>\n### `kafka_auth`\n\n**Sign in**\n\n<a id=\"kafka-bootstrap\"></a>\n### `kafka_bootstrap`\n\n**Broker list**\n\n<a id=\"kafka-create-topics\"></a>\n### `kafka_create_topics`\n\n**Create topics**\n\n- Why: Turn off 'Create topics automatically' if topics are provisioned another way.\n\nFix:\n\n```\nkafka-acls --bootstrap-server <broker> --add --allow-principal User: --operation Create --operation Write --operation Describe --topic '*' --resource-pattern-type literal\n```\n\n<a id=\"kafka-network\"></a>\n### `kafka_network`\n\n**Reach brokers**\n\n<a id=\"kafka-network-blocked\"></a>\n### `kafka_network_blocked`\n\n**Reach {b}:{b}**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"kafka-network-reachable\"></a>\n### `kafka_network_reachable`\n\n**Reach {b}:{b}**\n\n- Why: The host answered on the port.\n\n<a id=\"kafka-network-unreachable\"></a>\n### `kafka_network_unreachable`\n\n**Reach {b}:{b}**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"kafka-replication\"></a>\n### `kafka_replication`\n\n**Replication factor**\n\n## HTTP\n\n<a id=\"http-network-blocked\"></a>\n### `http_network_blocked`\n\n**Reach the endpoint**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"http-network-reachable\"></a>\n### `http_network_reachable`\n\n**Reach the endpoint**\n\n- Why: The host answered on the port.\n\n<a id=\"http-network-unreachable\"></a>\n### `http_network_unreachable`\n\n**Reach the endpoint**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"http-status\"></a>\n### `http_status`\n\n**Endpoint answers**\n\n## Google Pub/Sub\n\n<a id=\"pubsub-auth\"></a>\n### `pubsub_auth`\n\n**Sign in**\n\nFix:\n\n```\ngcloud projects add-iam-policy-binding {project_id} --member=serviceAccount:<sa-email> --role=roles/pubsub.editor\n```\n\n## AWS Kinesis\n\n<a id=\"kinesis-auth\"></a>\n### `kinesis_auth`\n\n**Sign in**\n\nFix:\n\n```\nAllow kinesis:ListStreams, kinesis:DescribeStreamSummary, kinesis:CreateStream, kinesis:PutRecord, kinesis:PutRecords for the BeziSync and runtime principals.\n```\n\n<a id=\"kinesis-connect\"></a>\n### `kinesis_connect`\n\n**Reach Kinesis**\n\n## Redis Streams\n\n<a id=\"redis-auth\"></a>\n### `redis_auth`\n\n**Sign in**\n\n<a id=\"redis-connect\"></a>\n### `redis_connect`\n\n**Talk to Redis**\n\n<a id=\"redis-memory\"></a>\n### `redis_memory`\n\n**Memory headroom**\n\n- Why: Set a stream length limit or add memory.\n\n<a id=\"redis-network-blocked\"></a>\n### `redis_network_blocked`\n\n**Reach Redis**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"redis-network-reachable\"></a>\n### `redis_network_reachable`\n\n**Reach Redis**\n\n- Why: The host answered on the port.\n\n<a id=\"redis-network-unreachable\"></a>\n### `redis_network_unreachable`\n\n**Reach Redis**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n<a id=\"redis-write\"></a>\n### `redis_write`\n\n**Write streams**\n\n## NATS JetStream\n\n<a id=\"nats-jetstream\"></a>\n### `nats_jetstream`\n\n**JetStream available**\n\n<a id=\"nats-network-blocked\"></a>\n### `nats_network_blocked`\n\n**Reach NATS**\n\n- Why: The address is loopback, link-local or a cloud metadata endpoint, which BeziSync never contacts unless an admin allows it (BEZISYNC_SSRF_ALLOW_CIDRS).\n\n<a id=\"nats-network-reachable\"></a>\n### `nats_network_reachable`\n\n**Reach NATS**\n\n- Why: The host answered on the port.\n\n<a id=\"nats-network-unreachable\"></a>\n### `nats_network_unreachable`\n\n**Reach NATS**\n\n- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).\n\n## Deploy\n\n<a id=\"checked-from-control-plane\"></a>\n### `checked_from_control_plane`\n\n**Checked from BeziSync**\n\n<a id=\"config-valid\"></a>\n### `config_valid`\n\n**Configuration**\n\n<a id=\"debezium-image-deprecated\"></a>\n### `debezium_image_deprecated`\n\n**Debezium version**\n\n- Why: Your Admins marked this image deprecated; move to one they offer.\n\n<a id=\"debezium-image-unlisted\"></a>\n### `debezium_image_unlisted`\n\n**Debezium version**\n\n- Why: Your Admins keep a catalog of tested Debezium Server images; this one is not among them.\n\n<a id=\"delivery-canary-unavailable\"></a>\n### `delivery_canary_unavailable`\n\n**Delivery canary**\n\n<a id=\"policy-pii-unknown\"></a>\n### `policy_pii_unknown`\n\n**Personal data**\n\n<a id=\"runtime-capacity\"></a>\n### `runtime_capacity`\n\n**Runtime capacity**\n\n- Why: The connector may stay pending until resources free up.\n\n<a id=\"runtime-disabled\"></a>\n### `runtime_disabled`\n\n**Runtime {name}**\n\n- Why: An admin disabled (cordoned) this runtime. Pipelines already running there keep running.\n\n<a id=\"runtime-ready\"></a>\n### `runtime_ready`\n\n**Runtime {name}**\n\n## Secret stores\n\n<a id=\"secret-ref-unresolved\"></a>\n### `secret_ref_unresolved`\n\n**Secrets from the secret store**\n\n- Why: The connection takes a secret from an external store, and reading it failed.\n\n## Project policies\n\n<a id=\"policy-ok\"></a>\n### `policy_ok`\n\n**Project policies**\n\n<a id=\"policy-pii-unmasked\"></a>\n### `policy_pii_unmasked`\n\n**Personal data**\n\n- Why: These columns look like personal data and must be masked or excluded: {unprotected}.\n\nFix:\n\n```\nIn Tables, mask or exclude each listed column.\n```\n\n<a id=\"policy-resources\"></a>\n### `policy_resources`\n\n**Resources**\n\n- Why: The '{size}' preset exceeds this project's limit ({max_resources}).\n\nFix:\n\n```\nChoose {max_resources} or smaller.\n```\n\n<a id=\"policy-runtime\"></a>\n### `policy_runtime`\n\n**Runtime**\n\n- Why: This project does not allow pipelines on that runtime.\n\n<a id=\"policy-sink-type\"></a>\n### `policy_sink_type`\n\n**Destination type**\n\n- Why: This project does not allow {sink_type} destinations.\n\n<a id=\"policy-snapshot-mode\"></a>\n### `policy_snapshot_mode`\n\n**Snapshot mode**\n\n- Why: Snapshot mode '{mode}' is not allowed here. Allowed: {allowed_snapshot_modes}.\n\nFix:\n\n```\nPick an allowed snapshot mode in the pipeline settings.\n```\n\n<a id=\"policy-source-budget\"></a>\n### `policy_source_budget`\n\n**Pipelines per source**\n\n- Why: The source already feeds {other_pipelines_on_source} pipeline(s); this project allows {limit}. Each one holds a replication slot or log reader on the database.\n\nFix:\n\n```\nReuse an existing pipeline (add tables to it) or ask an admin to raise the limit.\n```\n\n<a id=\"policy-source-type\"></a>\n### `policy_source_type`\n\n**Source type**\n\n- Why: This project does not allow {source_type} sources.\n"
+}

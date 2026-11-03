@@ -1,0 +1,136 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please redact credentials, tokens, connection strings, and production data before pasting logs or config.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug
+      placeholder: Describe what happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Create source connection...
+        2. Run preflight...
+        3. Deploy pipeline...
+        4. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: Describe what should have happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+      placeholder: Describe what actually happened...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Component/Area
+      description: Which part of BeziSync is affected?
+      options:
+        - Not sure
+        - Authentication/Login
+        - Workspaces
+        - Credentials/Secrets
+        - Source Connections
+        - Target Connections
+        - Connectivity Checks
+        - Preflight Validation
+        - Config Compiler
+        - Pipeline Deployment
+        - Pipeline Health/Logs
+        - Source Signaling
+        - Runtime Config
+        - Frontend UI
+        - Docker/Worker
+        - Other
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: Where are you running BeziSync?
+      options:
+        - Development stack (`make dev`)
+        - Production-like compose stack (`make up`)
+        - Custom Docker Compose
+        - Kubernetes
+        - Other
+
+  - type: input
+    id: version
+    attributes:
+      label: BeziSync Version
+      description: BeziSync version, git commit, or Docker image tag
+      placeholder: e.g., 0.1.0 or ghcr.io/...:v0.1.0
+
+  - type: input
+    id: source
+    attributes:
+      label: Source Engine
+      description: Source database and version
+      placeholder: e.g., PostgreSQL 16, MySQL 8.4
+
+  - type: input
+    id: target
+    attributes:
+      label: Target
+      description: Target sink and version, if relevant
+      placeholder: e.g., Kafka 3.8
+
+  - type: textarea
+    id: preflight
+    attributes:
+      label: Preflight or Connectivity Output
+      description: Paste relevant redacted check results
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs/Errors
+      description: Paste redacted browser console, API, worker, or Debezium logs
+      placeholder: |
+        Browser console:
+        API logs:
+        Worker logs:
+        Debezium logs:
+      render: shell
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots to help explain the problem
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information that might be helpful

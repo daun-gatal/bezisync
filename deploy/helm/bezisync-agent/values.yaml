@@ -1,0 +1,40 @@
+image:
+  repository: ghcr.io/daun-gatal/bezisync
+  tag: latest      # pin a release (e.g. 1.2.0) for reproducible installs; "" = the chart appVersion
+  pullPolicy: Always   # so `latest` is re-pulled; IfNotPresent suits a pinned tag
+# For private registries, e.g. [{ name: ghcr-pull-secret }].
+imagePullSecrets: []
+
+controlPlane:
+  url: ""          # e.g. https://bezisync.example.com (required)
+  insecure: false  # skip TLS verification: testing only
+
+# The enrollment token shown once when the runtime was added (bza_...). Either set it here
+# or reference an existing Secret holding it under key BEZISYNC_AGENT_TOKEN.
+token: ""
+existingSecret: ""
+
+# kubernetes: connectors run as Deployments in the release namespace.
+# docker: connectors run on the Docker daemon at docker.host (e.g. a DinD sidecar or VM).
+kind: kubernetes
+docker:
+  host: ""         # tcp://docker-host:2375
+  network: ""
+  imagePullTimeout: "30m"  # how long one image download may take: 10m, 30m, 1h or 2h
+
+# Lets the agent report node capacity (cluster-scoped, read-only list of nodes).
+reportNodeCapacity: true
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 384Mi }
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }

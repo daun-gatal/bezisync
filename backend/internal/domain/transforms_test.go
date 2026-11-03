@@ -1,0 +1,243 @@
+package domain_test
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
+	"github.com/daun-gatal/bezisync/backend/internal/val"
+)
+
+func mustSpec(t *testing.T, s string) domain.PipelineSpec {
+	t.Helper()
+	raw, err := pyjson.DecodeGeneric([]byte(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &val.V{}
+	spec, ok := domain.ParseSpec(v, nil, raw)
+	if !ok {
+		t.Fatalf("%s: %v", s, v.Errors)
+	}
+	return spec
+}
+
+func mustPolicies(t *testing.T, s string) domain.ProjectPolicies {
+	t.Helper()
+	raw, err := pyjson.DecodeGeneric([]byte(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &val.V{}
+	p, ok := domain.ParsePolicies(v, nil, raw)
+	if !ok {
+		t.Fatalf("%s: %v", s, v.Errors)
+	}
+	return p
+}
+
+func TestScriptedFilterNeedsThePolicy(t *testing.T) {
+	spec := mustSpec(t, `{"transforms": [{"type": "unwrap"}, {"type": "filter", "condition": "value.op == 'c'"}]}`)
+	got := domain.EvaluatePolicies(mustPolicies(t, `{}`), spec, nil, "postgresql", "kafka", 0)
+	if len(got) != 1 || got[0].Code != "policy_scripted_transform" || !got[0].Blocking {
+		t.Fatalf("got %+v", got)
+	}
+	if !strings.Contains(got[0].Message, "step 2 (filter)") || got[0].Fix == nil || got[0].Fix.Who != "Admin" {
+		t.Errorf("message %q fix %v", got[0].Message, got[0].Fix)
+	}
+	allowed := domain.EvaluatePolicies(mustPolicies(t, `{"allow_scripted_transforms": true}`), spec, nil, "postgresql", "kafka", 0)
+	if len(allowed) != 1 || allowed[0].Code != "policy_ok" {
+		t.Fatalf("allowed: %+v", allowed)
+	}
+	// An empty or missing condition is not a script.
+	for _, s := range []string{`{"transforms": [{"type": "filter"}]}`, `{"transforms": [{"type": "filter", "condition": ""}]}`} {
+		if got := domain.EvaluatePolicies(mustPolicies(t, `{}`), mustSpec(t, s), nil, "postgresql", "kafka", 0); got[0].Code != "policy_ok" {
+			t.Errorf("%s: %+v", s, got)
+		}
+	}
+}
+
+func TestScriptedPolicyDumpsOnlyWhenSet(t *testing.T) {
+	off, _ := json.Marshal(mustPolicies(t, `{"allow_scripted_transforms": false}`))
+	if strings.Contains(string(off), "allow_scripted_transforms") {
+		t.Errorf("default dumped: %s", off)
+	}
+	on, _ := json.Marshal(mustPolicies(t, `{"allow_scripted_transforms": true}`))
+	if !strings.HasSuffix(string(on), `"require_approval":false,"allow_scripted_transforms":true}`) &&
+		!strings.HasSuffix(string(on), `"require_approval": false, "allow_scripted_transforms": true}`) {
+		t.Errorf("set: %s", on)
+	}
+	v := &val.V{}
+	if _, ok := domain.ParsePolicies(v, nil, map[string]any{"allow_scripted_transforms": "yes please"}); ok {
+		t.Error("accepted a non-boolean")
+	}
+}
+
+const tables = `"source": {"tables": {"include": ["public.orders", "public.audit_log"]}}`
+
+func TestTypedTransformsRoundTrip(t *testing.T) {
+	in := `{` + tables + `,
+	  "transforms": [
+	    {"type": "filter", "id": "k7f2", "tables": ["public.orders"], "operations": ["insert", "update"],
+	     "rules": [{"field": "status", "op": "in", "values": ["paid", "shipped"]}, {"field": "total", "op": "gte", "value": 10.5},
+	               {"field": "note", "op": "is_null"}, {"field": "vip", "op": "eq", "value": true}]},
+	    {"type": "unwrap", "id": "u1a0", "delete_handling": "drop"},
+	    {"type": "rename", "id": "r9c1", "tables": ["public.orders"], "renames": [{"from": "cust_id", "to": "customer_id"}]},
+	    {"type": "add_field", "id": "a3d4", "name": "source_system", "value": {"kind": "static", "text": "orders-eu"}},
+	    {"type": "add_field", "id": "a3d5", "name": "pipeline", "value": {"kind": "pipeline"}},
+	    {"type": "flatten", "id": "f001"},
+	    {"type": "custom", "id": "c81e", "class": "com.acme.smt.CurrencyNormalizer", "properties": {"field": "total", "target.currency": "EUR"}}
+	  ],
+	  "values": {"decimals": "double", "timestamps": "isostring"},
+	  "keys": {"public.audit_log": ["event_id"]}}`
+	spec := mustSpec(t, in)
+	if spec.Transforms[0].Match != "all" || spec.Transforms[5].Delimiter != "_" || spec.Values.Binary != "" {
+		t.Fatalf("defaults: %+v", spec.Transforms)
+	}
+	b, _ := json.Marshal(spec)
+	again := mustSpec(t, string(b))
+	if !again.Equal(spec) || domain.SpecHash(again) != domain.SpecHash(spec) {
+		t.Fatalf("round trip changed the spec:\n%s", b)
+	}
+	clone := spec.Clone()
+	clone.Transforms[0].Rules[0].Values[0] = "changed"
+	clone.Transforms[2].Renames[0].To = "x"
+	clone.Transforms[6].Properties["field"] = "x"
+	clone.Keys["public.audit_log"][0] = "x"
+	if !spec.Equal(mustSpec(t, string(b))) {
+		t.Fatal("Clone shares state with the original")
+	}
+	for _, want := range []string{`"values":{"decimals":"double","timestamps":"isostring"}`, `"keys":{"public.audit_log":["event_id"]}`,
+		`{"type":"rename","id":"r9c1","tables":["public.orders"],"renames":[{"from":"cust_id","to":"customer_id"}]}`,
+		`"match":"all","rules":[{"field":"status","op":"in","values":["paid","shipped"]},{"field":"total","op":"gte","value":10.5}`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("dump lacks %s:\n%s", want, b)
+		}
+	}
+}
+
+func TestPythonEraSpecsStillParse(t *testing.T) {
+	// Stored versions are read with MustSpec: anything the Python releases accepted must parse.
+	for _, s := range []string{
+		`{"transforms": [{"type": "unwrap"}, {"type": "unwrap"}]}`,
+		`{"transforms": [{"type": "outbox"}, {"type": "filter", "condition": "x"}, {"type": "unwrap"}, {"type": "filter"}]}`,
+		`{"transforms": [{"type": "unwrap", "add_fields": ["anything.goes"], "delete_handling": "tombstone"}]}`,
+	} {
+		mustSpec(t, s)
+	}
+}
+
+func TestPythonEraSpecsDumpUnchanged(t *testing.T) {
+	// No new key appears unless it is used: the stored hashes of every existing version hold.
+	spec := mustSpec(t, `{"transforms": [{"type": "unwrap"}, {"type": "filter", "condition": "x"}, {"type": "outbox"}]}`)
+	b, _ := json.Marshal(spec)
+	steps, _ := json.Marshal(spec.Dump().Plain()["transforms"])
+	if string(steps) != `[{"add_fields":["op","source.ts_ms"],"condition":null,"delete_handling":"rewrite","type":"unwrap"},`+
+		`{"add_fields":["op","source.ts_ms"],"condition":"x","delete_handling":"rewrite","type":"filter"},`+
+		`{"add_fields":["op","source.ts_ms"],"condition":null,"delete_handling":"rewrite","type":"outbox"}]` {
+		t.Errorf("steps: %s", steps)
+	}
+	for _, key := range []string{`"values"`, `"keys"`} {
+		if strings.Contains(string(b), key) {
+			t.Errorf("%s dumped for a Python-era spec: %s", key, b)
+		}
+	}
+	if domain.StepName(1, spec.Transforms[1]) != "t1filter" {
+		t.Error(domain.StepName(1, spec.Transforms[1]))
+	}
+}
+
+func TestTransformValidation(t *testing.T) {
+	cases := []struct{ spec, want string }{
+		{`{"transforms": [{"type": "rename", "renames": [{"from": "a", "to": "b"}]}]}`, "needs the row-after-change event shape before it"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "filter", "operations": ["insert"]}]}`, "move this step above the event shape (step 1)"},
+		{`{"transforms": [{"type": "filter", "operations": ["insert"], "condition": "x"}]}`, "either operations and rules, or a raw condition"},
+		{`{"transforms": [{"type": "filter", "operations": []}]}`, "needs at least one operation or rule"},
+		{`{"transforms": [{"type": "filter", "operations": ["insert", "insert"]}]}`, "operations must not repeat"},
+		{`{"transforms": [{"type": "filter", "operations": ["upsert"]}]}`, "Input should be 'insert', 'update', 'delete' or 'snapshot'"},
+		{`{"transforms": [{"type": "filter", "condition": "x", "tables": ["public.orders"]}], ` + tables + `}`, "only filters built from operations and rules"},
+		{`{"transforms": [{"type": "filter", "match": "any", "operations": ["insert"]}]}`, "match needs rules"},
+		{`{"transforms": [{"type": "filter", "rules": [{"field": "a", "op": "gt", "value": "10"}]}]}`, "must be a number for this operator"},
+		{`{"transforms": [{"type": "filter", "rules": [{"field": "a", "op": "in", "values": []}]}]}`, "List should have at least 1 item"},
+		{`{"transforms": [{"type": "filter", "rules": [{"field": "a", "op": "eq"}]}]}`, "Field required"},
+		{`{"transforms": [{"type": "filter", "rules": [{"field": "a", "op": "is_null", "value": 1}]}]}`, "is_null takes no value"},
+		{`{"transforms": [{"type": "filter", "rules": [{"field": "a", "op": "eq", "value": "${BZ_SRC_PASSWORD}"}]}]}`, `must not contain "${"`},
+		{`{"transforms": [{"type": "filter", "rules": [{"field": "a'b", "op": "is_null"}]}]}`, "String should match pattern"},
+		{`{"transforms": [{"type": "filter", "rules": [{"field": "a", "op": "eq", "value": "x\ny"}]}]}`, "must not contain control characters"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "rename", "renames": [{"from": "a", "to": "a"}]}]}`, "cannot be renamed to itself"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "rename", "renames": [{"from": "a", "to": "b"}, {"from": "c", "to": "b"}]}]}`, "two fields would be called b"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "rename", "renames": [{"from": "a", "to": "b c"}]}]}`, "String should match pattern"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "rename", "renames": []}]}`, "List should have at least 1 item"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "add_field", "name": "x", "value": {"kind": "static", "text": "${HOME}"}}]}`, `must not contain "${"`},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "add_field", "name": "x", "value": {"kind": "static"}}]}`, "Field required"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "add_field", "name": "x", "value": {"kind": "pipeline", "text": "y"}}]}`, "needs no text"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "add_field", "name": "x", "value": {"kind": "time"}}]}`, "Input should be 'static' or 'pipeline'"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "flatten", "delimiter": "-"}]}`, "Input should be '_' or '.'"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "custom", "class": "Filter"}]}`, "String should match pattern"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "custom", "class": "a.B", "properties": {"type": "x"}}]}`, "type is set by BeziSync"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "custom", "class": "a.B", "properties": {"predicate": "x"}}]}`, "predicate is set by BeziSync"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "custom", "class": "a.B", "properties": {"x": "${BZ_STATE_PASSWORD}"}}]}`, `must not contain "${"`},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "custom", "class": "a.B", "properties": {"X=1": "y"}}]}`, "String should match pattern"},
+		{`{"transforms": [{"type": "rename", "delete_handling": "drop", "renames": [{"from": "a", "to": "b"}]}]}`, "not used by rename steps"},
+		{`{"transforms": [{"type": "unwrap", "tables": ["public.orders"]}], ` + tables + `}`, "unwrap steps apply to every table"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "flatten", "tables": ["public.nope"]}], ` + tables + `}`, "public.nope is not captured"},
+		{`{"transforms": [{"type": "unwrap"}, {"type": "flatten", "tables": []}]}`, "leave tables out"},
+		{`{"transforms": [{"type": "unwrap", "id": "abcd"}, {"type": "flatten", "id": "abcd"}]}`, "step id abcd is used twice"},
+		{`{"transforms": [{"type": "unwrap", "id": "AB"}]}`, "String should match pattern"},
+		{`{"keys": {"public.nope": ["id"]}, ` + tables + `}`, "public.nope is not captured"},
+		{`{"keys": {"public.orders": []}, ` + tables + `}`, "List should have at least 1 item"},
+		{`{"keys": {"public.orders": ["id", "id"]}, ` + tables + `}`, "key columns must not repeat"},
+		{`{"values": {"decimals": "float"}}`, "Input should be 'precise', 'double' or 'string'"},
+		{`{"values": {"zone": "UTC"}}`, "Extra inputs are not permitted"},
+	}
+	for _, c := range cases {
+		raw, err := pyjson.DecodeGeneric([]byte(c.spec))
+		if err != nil {
+			t.Fatalf("%s: %v", c.spec, err)
+		}
+		v := &val.V{}
+		if _, ok := domain.ParseSpec(v, nil, raw); ok {
+			t.Errorf("%s: accepted, want %q", c.spec, c.want)
+			continue
+		}
+		var msgs []string
+		for _, e := range v.Errors {
+			msgs = append(msgs, e.Message)
+		}
+		if !strings.Contains(strings.Join(msgs, " | "), c.want) {
+			t.Errorf("%s:\n got %v\nwant %q", c.spec, msgs, c.want)
+		}
+	}
+}
+
+func TestTransformPolicies(t *testing.T) {
+	spec := mustSpec(t, `{"transforms": [{"type": "unwrap"}, {"type": "flatten"}, {"type": "custom", "class": "a.B"},
+	  {"type": "custom", "class": "io.debezium.transforms.Filter", "properties": {"language": "jsr223.groovy", "condition": "true"}}]}`)
+	got := domain.EvaluatePolicies(mustPolicies(t, `{"allowed_transforms": ["unwrap"]}`), spec, nil, "postgresql", "kafka", 0)
+	var codes []string
+	for _, c := range got {
+		codes = append(codes, c.Code+": "+c.Message)
+	}
+	want := []string{
+		"policy_transform_type: This project does not allow step 2 (flatten).",
+		"policy_custom_transform: 2 steps run(s) a custom transform class (step 3 (custom), step 4 (custom)); this project does not allow custom transforms.",
+		"policy_scripted_transform: One step run(s) a script you wrote (step 4 (custom)); this project does not allow scripted transforms.",
+	}
+	if strings.Join(codes, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s", strings.Join(codes, "\n"))
+	}
+	all := domain.EvaluatePolicies(mustPolicies(t, `{"allow_custom_transforms": true, "allow_scripted_transforms": true}`), spec, nil, "postgresql", "kafka", 0)
+	if len(all) != 1 || all[0].Code != "policy_ok" {
+		t.Fatalf("%+v", all)
+	}
+	v := &val.V{}
+	if _, ok := domain.ParsePolicies(v, nil, map[string]any{"allowed_transforms": []any{"custom"}}); ok {
+		t.Error("custom is governed by allow_custom_transforms, not the type list")
+	}
+	b, _ := json.Marshal(mustPolicies(t, `{"allowed_transforms": [], "allow_custom_transforms": true}`))
+	if !strings.Contains(string(b), `"allow_custom_transforms":true,"allowed_transforms":[]`) {
+		t.Errorf("%s", b)
+	}
+}
