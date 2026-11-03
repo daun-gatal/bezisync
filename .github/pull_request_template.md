@@ -1,6 +1,6 @@
 ## Description
 
-<!-- Provide a brief description of what this PR does. -->
+<!-- Provide a brief description of what this PR does. Pull requests target `preview`: merging releases nothing; a maintainer releases from preview. -->
 
 ## Type of Change
 
@@ -31,6 +31,7 @@ Closes #
 - [ ] Backend tests/lint/types pass
 - [ ] Frontend tests/types/build pass
 - [ ] Docker build or compose flow tested when relevant
+- [ ] Helm charts: `make chart-test` when a chart changed
 - [ ] Security-sensitive paths reviewed when relevant
 
 ### Test Steps
@@ -41,12 +42,14 @@ Closes #
 
 <!-- If applicable, add screenshots or screen recordings. -->
 
-## Changelog Fragment
+## Changelog Fragment and chart version
 
-<!-- Required exactly when the PR changes an image or chart (backend/, frontend/ outside their .dockerignore, deploy/helm/); CI fails otherwise. Merging it releases. -->
+<!-- A fragment is required exactly when the PR changes an image (backend/, frontend/ outside their .dockerignore); CI fails otherwise. The next release from preview ships it. -->
+<!-- A change under deploy/helm/<chart>/ bumps that chart's version in its Chart.yaml instead (no fragment), and `make chart-docs` regenerates its README. -->
 <!-- If the PR number is not known yet, use a descriptive temporary filename and rename later if practical. -->
 
 - [ ] Added `changelogs/unreleased/<pr-number>-<slug>.md`
+- [ ] Bumped the version of every changed chart and ran `make chart-docs`
 - [ ] Not needed: no image or chart changes
 
 <details>

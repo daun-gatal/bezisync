@@ -1,7 +1,9 @@
 # Running locally
 
-Prerequisites: Docker, Go (the version in `backend/go.mod`), `golangci-lint` v2,
-`bun`, Node 24, `kubectl`, `helm`.
+Prerequisites: Docker with BuildKit (the `buildx` plugin: Docker Desktop, or docker-ce 23 and
+later; the Dockerfiles cross-compile with `--platform=$BUILDPLATFORM`, which the legacy builder
+cannot do), Go (the version in `backend/go.mod`), `golangci-lint` v2, `bun`, Node 24, `kubectl`,
+`helm`.
 
 ```bash
 make dev-db                                   # disposable Postgres; prints the URL

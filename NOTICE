@@ -1,0 +1,6 @@
+BeziSync
+Copyright 2026 daun-gatal and the BeziSync contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+It manages Debezium Server (https://debezium.io), which is a separate project
+under its own license and is not included in this product.

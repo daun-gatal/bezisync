@@ -11,7 +11,9 @@ catch problems *before* they reach production and an honest view of health after
 your identity provider, protect personal data per pipeline, and let AI agents work with it through
 MCP, with exactly their person's permissions.
 
-> Status: 1.0 under active development on the `rewrite/v1` branch.
+> Status: pre-1.0 and under active development. Releases: images `ghcr.io/daun-gatal/bezisync` and
+> `bezisync-web`, Helm charts at `oci://ghcr.io/daun-gatal/charts`, and the CLI on the
+> [Releases](https://github.com/daun-gatal/bezisync/releases) page.
 
 ## Try it in two minutes (Docker)
 
@@ -27,7 +29,7 @@ removes everything. Evaluation only — use the Helm chart for real installs.
 ## Quick start (Kubernetes)
 
 ```bash
-helm install bezisync deploy/helm/bezisync \
+helm install bezisync oci://ghcr.io/daun-gatal/charts/bezisync \
   --set postgres.enabled=true \
   --set secrets.masterKey=$(docker run --rm ghcr.io/daun-gatal/bezisync generate-master-key) \
   --set secrets.bootstrapAdminPassword='choose-a-strong-password' \
@@ -43,11 +45,13 @@ The [guide](docs/README.md) covers installation, pipelines, personal data, agent
 approvals, secret stores, SSO, AI agents (MCP), config-as-code and the CLI, and administration. Reference: every
 [preflight check](docs/reference/checks.md) and the [threat model](docs/security/threat-model.md).
 
-## Develop
+## Contributing
 
-See [CLAUDE.md](CLAUDE.md) and [`.rules/`](.rules/). Every change passes `make verify` and `make e2e`.
+Pull requests are welcome: target the `preview` branch (it collects changes until a maintainer
+releases them). See [CLAUDE.md](CLAUDE.md) and [`.rules/`](.rules/) for how the code is laid out
+and tested; every change passes `make verify` and `make e2e`, and CI runs both. Report security
+problems privately, as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
-Proprietary — all rights reserved. BeziSync is private and under active development; it is not
-licensed for use, copying or distribution.
+BeziSync is licensed under the [Apache License 2.0](LICENSE).

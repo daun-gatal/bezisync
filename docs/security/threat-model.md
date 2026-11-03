@@ -102,8 +102,11 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   it, and restrict who can reach `/metrics` (it requires `BEZISYNC_METRICS_TOKEN`).
 - **Supply chain.** The backend, controller and agent are one static Go binary on a distroless
   base image (no shell, no package manager, uid 10001), published as `bezisync` (agents run it
-  too). Dependencies are pinned in `go.sum`; CI runs `govulncheck` and Grype,
-  and release images are signed (cosign) with an SBOM attestation.
+  too). Dependencies are pinned in `go.sum`; CI runs `govulncheck` and Grype on the source and on
+  the built images. Releases ship only after a maintainer approves them, from a pre-release built
+  from the same commit; images, charts and CLI archives carry GitHub build-provenance
+  attestations (`gh attestation verify`). Pull requests (forks included) run CI with a read-only
+  token and no secrets; only the approved release job holds the token that pushes `main`.
 - **AppArmor.** Pods keep the container runtime's default AppArmor profile unless
   `appArmorProfile` names another. The optional `bezisync-default` profile (`deploy/apparmor/`) is containerd's
   default plus signals between a container's own processes; its privileged DaemonSet in

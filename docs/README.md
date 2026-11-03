@@ -38,16 +38,17 @@ the chart an AppArmor profile loaded on each node;
 default containerd profile blocks signals inside containers.
 The charts install the `latest` release images by default (`image.tag` / `webImage.tag`, pulled
 with `pullPolicy: Always`); pin `image.tag` and `webImage.tag` to a release (e.g. `0.1.0`) for
-reproducible upgrades. Images and charts are published only by releases, with the same version
-`X.Y.Z`.
+reproducible upgrades. The images (`X.Y.Z`, for linux/amd64 and linux/arm64) and the CLI share the
+release version; each chart has its own version (`helm show chart
+oci://ghcr.io/daun-gatal/charts/bezisync` shows it) and installs the release it was published with. Every
+release lists its chart versions; verify what you pull with `gh attestation verify
+oci://ghcr.io/daun-gatal/bezisync:X.Y.Z --owner daun-gatal`.
 
-**Private registry.** While the GHCR packages are private, sign in before pulling
-(`helm registry login ghcr.io`, `docker login ghcr.io`) with a classic token that has
-`read:packages`, and create an image pull secret for the cluster:
-`kubectl create secret docker-registry ghcr-pull-secret --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>`,
+**Private registry.** To install from a mirror or a private registry, push the images there and
+create an image pull secret for the cluster:
+`kubectl create secret docker-registry ghcr-pull-secret --docker-server=<registry> --docker-username=<user> --docker-password=<token>`,
 listed in `imagePullSecrets` of both charts (and in a runtime's *image pull secrets* when
-connectors use a private image). Alternatively make the packages public; the source repository
-can stay private.
+connectors use a private image), and point `image.repository` and `webImage.repository` at it.
 
 PostgreSQL holds BeziSync's metadata **and** each connector's offsets and schema history
 (`debezium_state` schema, or `BEZISYNC_STATE_DATABASE_URL`). It is on the data path: run it HA and
@@ -889,7 +890,7 @@ All settings are environment variables prefixed with `BEZISYNC_`.
 | `SSRF_ALLOW_CIDRS` / `SSRF_EXTRA_DENY_CIDRS` | — | Networks connection checks may (not) reach |
 | `DEBEZIUM_DEFAULT_IMAGE` | `quay.io/debezium/server:3.7.0.Final` | Image when neither pipeline nor runtime picks one, unless an Admin chose a catalog default |
 | `ICEBERG_IMAGE` | the pinned `ghcr.io/memiiso/debezium-server-iceberg` build | Image of Apache Iceberg pipelines (e.g. a mirror in a private registry) |
-| `AGENT_URL` / `AGENT_IMAGE` / `AGENT_CHART` / `AGENT_CHART_VERSION` | `PUBLIC_URL` / this release's `bezisync` image / OCI chart / this version | Used in generated agent install commands |
+| `AGENT_URL` / `AGENT_IMAGE` / `AGENT_CHART` / `AGENT_CHART_VERSION` | `PUBLIC_URL` / this release's `bezisync` image / OCI chart / the agent chart version the control-plane chart was released with (unset: the newest) | Used in generated agent install commands |
 | `LAB` | `false` | An open lab: the sign-in page invites anyone in and links the public testing policy (`/testing-policy`); feedback is addressed to the BeziSync team |
 | `METRICS_TOKEN`, `METRICS_RETENTION_DAYS` | —, `30` | Prometheus endpoint and chart history |
 | `SMTP_*` | — | Email alert channel |

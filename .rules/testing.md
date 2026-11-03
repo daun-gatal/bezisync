@@ -48,9 +48,9 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   `bezisync-e2e-agent` (recreated); the Playwright runner has `kubectl`/`helm`, an in-network
   kubeconfig and the repo's `deploy/` directory, so tests install agents as users would.
 - `E2E_GREP="pattern" scripts/e2e.sh` runs a subset while iterating; commit only after a full run.
-- The e2e suite runs locally, not in GitHub CI: its ~15 data-plane services do not fit a standard
-  4-CPU runner in reasonable time (setup alone took >20 min). CI type-checks it and runs the demo
-  smoke test (a real pipeline into Kafka); a full local `make e2e` before each commit is the gate.
+- The e2e suite runs in CI on every pull request (`ci.yml`, `scripts/e2e.sh` on the runner, up to
+  2 hours: its ~15 data-plane services take a while to start), and locally with `make e2e` before
+  a pull request. On failure CI uploads the Playwright report and the pod logs (`e2e-report`).
 - Layout is a gate: `e2e/tests/28-layout.spec.ts` seeds names at their longest (63-character slugs,
   a long project name) in its own `layout-stress` project and sweeps every main screen at 390, 768
   and 1280 px with `layoutProblems()` (`e2e/tests/layout.ts`): no overflow, no sideways page
@@ -72,7 +72,23 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   every user journey end-to-end in `e2e/tests/` against real Postgres, Kafka and Debezium Server.
 - A bug fix starts with a failing test.
 
-CI (`.github/workflows/ci.yml`) runs the same gates plus chart/compose validation, version and
-changelog-fragment checks (a fragment exactly when an image or chart changes), a vulnerability
-scan and — only when an image or chart changes — the image build and demo smoke test, on pull
-requests only; it does not run again after a merge (see `releases.md`).
+CI runs on pull requests to `preview` (see `releases.md`): `ci.yml` runs the same gates plus the
+version and changelog-fragment checks (a fragment exactly when an image changes, a new version for
+a changed chart), the manual-edit guard, the source scan, the images built and scanned (when an
+image changes), the e2e suite and the demo smoke test; `helm.yml` runs the chart gates below.
+
+## Helm charts
+
+```bash
+make chart-test   # helm lint --strict with every ci/*-values.yaml, helm-unittest, READMEs current (in Docker)
+make chart-docs   # regenerate deploy/helm/*/README.md (README.md.gotmpl + values.yaml `# --` comments)
+```
+
+- `deploy/helm/<chart>/ci/*-values.yaml` are the scenarios CI lints, renders (kubeconform on three
+  Kubernetes versions) and, for the control plane's `default` and `external-postgres`, installs on
+  kind with the change's images; the agent chart is installed there against that control plane and
+  must report in.
+- `deploy/helm/<chart>/unittests/*_test.yaml` are helm-unittest suites (template failures, defaults,
+  optional paths); `templates/tests/` holds the `helm test` pods (the bezisync image's own
+  `healthcheck`).
+- Every values key carries a `# --` comment: it becomes the chart README's values table.

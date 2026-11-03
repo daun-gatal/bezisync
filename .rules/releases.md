@@ -1,48 +1,63 @@
-# Releases, images and deployment
+# Releases, images and charts
 
 > Part of the BeziSync engineering guide. See [CLAUDE.md](../CLAUDE.md) / [AGENTS.md](../AGENTS.md)
 > for the overview, architecture, and golden rules. What CI runs lives in [testing.md](testing.md).
+
+## Branches
+
+- **`preview`** is where work lands: every pull request targets it, and CI runs there.
+- **`main`** holds released code only. Only the Release workflow moves it, by fast-forwarding it
+  to preview, so it never diverges from preview and always equals the latest release.
+- Merging releases nothing. A maintainer releases when preview is ready, after testing a
+  pre-release built from it.
 
 ## Workflows (`.github/workflows/`)
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | pull requests to `main` | Every check (backend, scripts, frontend, charts, compose, versions/changelog, vulnerability scan, e2e type check) and, when the PR changes an image or chart, the image build and the demo smoke test (the demo also runs for `deploy/compose/` and its script). It does **not** run again on `main` after a merge |
-| `push.yml` | push to `main` (every merge) | With fragments in `changelogs/unreleased/`: **releases** — see below. Without: nothing (no build, no publish). Images are signed (cosign keyless) with an SBOM attestation; both Helm charts are published as signed OCI artifacts. Optionally calls `deploy.yml` after a release (repository variable `AUTO_DEPLOY=true`) |
-| `deploy.yml` | manual, or called by `push.yml` | Deploys our cluster from [`k8s/`](../k8s/README.md): `diff`, `dry-run`, `apply`, `restart`, `uninstall`; `apply` and `playground-apply` first install `k8s/apparmor` (the AppArmor profile loader every pod relies on); `playground-apply` / `playground-delete` manage the [playground](../k8s/playground/README.md) (`k8s/playground/playground.sh`). The image tag defaults to the current version (`scripts/release.sh --current`: the release that commit carries) |
+| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the Playwright e2e suite (every PR, `scripts/e2e.sh` on the runner) and the demo smoke test (when the demo or an image changes). Read-only token, no secrets |
+| `helm.yml` | pull requests touching `deploy/helm/`, `backend/` or `frontend/` | `helm lint --strict` with every `ci/*-values.yaml`, helm-unittest (`unittests/`), kubeconform on three Kubernetes versions, the chart READMEs current (helm-docs), and installs on kind with the change's own images: bundled and external PostgreSQL, `helm test`, an agent that must report in, an in-place upgrade |
+| `build-branch.yml` | manual: branch (not `main`), include charts, version override | Pre-release images `X.Y.Z-pre` (and charts `<chart version>-pre`) of the version the branch would release (`release.sh --plan`), replacing the previous `-pre`. Commits, tags and releases nothing |
+| `release.yml` | manual, from `preview`: version override | The release: see below |
 
-Published on a release `vX.Y.Z` (nothing else publishes):
+Shared steps: `.github/actions/build-images` (both images, linux/amd64 + linux/arm64, push,
+attest) and `.github/actions/helm-publish` (package one chart, push unless that version exists,
+attest, pull and render).
 
-| | |
-|---|---|
-| Images `ghcr.io/daun-gatal/bezisync` (api, controller, agent, migrate, CLI: one binary) and `ghcr.io/daun-gatal/bezisync-web` (UI) | `:X.Y.Z`, `:vX.Y.Z`, `:latest`, `:sha-<short>`, `:main` |
-| Charts `oci://ghcr.io/daun-gatal/charts/{bezisync,bezisync-agent}` | `X.Y.Z` (appVersion `X.Y.Z`) |
+## Versions
 
-The charts' `image.tag` / `webImage.tag` default to `latest` (`pullPolicy: Always`) and the compose
-demo uses `:latest` too — pin a tag for reproducible installs. The control plane passes its chart
-version to agent install commands.
+- **App version** (images, CLI, every chart's `appVersion`): from the changelog fragments, plain
+  semver, the highest type wins (`patch` → X.Y.Z+1, `minor` → X.Y+1.0, `major` → X+1.0.0; below
+  1.0 a breaking change takes `minor`). It lives in `backend/internal/version/version.go`,
+  `frontend/package.json`, `frontend/openapi.json` and the charts' `appVersion`, which CI checks
+  agree (`release.sh --current`). An override (`release.sh 1.0.0`, the workflows' `version` input)
+  sets it explicitly.
+- **Chart versions**: each chart (`deploy/helm/bezisync`, `deploy/helm/bezisync-agent`) has its own
+  `version` in its `Chart.yaml`. A chart version counts as published once its git tag
+  `chart-<name>-v<version>` exists. An app release bumps the patch of a chart whose version is
+  already published (only its `appVersion` changed); a chart change bumps it by hand.
+- **The control-plane chart pins the agent chart**: the release fills its
+  `bezisync.io/agent-chart-version` annotation with the agent chart version released with it (or
+  the newest published one); agent install commands pass it as `--version`.
 
-## What releases: changes that reach an artifact
+## What a pull request carries
 
-A pull request carries a changelog fragment **exactly when** it changes a published artifact; CI
-fails otherwise (`scripts/release.sh --changes HEAD^1` on the PR's merge commit; locally
-`--changes origin/main`). A change reaches an artifact when it touches:
+- **A changelog fragment exactly when an image changes**: an image's build context is `backend/`
+  or `frontend/` minus what that directory's `.dockerignore` excludes (so `backend/testdata/`,
+  `backend/**/*_test.go`, `frontend/**/__tests__`, `frontend/src/test/`, `frontend/openapi.json`
+  do not count), including the `Dockerfile` and `.dockerignore` themselves. Keep the
+  `.dockerignore` files excluding everything an image does not need (no `!` exceptions; the check
+  refuses them). CI fails a change to an image without a fragment, and a fragment without one.
+- **A new chart version when a chart changes** (anything under `deploy/helm/<chart>/`): unpublished
+  and newer than every published one (several changes before a release share one bump). No
+  fragment for chart-only changes. Regenerate the chart READMEs (`make chart-docs`).
+- Everything else — `docs/`, `e2e/`, `deploy/compose/`, `deploy/e2e/`, `deploy/apparmor/`,
+  `scripts/`, `tools/`, `.github/`, `.rules/`, the guides — ships with neither.
+- Never edit `CHANGELOG.md` or the app version by hand: CI refuses both.
 
-- an image's build context: `backend/` or `frontend/` minus what that directory's
-  `.dockerignore` excludes (so `backend/testdata/`, `backend/**/*_test.go`, `frontend/**/__tests__`, `frontend/src/test/`,
-  `frontend/openapi.json` do not), including the `Dockerfile` and `.dockerignore` themselves;
-- a Helm chart: anything under `deploy/helm/`.
+### Changelog fragments
 
-Everything else — `docs/`, `e2e/`, `k8s/` (deploy it with `deploy.yml`), `deploy/compose/`,
-`deploy/e2e/`, `scripts/`, `.github/`, `.rules/`, the guides — ships with **no** fragment and
-merges without a release. The `.dockerignore` files decide what counts: keep them excluding
-everything an image does not need (no `!` exceptions; the check refuses them).
-
-## Changelog fragments
-
-A PR that changes an image or chart adds a fragment under `changelogs/unreleased/`
-(`<pr-number>-<slug>.md`, or a descriptive slug before the PR exists); never edit `CHANGELOG.md`
-or a version field in a feature PR.
+`changelogs/unreleased/<pr-number>-<slug>.md` (or a descriptive slug before the PR exists):
 
 ```md
 type: minor
@@ -51,26 +66,61 @@ type: minor
 - **Feature name** - description of what changed and why
 ```
 
-Valid types: `major`, `minor`, `patch`; sections: `Added`, `Changed`, `Fixed`, `Removed`. CI
-validates every fragment.
+Valid types: `major`, `minor`, `patch`; sections: `Added`, `Changed`, `Fixed`, `Removed`.
 
-## Releases
+## Releasing
 
-There is no manual step: **merging a pull request that carries fragments is the release.** On that
-push to `main`, `push.yml`:
+1. **Build branch** on `preview`: images `X.Y.Z-pre` and charts `<chart version>-pre`. Test them
+   (e.g. deploy them into a test cluster). Any other branch can be built the same way to try it
+   out; every build replaces the previous `-pre`.
+2. **Release** (run from `preview`). It plans with `release.sh --plan`:
+   - **app** — fragments are pending: images `X.Y.Z` + `latest`, the CLI, every chart;
+   - **charts** — no fragments, but a chart's version is unpublished: only those charts;
+   - **nothing** — it stops.
 
-1. runs `scripts/release.sh` (the Go tool `tools/cmd/release`) on the newest `main`: the highest fragment type decides the bump
-   (`major` > `minor` > `patch`; while the version is below 1.0, `major` bumps the minor and
-   `minor`/`patch` the patch, so 1.0.0 is only ever an explicit decision); it writes the `CHANGELOG.md` section, deletes the fragments and
-   sets the version in `backend/internal/version/version.go`, `frontend/package.json`,
-   `frontend/openapi.json` and both `Chart.yaml` (`version`, `appVersion`); CI checks they agree
-   (`scripts/release.sh --current`);
-2. commits `chore: release vX.Y.Z` to `main` and tags `vX.Y.Z` in one atomic push (pushed with
-   `GITHUB_TOKEN`, so it triggers no workflow; if `main` moved meanwhile, the newer merge's run
-   releases instead);
-3. builds the images from the release commit (the version is baked in), publishes images and
-   charts, and creates the GitHub Release from the `CHANGELOG.md` section.
+   It **stops unless the `-pre` of everything it would ship was built from preview's latest
+   commit** (the images' `org.opencontainers.image.revision` index annotation and the charts'
+   `bezisync.io/revision` annotation). The summary shows the version and the notes.
+3. **Approve** the `release-approval` environment (rejecting changes nothing). Then:
+   - app releases: `release.sh` writes the `CHANGELOG.md` section, deletes the fragments, sets the
+     app version everywhere and bumps published charts; `make chart-docs`; commit
+     `chore: release vX.Y.Z` to preview;
+   - `main` is fast-forwarded to preview (an atomic, non-force push of both: if preview moved since
+     the plan, nothing is pushed and a new `-pre` and run are needed);
+   - images, charts (immutable: an existing version is never overwritten), the tags `vX.Y.Z` and
+     `chart-<name>-v<version>`, the GitHub Release (the `CHANGELOG.md` section, the chart
+     versions, the CLI archives for Linux, macOS and Windows on amd64 and arm64 with
+     `checksums.txt`) and a post in Discussions (category *Announcements*). A chart-only release
+     gets a GitHub Release per chart (not marked latest), its notes the pull requests that changed
+     the chart since its previous release (`release.sh --chart-notes`);
+   - every `-pre` image and chart is deleted.
 
-A PR that reaches no artifact (docs, tests, CI) adds no fragment and releases nothing. Locally,
-`scripts/release.sh --dry-run` prints the version the pending fragments give and
-`--notes X.Y.Z` a release's notes.
+Locally: `scripts/release.sh --plan` shows what a release would publish, `--dry-run` the app
+version, `--notes X.Y.Z` a release's notes.
+
+## Published artifacts
+
+| | Tags |
+|---|---|
+| Images `ghcr.io/daun-gatal/bezisync` (api, controller, agent, migrate, CLI: one binary) and `ghcr.io/daun-gatal/bezisync-web` (UI), linux/amd64 + linux/arm64 | `X.Y.Z`, `latest`; `X.Y.Z-pre` while testing |
+| Charts `oci://ghcr.io/daun-gatal/charts/{bezisync,bezisync-agent}` | `<chart version>`; `<chart version>-pre` while testing |
+| CLI archives on the GitHub Release | `bezisync_X.Y.Z_<os>_<arch>.tar.gz` / `.zip`, `checksums.txt` |
+
+Build provenance is attested with GitHub artifact attestations (stored by GitHub, so no
+signature tags in the registry): `gh attestation verify oci://ghcr.io/daun-gatal/bezisync:X.Y.Z
+--owner daun-gatal`. They need the repository to be public. buildx's own provenance and SBOM are
+off, so images carry no "unknown/unknown" entries. The charts' `image.tag` / `webImage.tag`
+default to `latest` (`pullPolicy: Always`) and the compose demo uses `:latest` too — pin a tag for
+reproducible installs.
+
+## Repository settings the workflows rely on
+
+- Environment **`release-approval`**: required reviewer (a maintainer), deployments only from
+  `preview`.
+- Secret **`RELEASE_SECRET`**: a fine-grained token (this repository, contents: read and write)
+  allowed to push to `preview` and `main` past their rulesets.
+- Rulesets: `preview` — pull request and green checks required; `main` — only the release token
+  pushes, no force pushes.
+- GHCR packages public and linked to the repository (the images' `org.opencontainers.image.source`
+  label links them); Discussions with an *Announcements* category; Actions approval required for
+  outside contributors.

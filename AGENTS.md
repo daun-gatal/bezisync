@@ -48,9 +48,10 @@ Browser / CLI ──▶ api (Go)       ─┐
 - Frontend (`frontend/`) is a React SPA served by nginx, talking only to `/api/v1`.
 - `bezisync remote …` is the CLI for users and CI (API tokens); `deploy/` holds the Helm charts
   (control plane, agent), the compose demo stack, the e2e fixtures and an optional AppArmor profile
-  (`deploy/apparmor/`). Two workflows: `ci.yml` (checks + image build, on pull requests) and
-  `push.yml` (on a merge with changelog fragments, releases vX.Y.Z and publishes images and charts
-  to GHCR) — see `.rules/releases.md`.
+  (`deploy/apparmor/`). Pull requests target `preview`; `main` only moves by releases. Four
+  workflows: `ci.yml` and `helm.yml` (every check, e2e included, on pull requests), `build-branch.yml`
+  (pre-release images and charts `-pre` from a branch) and `release.yml` (from preview, after an
+  approval: images, charts, CLI and the GitHub Release) — see `.rules/releases.md`.
 - `tools/` is a small Go module (no dependencies, outside the image build contexts) with the
   release tool (`scripts/release.sh`) and the demo smoke test. There is
   no Python anywhere in the repository.
