@@ -1,17 +1,12 @@
 # Helm charts: lint, unit tests, schema validation and real installs on kind, for pull requests that
-# touch a chart (or the images it installs). The version rule (a changed chart needs a new,
-# unpublished version) is checked by ci.yml with the release tool.
+# touch a chart (or the images it installs). It starts on every pull request so its checks can be
+# required: without such changes its jobs are skipped, which counts as passed. The version rule (a
+# changed chart needs a new, unpublished version) is checked by ci.yml with the release tool.
 name: Helm charts
 
 on:
   pull_request:
     branches: [preview]
-    paths:
-      - deploy/helm/**
-      - backend/**
-      - frontend/**
-      - .github/workflows/helm.yml
-      - .github/actions/helm-publish/**
 
 concurrency:
   group: helm-${{ github.ref }}
@@ -26,8 +21,28 @@ env:
   HELM_DOCS_VERSION: 1.14.2
 
 jobs:
+  changes:
+    name: Chart or image changes
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    outputs:
+      charts: ${{ steps.diff.outputs.charts }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 2 }   # HEAD is the merge into preview; HEAD^1 is preview
+      - id: diff
+        run: |
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(deploy/helm/|backend/|frontend/|\.github/workflows/helm\.yml|\.github/actions/helm-publish/)'; then
+            echo "charts=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "charts=false" >> "$GITHUB_OUTPUT"
+            echo "No chart or image changes: the chart checks are skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   lint-test:
     name: Lint, unit tests, schema and docs
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-latest
     permissions: { contents: read }
     steps:
@@ -69,6 +84,8 @@ jobs:
 
   kind:
     name: Install on kind (${{ matrix.scenario }})
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-latest
     permissions: { contents: read }
     timeout-minutes: 30
@@ -150,3 +167,21 @@ jobs:
           kubectl get pods -A -o wide || true
           kubectl describe pods -l app.kubernetes.io/instance=bezisync || true
           kubectl logs -l app.kubernetes.io/instance=bezisync --all-containers --tail=200 || true
+
+  # The one check to require (a skipped matrix job reports under an unexpanded name): passes when
+  # every chart job passed or was skipped.
+  result:
+    name: Helm charts result
+    needs: [changes, lint-test, kind]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Every chart job passed or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "::error::a chart job ended $r"; exit 1 ;; esac
+          done

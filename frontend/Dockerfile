@@ -18,6 +18,10 @@ LABEL org.opencontainers.image.title="bezisync-web" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${COMMIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}"
+# The base image lags behind Alpine's security fixes: take them at build time (CI scans the result).
+USER root
+RUN apk upgrade --no-cache
+USER 101
 ENV BEZISYNC_API_UPSTREAM=http://bezisync-api:8000
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
