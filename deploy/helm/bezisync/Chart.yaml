@@ -3,7 +3,7 @@ name: bezisync
 description: BeziSync — self-service control plane for Debezium Server
 type: application
 version: 0.1.0
-appVersion: "0.0.0"
+appVersion: "0.1.0"
 home: https://github.com/daun-gatal/bezisync
 sources: [https://github.com/daun-gatal/bezisync]
 keywords: [debezium, cdc, kafka, change-data-capture]
