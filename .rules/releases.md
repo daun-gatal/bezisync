@@ -116,11 +116,24 @@ reproducible installs.
 ## Repository settings the workflows rely on
 
 - Environment **`release-approval`**: required reviewer (a maintainer), deployments only from
-  `preview`.
-- Secret **`RELEASE_SECRET`**: a fine-grained token (this repository, contents: read and write)
-  allowed to push to `preview` and `main` past their rulesets.
-- Rulesets: `preview` — pull request and green checks required; `main` — only the release token
-  pushes, no force pushes.
+  `preview`, administrators cannot bypass it. It holds the secret **`RELEASE_SECRET`**: a
+  fine-grained token of a repository admin (this repository, Contents: read and write), which
+  pushes the release commit to `preview` and fast-forwards `main`.
+- Rulesets (Repository admin bypasses all three, which is how the release token pushes):
+  - **`preview`**: no deletion or force push, linear history, a pull request with one approval
+    (stale approvals dismissed, conversations resolved; squash merges only) and these checks:
+    Backend lint, Backend tests, Tools, Frontend, Versions and changelog, Demo compose file,
+    Vulnerability scan (source), Build and scan images, Demo stack smoke test, End-to-end
+    (Playwright), Helm charts result. Not "up to date with the base" (e2e takes up to 2 hours).
+    A job skipped by its `if` counts as passed; `helm.yml` starts on every pull request and its
+    `Helm charts result` job is the one chart check to require (skipped matrix jobs report under
+    an unexpanded name). Renaming a required job means updating the ruleset.
+  - **`main`**: updates restricted to the bypass, no deletion or force push, linear history.
+  - **`release tags`** (`v*`, `chart-*`): no update or deletion — a published version's tag never
+    moves. Creation stays open: the release creates them with `GITHUB_TOKEN`, and a personal
+    account cannot name GitHub Actions as a bypass actor.
+- Merging: squash only (the PR title becomes the commit subject, with `(#N)`), head branches
+  deleted after merge.
 - GHCR packages public and linked to the repository (the images' `org.opencontainers.image.source`
   label links them); Discussions with an *Announcements* category; Actions approval required for
   outside contributors.
