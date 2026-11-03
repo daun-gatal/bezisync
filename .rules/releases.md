@@ -15,7 +15,7 @@
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the Playwright e2e suite (every PR, `scripts/e2e.sh` on the runner) and the demo smoke test (when the demo or an image changes). Read-only token, no secrets |
+| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the demo smoke test (when the demo or an image changes). Read-only token, no secrets |
 | `helm.yml` | pull requests touching `deploy/helm/`, `backend/` or `frontend/` | `helm lint --strict` with every `ci/*-values.yaml`, helm-unittest (`unittests/`), kubeconform on three Kubernetes versions, the chart READMEs current (helm-docs), and installs on kind with the change's own images: bundled and external PostgreSQL, `helm test`, an agent that must report in, an in-place upgrade |
 | `build-branch.yml` | manual: branch (not `main`), include charts, version override | Pre-release images `X.Y.Z-pre` (and charts `<chart version>-pre`) of the version the branch would release (`release.sh --plan`), replacing the previous `-pre`. Commits, tags and releases nothing |
 | `release.yml` | manual, from `preview`: version override | The release: see below |
@@ -123,8 +123,8 @@ reproducible installs.
   - **`preview`**: no deletion or force push, linear history, a pull request with one approval
     (stale approvals dismissed, conversations resolved; squash merges only) and these checks:
     Backend lint, Backend tests, Tools, Frontend, Versions and changelog, Demo compose file,
-    Vulnerability scan (source), Build and scan images, Demo stack smoke test, End-to-end
-    (Playwright), Helm charts result. Not "up to date with the base" (e2e takes up to 2 hours).
+    Vulnerability scan (source), Build and scan images, Demo stack smoke test,
+    Helm charts result. Not "up to date with the base".
     A job skipped by its `if` counts as passed; `helm.yml` starts on every pull request and its
     `Helm charts result` job is the one chart check to require (skipped matrix jobs report under
     an unexpanded name). Renaming a required job means updating the ruleset.

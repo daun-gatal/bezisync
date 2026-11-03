@@ -49,7 +49,7 @@ Browser / CLI ──▶ api (Go)       ─┐
 - `bezisync remote …` is the CLI for users and CI (API tokens); `deploy/` holds the Helm charts
   (control plane, agent), the compose demo stack, the e2e fixtures and an optional AppArmor profile
   (`deploy/apparmor/`). Pull requests target `preview`; `main` only moves by releases. Four
-  workflows: `ci.yml` and `helm.yml` (every check, e2e included, on pull requests), `build-branch.yml`
+  workflows: `ci.yml` and `helm.yml` (every check on pull requests; the e2e suite runs locally), `build-branch.yml`
   (pre-release images and charts `-pre` from a branch) and `release.yml` (from preview, after an
   approval: images, charts, CLI and the GitHub Release) — see `.rules/releases.md`.
 - `tools/` is a small Go module (no dependencies, outside the image build contexts) with the

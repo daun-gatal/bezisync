@@ -79,7 +79,7 @@ it is also the job queue.
 ## Contributing
 
 Contributions are welcome! Open pull requests against the **`preview`** branch; CI runs every
-check, the end-to-end suite included. [CLAUDE.md](CLAUDE.md) and [`.rules/`](.rules/) explain the
+check except the end-to-end suite: run `make e2e` locally before opening one. [CLAUDE.md](CLAUDE.md) and [`.rules/`](.rules/) explain the
 layout, the conventions and how to test. Please report security issues privately, as described in
 [SECURITY.md](SECURITY.md).
 

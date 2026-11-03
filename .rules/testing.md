@@ -48,9 +48,9 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   `bezisync-e2e-agent` (recreated); the Playwright runner has `kubectl`/`helm`, an in-network
   kubeconfig and the repo's `deploy/` directory, so tests install agents as users would.
 - `E2E_GREP="pattern" scripts/e2e.sh` runs a subset while iterating; commit only after a full run.
-- The e2e suite runs in CI on every pull request (`ci.yml`, `scripts/e2e.sh` on the runner, up to
-  2 hours: its ~15 data-plane services take a while to start), and locally with `make e2e` before
-  a pull request. On failure CI uploads the Playwright report and the pod logs (`e2e-report`).
+- The e2e suite runs locally, not in CI: run the full `make e2e` before opening a pull request
+  (its ~15 data-plane services need more time and disk than a CI runner offers). CI type-checks
+  the suite (`e2e` tsc) only.
 - Layout is a gate: `e2e/tests/28-layout.spec.ts` seeds names at their longest (63-character slugs,
   a long project name) in its own `layout-stress` project and sweeps every main screen at 390, 768
   and 1280 px with `layoutProblems()` (`e2e/tests/layout.ts`): no overflow, no sideways page
@@ -75,7 +75,7 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
 CI runs on pull requests to `preview` (see `releases.md`): `ci.yml` runs the same gates plus the
 version and changelog-fragment checks (a fragment exactly when an image changes, a new version for
 a changed chart), the manual-edit guard, the source scan, the images built and scanned (when an
-image changes), the e2e suite and the demo smoke test; `helm.yml` runs the chart gates below.
+image changes), the e2e type check and the demo smoke test; `helm.yml` runs the chart gates below.
 
 ## Helm charts
 
