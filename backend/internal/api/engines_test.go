@@ -27,6 +27,12 @@ func TestFlinkCDCOffUntilAnImageIsRegistered(t *testing.T) {
 		at(t, l[1], "available") != false || !strings.Contains(at(t, l[1], "reason").(string), "Engine versions") || at(t, l[1], "default_image") != nil {
 		t.Fatal(string(engines.Raw))
 	}
+	// What each engine runs, and Flink CDC's settings and sizes, for the wizard.
+	if at(t, l[0], "sources") != nil || at(t, l[0], "except_sinks").([]any)[0] != "starrocks" || len(at(t, l[1], "sources").([]any)) != 3 ||
+		len(at(t, l[1], "sinks").([]any)) != 4 || len(at(t, l[1], "settings").([]any)) == 0 || at(t, l[1], "sizes", "medium", "parallelism") != float64(4) ||
+		at(t, l[0], "settings") != nil {
+		t.Fatal(string(engines.Raw))
+	}
 	if c := e.admin.get("/api/v1/debezium-catalog?engine=flink-cdc").expect(200); c.At("default_image") != nil || len(c.List("entries")) != 0 {
 		t.Fatal(string(c.Raw))
 	}

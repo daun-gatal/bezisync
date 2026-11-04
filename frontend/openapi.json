@@ -2195,6 +2195,21 @@
             ],
             "title": "Default Image"
           },
+          "except_sinks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Destination types it never writes.",
+            "title": "Except Sinks"
+          },
           "id": {
             "enum": [
               "debezium",
@@ -2215,6 +2230,52 @@
             "description": "Why the engine is unavailable and how to turn it on.",
             "title": "Reason"
           },
+          "settings": {
+            "description": "Flink CDC: the Flink settings a pipeline may choose.",
+            "items": {
+              "$ref": "#/components/schemas/FlinkSetting"
+            },
+            "title": "Settings",
+            "type": "array"
+          },
+          "sinks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Destination types it writes (null: every one except except_sinks).",
+            "title": "Sinks"
+          },
+          "sizes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FlinkSize"
+            },
+            "description": "Flink CDC: each size preset's cluster.",
+            "title": "Sizes",
+            "type": "object"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source types it reads (null: every one).",
+            "title": "Sources"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2225,7 +2286,10 @@
           "title",
           "available",
           "reason",
-          "default_image"
+          "default_image",
+          "sources",
+          "sinks",
+          "except_sinks"
         ],
         "title": "EngineRead",
         "type": "object"
@@ -2760,6 +2824,103 @@
           }
         },
         "title": "FlinkCDCSpec",
+        "type": "object"
+      },
+      "FlinkSetting": {
+        "properties": {
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "default": {
+            "title": "Default",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "max": {
+            "title": "Max",
+            "type": "string"
+          },
+          "min": {
+            "title": "Min",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "duration",
+              "int",
+              "fraction",
+              "enum"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "type",
+          "default",
+          "why"
+        ],
+        "title": "FlinkSetting",
+        "type": "object"
+      },
+      "FlinkSize": {
+        "properties": {
+          "jobmanager_cpu": {
+            "title": "Jobmanager Cpu",
+            "type": "string"
+          },
+          "jobmanager_memory": {
+            "title": "Jobmanager Memory",
+            "type": "string"
+          },
+          "parallelism": {
+            "title": "Parallelism",
+            "type": "integer"
+          },
+          "taskmanager_cpu": {
+            "title": "Taskmanager Cpu",
+            "type": "string"
+          },
+          "taskmanager_memory": {
+            "title": "Taskmanager Memory",
+            "type": "string"
+          },
+          "taskmanagers": {
+            "title": "Taskmanagers",
+            "type": "integer"
+          },
+          "total_memory_mib": {
+            "title": "Total Memory Mib",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobmanager_cpu",
+          "jobmanager_memory",
+          "taskmanagers",
+          "taskmanager_cpu",
+          "taskmanager_memory",
+          "parallelism",
+          "total_memory_mib"
+        ],
+        "title": "FlinkSize",
         "type": "object"
       },
       "FormatSpec": {

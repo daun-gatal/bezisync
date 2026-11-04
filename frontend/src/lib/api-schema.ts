@@ -2961,6 +2961,11 @@ export interface components {
             /** Default Image */
             default_image: string | null;
             /**
+             * Except Sinks
+             * @description Destination types it never writes.
+             */
+            except_sinks: string[] | null;
+            /**
              * Id
              * @enum {string}
              */
@@ -2970,6 +2975,28 @@ export interface components {
              * @description Why the engine is unavailable and how to turn it on.
              */
             reason: string | null;
+            /**
+             * Settings
+             * @description Flink CDC: the Flink settings a pipeline may choose.
+             */
+            settings?: components["schemas"]["FlinkSetting"][];
+            /**
+             * Sinks
+             * @description Destination types it writes (null: every one except except_sinks).
+             */
+            sinks: string[] | null;
+            /**
+             * Sizes
+             * @description Flink CDC: each size preset's cluster.
+             */
+            sizes?: {
+                [key: string]: components["schemas"]["FlinkSize"];
+            };
+            /**
+             * Sources
+             * @description Source types it reads (null: every one).
+             */
+            sources: string[] | null;
             /** Title */
             title: string;
         };
@@ -3200,6 +3227,45 @@ export interface components {
              * @description What happens when a source table changes shape (default apply).
              */
             schema_changes?: ("apply" | "ignore" | "stop") | null;
+        };
+        /** FlinkSetting */
+        FlinkSetting: {
+            /** Choices */
+            choices?: string[];
+            /** Default */
+            default: string;
+            /** Key */
+            key: string;
+            /** Max */
+            max?: string;
+            /** Min */
+            min?: string;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "duration" | "int" | "fraction" | "enum";
+            /** Why */
+            why: string;
+        };
+        /** FlinkSize */
+        FlinkSize: {
+            /** Jobmanager Cpu */
+            jobmanager_cpu: string;
+            /** Jobmanager Memory */
+            jobmanager_memory: string;
+            /** Parallelism */
+            parallelism: number;
+            /** Taskmanager Cpu */
+            taskmanager_cpu: string;
+            /** Taskmanager Memory */
+            taskmanager_memory: string;
+            /** Taskmanagers */
+            taskmanagers: number;
+            /** Total Memory Mib */
+            total_memory_mib: number;
         };
         /** FormatSpec */
         FormatSpec: {

@@ -1,5 +1,5 @@
 import { DEFAULT_SINK_CAPS, type SinkCaps } from '@/lib/connections';
-import { deriveSinkOptions, destinationFor, fullSpec, namingError, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, stageOf, withShape } from '../spec';
+import { deriveSinkOptions, destinationFor, fullSpec, namingError, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
 
 describe('pipeline spec helpers', () => {
   it('fills defaults that mirror the backend', () => {
@@ -102,5 +102,31 @@ describe('pruneToTables', () => {
     expect(out.transforms.map((t) => [t.type, t.tables])).toEqual([['unwrap', undefined], ['rename', ['a.x']], ['add_field', undefined]]);
     expect(out.keys).toEqual({ 'a.x': ['id'] });
     expect(pruneToTables(spec, ['a.z']).keys).toBeUndefined();
+  });
+});
+
+describe('specForEngine', () => {
+  const base = fullSpec({
+    source: { tables: { include: ['s.t'] } },
+    advanced: { 'debezium.source.x': '1' },
+    values: { decimals: 'string' },
+    debezium_image: 'quay.io/debezium/server:3.7.0.Final',
+    snapshot: { mode: 'initial', delay_seconds: 30, window: '01:00-02:00' },
+    flink_cdc: { new_columns: 'send' },
+  } as never);
+  it('keeps only Flink CDC settings on Flink CDC', () => {
+    const s = specForEngine(base, 'flink-cdc');
+    expect(s.advanced).toEqual({});
+    expect(s.values).toBeUndefined();
+    expect(s.debezium_image).toBeNull();
+    expect(s.snapshot.delay_seconds).toBe(0);
+    expect(s.snapshot.window).toBeNull();
+    expect(s.flink_cdc).toEqual({ new_columns: 'send' });
+  });
+  it('keeps only Debezium settings on Debezium', () => {
+    const s = specForEngine(base, 'debezium');
+    expect(s.flink_cdc).toBeUndefined();
+    expect(s.advanced).toEqual({ 'debezium.source.x': '1' });
+    expect(s.snapshot.window).toBe('01:00-02:00');
   });
 });

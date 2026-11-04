@@ -1,6 +1,7 @@
 import { useUpdatePipeline, type Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import type { FullSpec } from './spec';
+import type { EngineId } from '@/lib/engines';
 
 export interface SaveBody {
   spec?: FullSpec;
@@ -8,6 +9,8 @@ export interface SaveBody {
   runtime_id?: string;
   name?: string;
   owner?: string;
+  /** Only when the person picks one; otherwise the server keeps or picks the engine. */
+  engine?: EngineId;
 }
 
 /**

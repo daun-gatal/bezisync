@@ -105,6 +105,23 @@ type engineRead struct {
 	Available    bool    `json:"available"`
 	Reason       *string `json:"reason"`
 	DefaultImage *string `json:"default_image"`
+	// Sources and Sinks it runs (nil: every one, except ExceptSinks).
+	Sources     []string `json:"sources"`
+	Sinks       []string `json:"sinks"`
+	ExceptSinks []string `json:"except_sinks"`
+	// Flink CDC: the settings a pipeline may choose and the size presets.
+	Settings []engine.FlinkSetting `json:"settings,omitempty"`
+	Sizes    map[string]flinkSize  `json:"sizes,omitempty"`
+}
+
+type flinkSize struct {
+	JobManagerCPU     string `json:"jobmanager_cpu"`
+	JobManagerMemory  string `json:"jobmanager_memory"`
+	TaskManagers      int    `json:"taskmanagers"`
+	TaskManagerCPU    string `json:"taskmanager_cpu"`
+	TaskManagerMemory string `json:"taskmanager_memory"`
+	Parallelism       int    `json:"parallelism"`
+	TotalMemoryMiB    int    `json:"total_memory_mib"`
 }
 
 // catalogEngine reads the ?engine= of a catalog request (Debezium when absent).
@@ -153,6 +170,14 @@ func catalogRoutes(r chi.Router) {
 				return err
 			}
 			e := engineRead{ID: string(id), Title: id.Title(), Available: a.Available}
+			e.Sources, e.Sinks, e.ExceptSinks = engine.Runs(id)
+			if id == engine.FlinkCDC {
+				e.Settings, e.Sizes = engine.FlinkSettings, map[string]flinkSize{}
+				for name, s := range engine.FlinkSizes {
+					e.Sizes[name] = flinkSize{JobManagerCPU: s.JobManagerCPU, JobManagerMemory: s.JobManagerMemory, TaskManagers: s.TaskManagers,
+						TaskManagerCPU: s.TaskManagerCPU, TaskManagerMemory: s.TaskManagerMemory, Parallelism: s.Parallelism(), TotalMemoryMiB: s.TotalMemoryMiB()}
+				}
+			}
 			if a.Reason != "" {
 				e.Reason = &a.Reason
 			}

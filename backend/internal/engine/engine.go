@@ -48,6 +48,15 @@ var flinkSinks = []string{"iceberg", "starrocks", "doris", "fluss"}
 // flinkOnlySinks have no Debezium Server sink.
 var flinkOnlySinks = []string{"starrocks", "doris", "fluss"}
 
+// Runs lists what an engine reads and writes: nil means every source (or destination) except
+// those in exceptSinks.
+func Runs(id ID) (sources, sinks, exceptSinks []string) {
+	if id == FlinkCDC {
+		return slices.Clone(flinkSources), slices.Clone(flinkSinks), nil
+	}
+	return nil, nil, slices.Clone(flinkOnlySinks)
+}
+
 // FlinkOnlySink reports a destination only Flink CDC can write.
 func FlinkOnlySink(sinkType string) bool { return slices.Contains(flinkOnlySinks, sinkType) }
 

@@ -20,6 +20,7 @@ export function PersonalDataCard({
   candidates,
   sourceCanMask,
   sourceTitle,
+  noMaskWhy = null,
   expert,
   onChoose,
 }: {
@@ -28,6 +29,8 @@ export function PersonalDataCard({
   candidates: { table: string; column: string; type: string; maskable: boolean }[];
   sourceCanMask: boolean;
   sourceTitle: string;
+  /** Why nothing can be masked, when it isn't the source (a Flink CDC pipeline). */
+  noMaskWhy?: string | null;
   expert: boolean;
   onChoose: (table: string, column: string, choice: Choice | null) => void;
 }) {
@@ -36,7 +39,7 @@ export function PersonalDataCard({
   const problem = personalProblem(rows);
   const maskWhy = (r: PersonalRow) =>
     !sourceCanMask
-      ? `${sourceTitle} values can’t be hashed.`
+      ? (noMaskWhy ?? `${sourceTitle} values can’t be hashed.`)
       : r.type === null
         ? 'The column is not in the table any more.'
         : `Only text columns can be masked (this one is ${r.type}).`;

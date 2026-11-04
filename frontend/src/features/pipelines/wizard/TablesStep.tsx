@@ -45,7 +45,9 @@ export function TablesStep({
   const connectorTypes = useConnectorTypes(project.id);
   const sourceType = connectorTypes.data?.find((t) => t.kind === 'source' && t.type === pipeline.source.type);
   const caps = sourceType?.transforms as { maskable_types?: string[] } | undefined;
-  const maskable = sourceType?.supports_masking === false ? [] : caps?.maskable_types;
+  // Flink CDC has no hash function: a pipeline on it removes personal data instead of masking it.
+  const flinkNoHash = pipeline.engine === 'flink-cdc' ? (pipeline.caps.why?.hash_mask ?? 'Flink CDC has no hash function for masks.') : null;
+  const maskable = sourceType?.supports_masking === false || flinkNoHash ? [] : caps?.maskable_types;
   const { save, pending, error } = useSaveSpec(pipeline);
   const tables = useMemo(() => discovery.data?.tables ?? [], [discovery.data]);
   const schemas = [...new Set(tables.map((t) => t.schema))].sort();
@@ -189,6 +191,7 @@ export function TablesStep({
           rows={rows}
           candidates={candidates}
           sourceCanMask={Boolean(maskable?.length)}
+          noMaskWhy={flinkNoHash}
           sourceTitle={sourceType?.title ?? pipeline.source.type}
           expert={expert}
           onChoose={choose}
