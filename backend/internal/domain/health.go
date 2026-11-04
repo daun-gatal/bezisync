@@ -322,6 +322,9 @@ type DeriveInput struct {
 	// EngineDown is why an engine that explains itself (Flink CDC) is down; it replaces reading
 	// Debezium's logs. Code "health_down" while a young pipeline starts means it is deploying.
 	EngineDown *Reason
+	// StartedAt is when the workload last started: an engine that explains itself is starting,
+	// not failed, for DeployGrace after a resume or restart too.
+	StartedAt *time.Time
 }
 
 // Derive turns observations into one honest verdict: nothing is healthy without fresh,
@@ -409,7 +412,8 @@ func derive(in DeriveInput) Verdict {
 		if d == nil {
 			d = &Reason{Code: "health_down", Message: "Debezium Server reports DOWN.", Severity: "error"}
 		}
-		if young && d.Code == "health_down" {
+		starting := young || (in.EngineDown != nil && in.StartedAt != nil && in.Now.Sub(*in.StartedAt) < DeployGrace)
+		if starting && d.Code == "health_down" {
 			return Verdict{Lifecycle: LifecycleDeploying, Health: HealthUnknown, Summary: "Connector starting…"}
 		}
 		return Verdict{LifecycleFailed, HealthDown, []Reason{*d}, d.Message}

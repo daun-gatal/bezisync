@@ -128,8 +128,13 @@ func flinkStatus(st *flinkhelper.Status, obs *runtime.Observation, tables []stri
 	if len(st.Chunks) > 0 {
 		chunks := map[string]any{}
 		for _, t := range tables {
-			if n, ok := st.Chunks[strings.ReplaceAll(t, ".", "_")]; ok {
-				chunks[t] = n
+			// Flink names splits by its table id with dots as underscores; SQL Server's id
+			// starts with the database ("shop_dbo_orders" for dbo.orders).
+			key := strings.ReplaceAll(t, ".", "_")
+			for k, n := range st.Chunks {
+				if k == key || strings.HasSuffix(k, "_"+key) {
+					chunks[t] = n
+				}
 			}
 		}
 		out["chunks"] = chunks

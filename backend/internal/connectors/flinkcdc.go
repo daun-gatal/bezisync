@@ -130,6 +130,9 @@ func (s *mysqlSource) FlinkSource(conn Resolved, c CompileContext, at FlinkEndpo
 		// caching_sha2_password sends the password RSA-encrypted when there is no TLS.
 		o.Set("jdbc.properties.allowPublicKeyRetrieval", "true")
 	}
+	if hb := c.Spec.Policies.HeartbeatSeconds; hb > 0 {
+		o.Set("heartbeat.interval", strconv.Itoa(hb)+"s")
+	}
 	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SRC_PASSWORD": Str(sec, "password")}, Connector: "mysql", Drivers: []string{"mysql"}}, nil
 }
 
@@ -165,7 +168,8 @@ func (s *postgresSource) FlinkSource(conn Resolved, c CompileContext, at FlinkEn
 		{"scan.newly-added-table.enabled", "true"},
 		{"schema-change.enabled", "true"},
 	}
-	if hb := c.Spec.Policies.HeartbeatSeconds; hb != 0 {
+	if hb := c.Spec.Policies.HeartbeatSeconds; hb > 0 {
+		o.Set("heartbeat.interval", strconv.Itoa(hb)+"s")
 		// Keeps the slot moving on a quiet database (the WAL it holds back stays small).
 		o.Set("debezium.heartbeat.action.query", fmt.Sprintf(
 			"INSERT INTO %s.heartbeat (pipeline, ts) VALUES ('%s', now()) ON CONFLICT (pipeline) DO UPDATE SET ts = EXCLUDED.ts",
@@ -176,3 +180,40 @@ func (s *postgresSource) FlinkSource(conn Resolved, c CompileContext, at FlinkEn
 
 // FlinkTableID: PostgreSQL events are named schema.table (the database is the connection's).
 func (*postgresSource) FlinkTableID(_ Resolved, table string) string { return table }
+
+// SQL Server: one database per pipeline (the connection's); Flink CDC names events by all three
+// parts, database.schema.table.
+func (s *sqlserverSource) FlinkSource(conn Resolved, c CompileContext, at FlinkEndpoint, _ int) (*FlinkBlock, error) {
+	cfg, sec, err := msCfg(conn)
+	if err != nil {
+		return nil, err
+	}
+	if !flinkName.MatchString(cfg.Database) {
+		return nil, problem.New(422, "flink_table_name",
+			fmt.Sprintf("Flink CDC can't read the database %s: its name may only use letters, digits and underscores.", cfg.Database))
+	}
+	tables := make([]string, len(c.Spec.Source.Tables.Include))
+	for i, t := range c.Spec.Source.Tables.Include {
+		tables[i] = cfg.Database + "." + t
+	}
+	o := FlinkOptions{
+		{"type", "sqlserver"},
+		{"hostname", at.Host},
+		{"port", strconv.Itoa(at.Port)},
+		{"username", cfg.User},
+		{"password", "${BZ_SRC_PASSWORD}"},
+		{"tables", strings.Join(tables, ",")},
+		{"scan.newly-added-table.enabled", "true"},
+		{"schema-change.enabled", "true"},
+		{"jdbc.properties.encrypt", boolStr(cfg.Encrypt)},
+		{"jdbc.properties.trustServerCertificate", boolStr(cfg.TrustCert)},
+		{"debezium.database.encrypt", boolStr(cfg.Encrypt)},
+		{"debezium.database.trustServerCertificate", boolStr(cfg.TrustCert)},
+	}
+	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SRC_PASSWORD": Str(sec, "password")}, Connector: "sqlserver"}, nil
+}
+
+// FlinkTableID: SQL Server events carry the database too.
+func (*sqlserverSource) FlinkTableID(conn Resolved, table string) string {
+	return Str(conn.Config, "database") + "." + table
+}

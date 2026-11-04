@@ -11,9 +11,9 @@ source:
   schema-change.enabled: "true"
   jdbc.properties.sslMode: "REQUIRED"
   debezium.database.ssl.mode: "required"
+  heartbeat.interval: "10s"
   scan.startup.mode: "initial"
   scan.snapshot.fetch.size: "10000"
-  heartbeat.interval: "10s"
 sink:
   type: "values"
   token: ${BZ_SINK_TOKEN}

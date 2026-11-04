@@ -53,11 +53,11 @@ func TestFlinkDownSaysWhy(t *testing.T) {
 func TestFlinkStatusKeepsTheJobAndProgress(t *testing.T) {
 	at := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
 	st := &flinkhelper.Status{Phase: flinkhelper.PhaseRunning, JobState: "RUNNING", TaskManagers: 2, TaskManagersWanted: 2, CheckpointsDone: 5,
-		LastStored: &flinkhelper.Saved{ID: 9, Kind: "checkpoint", Reason: "periodic", TakenAt: at, Size: 3000}, Chunks: map[string]int64{"shop_orders": 12, "other_t": 1}}
+		LastStored: &flinkhelper.Saved{ID: 9, Kind: "checkpoint", Reason: "periodic", TakenAt: at, Size: 3000}, Chunks: map[string]int64{"shop_orders": 12, "other_t": 1, "inv_dbo_items": 3}}
 	obs := &runtime.Observation{Details: map[string]any{"components": []any{map[string]any{"role": "jobmanager"}}}}
-	got := flinkStatus(st, obs, []string{"shop.orders", "shop.items"})
+	got := flinkStatus(st, obs, []string{"shop.orders", "shop.items", "dbo.items"})
 	chunks := got["chunks"].(map[string]any)
-	if len(chunks) != 1 || chunks["shop.orders"] != int64(12) || got["last_saved"].(map[string]any)["id"] != int64(9) || got["components"] == nil ||
+	if len(chunks) != 2 || chunks["shop.orders"] != int64(12) || chunks["dbo.items"] != int64(3) || got["last_saved"].(map[string]any)["id"] != int64(9) || got["components"] == nil ||
 		got["last_saved"].(map[string]any)["taken_at"] != "2026-11-04T09:00:00+00:00" {
 		t.Fatalf("%+v", got)
 	}

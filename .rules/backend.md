@@ -241,14 +241,16 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `prepareIfNeeded`) and live only for tables the artifact lacks (previews). Hash masks, scripted
   filters, outbox, flatten, custom steps, Debezium value formats, advanced properties, copy delays
   and "copy on every start" are refused with the reason. MySQL server ids: `MyServerIDRange`, blocks
-  of 8 below 2^31 (Flink CDC reads them as signed 32-bit). Table names are letters, digits and `_`
+  of 8 below 2^31 (Flink CDC reads them as signed 32-bit). SQL Server reads one database (the connection's) and names
+  events `database.schema.table`; options a source lacks are never set (Flink CDC rejects unknown
+  options: `heartbeat.interval` is MySQL's and PostgreSQL's). Table names are letters, digits and `_`
   only (Flink CDC splits names at dots and reads them as regular expressions).
 - Flink CDC in the controller (`controller/flinkcdc.go`): evidence comes from the helper, `/q/health`
   (UP once the job runs on every TaskManager) and `/bz/status`, mapped onto `domain.Metrics`
   (connected while the job runs; copying until the source's log split, `binlog-split` or
   `stream-split`, exists: `Status.Streaming`; lag from the readers' emit lag) and onto
   `DeriveInput.EngineDown` (why it is down, replacing Debezium's log diagnosis; "health_down" while a
-  young pipeline starts). `status.flink` keeps the job, its saves, copy chunks per table and the
+  young pipeline starts, or within `DeployGrace` of the workload's start: a resume takes a minute). `status.flink` keeps the job, its saves, copy chunks per table and the
   cluster's components. Delete also drops the saved positions; PostgreSQL cleanup drops inactive
   `<slot>_<n>` copy slots. `ExpireSavedPositions` (retention tick) removes set-aside positions and
   savepoints beyond the newest ten after a week unless kept.

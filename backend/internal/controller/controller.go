@@ -438,7 +438,7 @@ func (c *Controller) Reconcile(ctx context.Context, id uuid.UUID) error {
 			Metrics: metrics, Logs: logs, LatencyTargetMS: latencyTarget, RuntimeError: runtimeError,
 			SourceRisk: risk, LastLifecycle: p.Lifecycle, EngineDown: seen.engineDown}
 		if obs != nil {
-			in.Phase, in.Restarts, in.WorkloadReason, in.ImagePull = obs.Phase, obs.Restarts, obs.Reason, obs.ImagePull
+			in.Phase, in.Restarts, in.WorkloadReason, in.ImagePull, in.StartedAt = obs.Phase, obs.Restarts, obs.Reason, obs.ImagePull, obs.StartedAt
 		}
 		verdict := domain.Derive(in)
 		if applyError != "" && verdict.Lifecycle != domain.LifecycleStreaming {

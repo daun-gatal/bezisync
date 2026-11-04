@@ -2,6 +2,7 @@ package compiler_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -299,5 +300,43 @@ func TestCompileFlinkSinkTransform(t *testing.T) {
 	if !strings.Contains(got.Pipeline, "projection: \"*, __data_event_type__ AS `__op`\"") || !strings.Contains(got.Pipeline, `converter-after-transform: "SOFT_DELETE"`) ||
 		!strings.Contains(got.Settings, `"values-extra"`) {
 		t.Fatal(got.Pipeline, got.Settings)
+	}
+}
+
+// Start over from a time on MySQL: the stored time reads back whatever number type it decoded to.
+func TestCompileFlinkStartFromTime(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"sink": map[string]any{"naming": "{schema}_{table}"}, "flink_cdc": map[string]any{"new_columns": "send"}})
+	for _, ms := range []any{json.Number("1700000000000"), float64(1_700_000_000_000), int64(1_700_000_000_000), "1700000000000"} {
+		in := secrets
+		in.Startup = map[string]any{"mode": "timestamp", "timestamp_ms": ms}
+		got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+		if err != nil || !strings.Contains(got.Pipeline, `scan.startup.timestamp-millis: "1700000000000"`) || !strings.Contains(got.Pipeline, `scan.startup.mode: "timestamp"`) {
+			t.Fatalf("%T: %v", ms, err)
+		}
+	}
+}
+
+// SQL Server reads the connection's database; routes and transforms name tables with it, and no
+// option it lacks (heartbeat.interval) is set.
+func TestCompileFlinkSQLServer(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"dbo.orders"}}},
+		"sink": map[string]any{"naming": "{schema}_{table}"}, "keys": map[string]any{"dbo.orders": []any{"order_id"}},
+		"policies": map[string]any{"heartbeat_seconds": 10}, "flink_cdc": map[string]any{"new_columns": "send"}})
+	ms := connectors.Resolved{Type: "sqlserver", Config: map[string]any{"host": "mssql", "port": 1433, "database": "shop", "user": "cdc", "encrypt": true},
+		Secrets: map[string]any{"password": "pw"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), ms, testSink, "acme/flink-cdc:3.7.0", secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`tables: "shop.dbo.orders"`, `source-table: "shop.dbo.orders"`, `jdbc.properties.encrypt: "true"`, `primary-keys: "order_id"`} {
+		if !strings.Contains(got.Pipeline, want) {
+			t.Errorf("lacks %s:\n%s", want, got.Pipeline)
+		}
+	}
+	if strings.Contains(got.Pipeline, "heartbeat") {
+		t.Fatal(got.Pipeline)
 	}
 }

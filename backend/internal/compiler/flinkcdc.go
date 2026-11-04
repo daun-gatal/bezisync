@@ -173,9 +173,6 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	if err := startupOptions(&srcBlock.Options, spec, in.Startup, source.Type); err != nil {
 		return nil, err
 	}
-	if spec.Policies.HeartbeatSeconds > 0 {
-		srcBlock.Options.Set("heartbeat.interval", strconv.Itoa(spec.Policies.HeartbeatSeconds)+"s")
-	}
 
 	// Routes: each table to its destination, first match only.
 	destinations := map[string]string{}
@@ -266,20 +263,40 @@ func startupOptions(o *connectors.FlinkOptions, spec domain.PipelineSpec, startu
 		if sourceType != "mysql" && sourceType != "sqlserver" {
 			return problem.New(422, "engine_unsupported", "Only MySQL and SQL Server sources can start from a point in time.")
 		}
-		ms, _ := startup["timestamp_ms"].(float64)
-		if n, ok := startup["timestamp_ms"].(int64); ok {
-			ms = float64(n)
-		}
+		ms := startupMillis(startup["timestamp_ms"])
 		if ms <= 0 {
 			return problem.New(422, "engine_settings", "Starting from a point in time needs the time.")
 		}
-		o.Set("scan.startup.timestamp-millis", strconv.FormatInt(int64(ms), 10))
+		o.Set("scan.startup.timestamp-millis", strconv.FormatInt(ms, 10))
 	}
 	if spec.Snapshot.ChunkSize != domain.DefaultSpec().Snapshot.ChunkSize {
 		o.Set("scan.incremental.snapshot.chunk.size", strconv.Itoa(spec.Snapshot.ChunkSize))
 	}
 	o.Set("scan.snapshot.fetch.size", strconv.Itoa(spec.Snapshot.FetchSize))
 	return nil
+}
+
+// startupMillis reads the stored start time, however the artifact was decoded.
+func startupMillis(v any) int64 {
+	switch x := v.(type) {
+	case json.Number:
+		n, err := x.Int64()
+		if err != nil {
+			f, _ := x.Float64()
+			return int64(f)
+		}
+		return n
+	case float64:
+		return int64(x)
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case string:
+		n, _ := strconv.ParseInt(x, 10, 64)
+		return n
+	}
+	return 0
 }
 
 // flinkConf is flink-conf.yaml: BeziSync's settings (never overridable) and the pipeline's

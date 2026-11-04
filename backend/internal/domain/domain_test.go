@@ -518,6 +518,13 @@ func TestDeriveEngineReasons(t *testing.T) {
 	if got := domain.Derive(in); got.Lifecycle != domain.LifecycleFailed || got.Summary != starting.Message || got.Reasons[0].Code != "health_down" {
 		t.Fatalf("old: %+v", got)
 	}
+	// Resumed a minute ago: still starting, however old the deploy.
+	resumed := now.Add(-time.Minute)
+	in.StartedAt = &resumed
+	if got := domain.Derive(in); got.Lifecycle != domain.LifecycleDeploying {
+		t.Fatalf("resumed: %+v", got)
+	}
+	in.StartedAt = nil
 	failed := &domain.Reason{Code: "destination_renamed", Message: "The destination table changed name.", Severity: "error"}
 	in.DeployedAt, in.EngineDown = &young, failed
 	if got := domain.Derive(in); got.Lifecycle != domain.LifecycleFailed || got.Reasons[0] != *failed {
