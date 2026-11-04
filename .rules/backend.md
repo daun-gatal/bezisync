@@ -16,6 +16,7 @@ internal/
 ├── controller/       # leader-elected reconcile loop, jobs, uninstall
 ├── agent/            # `bezisync agent` (dials out; never listens)
 ├── connectors/       # sources and sinks (+ descriptors.json: their forms/validation schemas)
+├── engine/           # the engines (Debezium, Flink CDC): which source/destination pairs each runs, capabilities (pure)
 ├── compiler/         # spec + resolved connections → application.properties + env (pure)
 ├── runtime/          # Docker and Kubernetes drivers (+ GKE/EKS auth)
 ├── secrets/          # external secret store clients (Vault, AWS, GCP, Kubernetes)
@@ -167,6 +168,13 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   connector shares. MongoDB is excluded.
 
 ## Pipelines, compiler, runtimes, controller
+- Engines (`internal/engine`): a pipeline runs on Debezium Server or Flink CDC. `engine.Supports`
+  and `engine.Choices` say which engines can run a source/destination pair (Flink CDC: MySQL/MariaDB,
+  PostgreSQL and SQL Server into Iceberg, StarRocks, Doris and Fluss; StarRocks, Doris and Fluss are
+  Flink CDC only); `engine.Default` is Debezium wherever it can run. `engine.CapsFor` is what an
+  engine can do (edit offsets, copy a table again, saved positions, event formats…), with `Why` for
+  every unavailable action. Capabilities always come from the engine, never from the destination
+  type; a source's own `capture` limits still apply on top.
 - `domain.PipelineSpec` is the contract (API body, YAML, wizard); it serialises in declaration order.
   One change is one `PipelineVersion`: while the current version is unsealed (`sealed_at` null) and
   the caller made it, `UpdatePipeline` updates it in place (wizard steps and autosave never pile up
