@@ -2684,6 +2684,11 @@ export interface components {
         };
         /** ConnectorType */
         ConnectorType: {
+            /**
+             * Available
+             * @description False while no engine that writes it is available (Flink CDC needs a registered image).
+             */
+            available?: boolean;
             capture?: components["schemas"]["CaptureCaps"];
             /** Config Schema */
             config_schema: {
@@ -2691,6 +2696,11 @@ export interface components {
             };
             /** Description */
             description: string;
+            /**
+             * Engines
+             * @description Engines that can write this destination, when only some can (Flink CDC for StarRocks, Doris and Fluss).
+             */
+            engines?: ("debezium" | "flink-cdc")[];
             /**
              * Kind
              * @enum {string}
@@ -2715,6 +2725,11 @@ export interface components {
             transforms?: components["schemas"]["TransformCaps"];
             /** Type */
             type: string;
+            /**
+             * Unavailable Reason
+             * @description Why it can't be used yet, and who can change that.
+             */
+            unavailable_reason?: string;
         };
         /** CopyConnection */
         CopyConnection: {

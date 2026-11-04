@@ -81,7 +81,11 @@ src/
   header. **People** is the only screen that edits access (filter `?in=<project id>` for one
   project). Work on pipelines stays with pipelines: the Debezium version is changed from the
   Pipelines list (column, `?debezium=` filter, bulk select) and the pipeline page with
-  `ChangeDebeziumDialog`; `lib/debezium.ts` holds `useCatalog`/`useDebeziumImages`. Never add a
+  `ChangeDebeziumDialog`; `lib/debezium.ts` holds `useCatalog`/`useDebeziumImages`. Settings →
+  **Engine versions** (`EngineVersionsSection`, `?engine=flink-cdc`) curates each engine's images;
+  registering the first Flink CDC image turns that engine on (`lib/engines.ts`: `useEngines`,
+  `useEngineCatalog`, `engineGate`). Destinations only Flink CDC writes carry a "Flink CDC" pill
+  in the connection type picker and are disabled, with the reason, while it is off. Never add a
   second screen for the same job; renamed or merged section ids go in `LEGACY_SECTIONS` (old
   `/admin/$section` links redirect via `LEGACY_ADMIN_SECTIONS`).
   Checkboxes whose value comes from the server keep row-level local state set in the change

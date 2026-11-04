@@ -216,8 +216,9 @@ const learnRoute = createRoute({ getParentRoute: () => projectRoute, path: '/lea
 const tourRoute = createRoute({ getParentRoute: () => projectRoute, path: '/tour', component: lazyRouteComponent(() => import('@/features/tour/TourPage'), 'TourPage') });
 
 /** q: search; in: People's project filter; scope: the project a per-project section shows (default: the current one); page: a paged section's page. */
-const sectionSearch = (s: Record<string, unknown>): { q?: string; in?: string; scope?: string; page?: number } => ({
+const sectionSearch = (s: Record<string, unknown>): { q?: string; in?: string; scope?: string; page?: number; engine?: 'flink-cdc' } => ({
   ...pageSearch(s),
+  ...(s.engine === 'flink-cdc' ? { engine: 'flink-cdc' as const } : {}),
   ...(typeof s.q === 'string' && s.q ? { q: s.q } : {}),
   ...(typeof s.in === 'string' && s.in ? { in: s.in } : {}),
   ...(typeof s.scope === 'string' && s.scope ? { scope: s.scope } : {}),

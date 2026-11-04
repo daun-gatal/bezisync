@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,16 +9,60 @@ import { Check, Field, Input, Textarea } from '@/components/ui/form';
 import { Card, QueryState } from '@/components/ui/layout';
 import { Confirm } from '@/components/ui/overlays';
 import { List, ListRow } from '@/components/ui/table';
+import { Tabs } from '@/components/ui/tabs';
 import { Ident, Meta, plural } from '@/components/ui/text';
 import { client, unwrap, type Schemas } from '@/lib/api';
-import { catalogKey, useCatalog } from '@/lib/debezium';
+import { catalogKey } from '@/lib/debezium';
+import { ENGINE_TITLE, engineCatalogKey, enginesKey, useEngineCatalog, useEngines, type EngineId } from '@/lib/engines';
 
 type Entry = Schemas['CatalogEntryRead'];
 
-/** The Debezium versions every project picks from, the default, and where each one runs. */
-export function DebeziumVersionsSection() {
+/** The images each engine runs, its default, and where each one runs. Flink CDC is off until an
+ *  image is registered here. */
+export function EngineVersionsSection() {
+  const search = useSearch({ from: '/p/$projectSlug/settings/$section' });
+  const navigate = useNavigate({ from: '/p/$projectSlug/settings/$section' });
+  const engine: EngineId = search.engine === 'flink-cdc' ? 'flink-cdc' : 'debezium';
+  const engines = useEngines();
+  const flink = engines.data?.find((e) => e.id === 'flink-cdc');
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="m-0 text-xl font-semibold">Engine versions</h2>
+        <p className="m-0 text-base text-muted">
+          The images pipelines run, per engine. Debezium runs every pipeline unless Flink CDC fits better; Flink CDC is optional and turns on once you register
+          an image for it.
+        </p>
+      </div>
+      <Tabs
+        idBase="engine-versions"
+        label="Engine"
+        value={engine}
+        onChange={(v) => void navigate({ search: (s) => ({ ...s, engine: v === 'flink-cdc' ? 'flink-cdc' : undefined }), replace: true })}
+        tabs={[
+          { id: 'debezium', label: 'Debezium' },
+          { id: 'flink-cdc', label: flink && !flink.available ? 'Flink CDC (off)' : 'Flink CDC' },
+        ]}
+      />
+      {engine === 'flink-cdc' && flink && !flink.available ? (
+        <Card title="Flink CDC is off">
+          <p className="m-0 max-w-3xl text-base text-muted">
+            BeziSync doesn’t publish a Flink CDC image: build one from <code className="font-mono text-sm">deploy/images/flink-cdc/Dockerfile</code> (add{' '}
+            <code className="font-mono text-sm">--build-arg MYSQL_DRIVER=8.4.0</code> for MySQL, MariaDB or StarRocks), push it to a registry your runtimes
+            pull from, and add it below. Pipelines can then choose Flink CDC where it fits: StarRocks, Doris, Fluss, and Iceberg from MySQL, MariaDB,
+            PostgreSQL or SQL Server.
+          </p>
+        </Card>
+      ) : null}
+      <CatalogPanel key={engine} engine={engine} />
+    </div>
+  );
+}
+
+function CatalogPanel({ engine }: { engine: EngineId }) {
   const qc = useQueryClient();
-  const catalog = useCatalog();
+  const catalog = useEngineCatalog(engine);
+  const title = ENGINE_TITLE[engine];
   const [image, setImage] = useState('');
   const [label, setLabel] = useState('');
   const [notes, setNotes] = useState('');
@@ -27,12 +71,15 @@ export function DebeziumVersionsSection() {
   /** A default change waiting for confirmation: the entry to make default, or null for the install default. */
   const [defaulting, setDefaulting] = useState<{ entry: Entry; on: boolean } | null>(null);
   const done = (data: Schemas['CatalogRead']) => {
-    qc.setQueryData(catalogKey, data);
+    qc.setQueryData(engineCatalogKey(engine), data);
+    if (engine === 'debezium') qc.setQueryData(catalogKey, data);
+    void qc.invalidateQueries({ queryKey: enginesKey });
+    void qc.invalidateQueries({ queryKey: ['connector-types'] });
     void qc.invalidateQueries({ queryKey: ['debezium-images'] });
     void qc.invalidateQueries({ queryKey: ['runtimes'] });
   };
   const add = useMutation({
-    mutationFn: () => unwrap(client.POST('/api/v1/debezium-catalog', { body: { image: image.trim(), label, notes, is_default: makeDefault } })),
+    mutationFn: () => unwrap(client.POST('/api/v1/debezium-catalog', { body: { image: image.trim(), label, notes, is_default: makeDefault, engine } })),
     onSuccess: (data) => {
       toast.success(`Added ${image.trim()}`);
       setImage('');
@@ -66,25 +113,22 @@ export function DebeziumVersionsSection() {
   const current = catalog.data?.entries.find((e) => e.is_default);
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <h2 className="m-0 text-xl font-semibold">Debezium versions</h2>
-        <p className="m-0 text-base text-muted">
-          The Debezium Server images every project picks from. The default runs pipelines that choose no version (and whose runtime sets none) from their next
-          deploy: changing it never restarts running pipelines. Editors upgrade pipelines from the Pipelines list (select, then Change Debezium version) or from
-          a pipeline’s page.
-        </p>
-      </div>
+      <p className="m-0 max-w-3xl text-base text-muted">
+        {engine === 'debezium'
+          ? 'The Debezium Server images every project picks from. The default runs pipelines that choose no version (and whose runtime sets none) from their next deploy: changing it never restarts running pipelines. Editors upgrade pipelines from the Pipelines list (select, then Change Debezium version) or from a pipeline’s page.'
+          : 'The Flink CDC images pipelines on Flink CDC run. The default runs pipelines that pin none from their next deploy; running pipelines are not restarted.'}
+      </p>
       <InlineError error={update.error && !defaulting ? update.error : null} doing="Couldn’t change the image" />
       <Card pad={false}>
         <QueryState query={catalog} doing="Couldn’t load the catalog">
           {(data) => (
-            <List label="Debezium images">
+            <List label={`${title} images`}>
               {data.entries.map((e) => (
                 <ListRow key={e.image} tone={e.deprecated ? 'warn' : null}>
                   <span className="flex min-w-0 flex-[1_1_320px] flex-col gap-1">
                     <Ident className="font-medium">{e.image}</Ident>
                     <Meta>
-                      {e.label || (e.official ? 'Official Debezium Server' : 'Custom image')}
+                      {e.label || (e.official ? `Official ${title === 'Debezium' ? 'Debezium Server' : title}` : 'Custom image')}
                       {e.notes ? ` · ${e.notes}` : ''}
                       {e.pipelines !== null && e.pipelines !== undefined ? ` · ${plural(e.pipelines, 'live pipeline')}` : ''}
                     </Meta>
@@ -172,7 +216,15 @@ export function DebeziumVersionsSection() {
       </Card>
       <Card title="Add an image">
         <form onSubmit={submit} className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
-          <Field label="Image" hint="repository:tag, e.g. quay.io/debezium/server:3.8.0.Final or your own build with extra drivers." className="col-span-full">
+          <Field
+            label="Image"
+            hint={
+              engine === 'debezium'
+                ? 'repository:tag, e.g. quay.io/debezium/server:3.8.0.Final or your own build with extra drivers.'
+                : 'repository:tag of your Flink CDC build, e.g. registry.example.com/bezisync-flink-cdc:3.7.0-2.2.1.'
+            }
+            className="col-span-full"
+          >
             {(id) => <Input id={id} required className="font-mono" spellCheck={false} value={image} onChange={(e) => setImage(e.target.value)} />}
           </Field>
           <Field label="Label" optional>
@@ -198,7 +250,9 @@ export function DebeziumVersionsSection() {
         tone="primary"
         title={defaulting?.on ? `Make ${defaulting.entry.image} the default?` : 'Go back to the install default?'}
         effects={[
-          'Pipelines that choose no version, on runtimes that set none, use it from their next deploy.',
+          engine === 'debezium'
+            ? 'Pipelines that choose no version, on runtimes that set none, use it from their next deploy.'
+            : 'Flink CDC pipelines that pin no image use it from their next deploy.',
           'Running pipelines are not restarted.',
           current?.pipelines
             ? `Right now ${plural(current.pipelines, 'live pipeline')} run the current default.`

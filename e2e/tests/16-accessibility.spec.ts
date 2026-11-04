@@ -15,7 +15,8 @@ const PAGES = [
   '/p/default/settings/policies',
   '/p/default/settings/people',
   '/p/default/account',
-  '/p/default/settings/debezium',
+  '/p/default/settings/engines',
+  '/p/default/settings/engines?engine=flink-cdc',
   '/p/default/settings/sign-in',
   '/p/default/settings/mcp',
 ];

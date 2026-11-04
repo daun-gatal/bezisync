@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { toast } from 'sonner';
@@ -7,6 +8,7 @@ import { InlineError, Pill, Skeleton } from '@/components/ui/feedback';
 import { Check, Field, Input, RadioCards, SlugInput, slugError } from '@/components/ui/form';
 import { cleanValues, defaultsOf, SchemaForm, type FormValues, type JsonSchema, type LinkOptions } from '@/components/SchemaForm';
 import { CheckList } from '@/components/CheckList';
+import { engineGate } from '@/lib/engines';
 import { slugify } from '@/lib/format';
 import { useSecretStores } from '@/lib/secretRefs';
 import { useProject } from '@/lib/session';
@@ -194,27 +196,40 @@ export function ConnectionDialog({
         <Skeleton />
       ) : !type ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-2.5">
-          {choices.map((t) => (
-            <button
-              key={t.type}
-              type="button"
-              onClick={() => {
-                setType(t);
-                setTouched(true);
-              }}
-              className="flex min-w-0 flex-col gap-1 rounded-lg border border-line-strong bg-surface px-3.5 py-3 text-left hover:border-accent hover:bg-hover"
-            >
-              <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <strong className="text-base font-semibold">{TYPE_LABEL[t.type] ?? t.title}</strong>
-                {t.capture?.maturity === 'incubating' ? (
-                  <Pill tone="info" title="Debezium marks this connector as incubating: it works, but may change between versions.">
-                    Preview
-                  </Pill>
-                ) : null}
-              </span>
-              <span className="text-sm text-muted">{t.description}</span>
-            </button>
-          ))}
+          {choices.map((t) => {
+            const gate = engineGate(t);
+            const off = gate !== null && !gate.available;
+            return (
+              <button
+                key={t.type}
+                type="button"
+                disabled={off}
+                onClick={() => {
+                  setType(t);
+                  setTouched(true);
+                }}
+                className={clsx(
+                  'flex min-w-0 flex-col gap-1 rounded-lg border border-line-strong bg-surface px-3.5 py-3 text-left',
+                  off ? 'cursor-not-allowed opacity-70' : 'hover:border-accent hover:bg-hover',
+                )}
+              >
+                <span className="flex min-w-0 flex-wrap items-center gap-2">
+                  <strong className="text-base font-semibold">{TYPE_LABEL[t.type] ?? t.title}</strong>
+                  {t.capture?.maturity === 'incubating' ? (
+                    <Pill tone="info" title="Debezium marks this connector as incubating: it works, but may change between versions.">
+                      Preview
+                    </Pill>
+                  ) : null}
+                  {gate ? (
+                    <Pill tone="grey" title="Only Flink CDC writes this destination.">
+                      Flink CDC
+                    </Pill>
+                  ) : null}
+                </span>
+                <span className="text-sm text-muted">{off ? gate.reason : t.description}</span>
+              </button>
+            );
+          })}
         </div>
       ) : (
         <>

@@ -11,6 +11,15 @@ const types = [
     config_schema: { required: ['host'], properties: { host: { type: 'string', title: 'Host' }, ssl_mode: { enum: ['disable', 'require'], type: 'string', default: 'prefer', title: 'TLS' } } },
     secret_schema: { properties: { password: { type: 'string', title: 'Password' } } },
   },
+  // Written by Flink CDC only: StarRocks while the engine is off, Doris once it is on.
+  {
+    kind: 'sink', type: 'starrocks', title: 'StarRocks', description: 'olap', presets: [], config_schema: { properties: {} }, secret_schema: { properties: {} },
+    engines: ['flink-cdc'], available: false, unavailable_reason: "Flink CDC isn't turned on: an Admin registers a Flink CDC image under Settings → Engine versions.",
+  },
+  {
+    kind: 'sink', type: 'doris', title: 'Apache Doris', description: 'doris tables', presets: [], config_schema: { properties: {} }, secret_schema: { properties: {} },
+    engines: ['flink-cdc'], available: true,
+  },
 ];
 
 const me = {
@@ -94,5 +103,24 @@ describe('ConnectionDialog', () => {
     // Back to typing: the picker no longer holds the save.
     await userEvent.click(screen.getByRole('button', { name: 'Type it' }));
     expect(screen.queryByRole('button', { name: 'Save anyway' })).toBeNull();
+  });
+});
+
+describe('Flink CDC destinations', () => {
+  it('are marked, and offered only once the engine is on', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProjectProvider me={me} project={me.projects[0]!}>
+          <ConnectionDialog open onOpenChange={() => undefined} kind="sink" />
+        </ProjectProvider>
+      </QueryClientProvider>,
+    );
+    const starrocks = await screen.findByRole('button', { name: /StarRocks/ });
+    expect(starrocks).toBeDisabled();
+    expect(starrocks).toHaveTextContent('Settings → Engine versions');
+    const doris = screen.getByRole('button', { name: /Apache Doris/ });
+    expect(doris).toBeEnabled();
+    expect(doris).toHaveTextContent('Flink CDC');
+    expect(doris).toHaveTextContent('doris tables');
   });
 });

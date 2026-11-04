@@ -35,7 +35,7 @@ function useProjects() {
 /** What an Admin can do: listed whenever Admin is granted or taken away. */
 const ADMIN_POWERS = [
   'Opens every project with every permission, including deploying and approving.',
-  'Opens Settings: people, projects, runtimes, secret stores, Debezium versions, policies and the audit log.',
+  'Opens Settings: people, projects, runtimes, secret stores, engine versions, policies and the audit log.',
   'Can make other people Admins.',
 ];
 
@@ -336,7 +336,7 @@ function AddPersonDialog({
               columns={2}
               options={[
                 { value: 'project', label: 'A role in one project', description: 'Add more projects afterwards under Manage.' },
-                { value: 'admin', label: 'Admin', description: 'Every project, Settings, people and Debezium versions.' },
+                { value: 'admin', label: 'Admin', description: 'Every project, Settings, people and engine versions.' },
               ]}
             />
           )}
@@ -386,7 +386,7 @@ function ManagePersonDialog({ user, projects, onClose }: { user: User; projects:
         why="You can’t remove your own Admin role."
         onChange={(on) => setAdminChange(on)}
         label="Admin"
-        description="Every project, Settings, people and Debezium versions."
+        description="Every project, Settings, people and engine versions."
       />
       <InlineError error={error} doing="Couldn’t save the change" />
       {user.is_superuser ? (

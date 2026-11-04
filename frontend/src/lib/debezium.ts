@@ -6,7 +6,7 @@ export type PipelineImage = Schemas['PipelineImageRead'] & { image: string; stan
 export const catalogKey = ['debezium-catalog'] as const;
 export const imagesKey = (projectId: string) => ['debezium-images', projectId] as const;
 
-/** The install-wide Debezium version catalog (Admins curate it in Settings → Debezium versions). */
+/** The install-wide Debezium version catalog (Admins curate it in Settings → Engine versions). */
 export function useCatalog() {
   return useQuery({ queryKey: catalogKey, queryFn: () => unwrap(client.GET('/api/v1/debezium-catalog')), staleTime: 60_000 });
 }

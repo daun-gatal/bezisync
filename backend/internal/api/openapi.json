@@ -1579,6 +1579,11 @@
       },
       "ConnectorType": {
         "properties": {
+          "available": {
+            "description": "False while no engine that writes it is available (Flink CDC needs a registered image).",
+            "title": "Available",
+            "type": "boolean"
+          },
           "capture": {
             "$ref": "#/components/schemas/CaptureCaps"
           },
@@ -1590,6 +1595,18 @@
           "description": {
             "title": "Description",
             "type": "string"
+          },
+          "engines": {
+            "description": "Engines that can write this destination, when only some can (Flink CDC for StarRocks, Doris and Fluss).",
+            "items": {
+              "enum": [
+                "debezium",
+                "flink-cdc"
+              ],
+              "type": "string"
+            },
+            "title": "Engines",
+            "type": "array"
           },
           "kind": {
             "enum": [
@@ -1629,6 +1646,11 @@
           },
           "type": {
             "title": "Type",
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "description": "Why it can't be used yet, and who can change that.",
+            "title": "Unavailable Reason",
             "type": "string"
           }
         },
