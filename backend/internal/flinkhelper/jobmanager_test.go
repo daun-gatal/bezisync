@@ -432,8 +432,8 @@ func TestJobManagerGivesUpAfterRepeatedRaces(t *testing.T) {
 		}
 	})
 	st := h.waitFor(t, "failed", func(s Status) bool { return s.Phase == PhaseFailed })
-	if st.ErrorCode != "schema_registry" || st.Submits != maxResubmits+1 {
-		t.Fatalf("%+v", st)
+	if _, cancels, _, _ := h.f.counts(); st.ErrorCode != "schema_registry" || st.Submits != maxResubmits+1 || cancels != maxResubmits+1 {
+		t.Fatalf("%+v cancels %d", st, cancels)
 	}
 }
 

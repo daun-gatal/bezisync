@@ -224,6 +224,7 @@ func (m *JobManager) lifecycle(ctx context.Context) {
 		case outcomeRace:
 			attempt++
 			if attempt > maxResubmits {
+				_ = m.REST.Cancel(ctx, jobID)
 				m.fail(PhaseFailed, "schema_registry",
 					"Flink CDC's schema registry failed while starting the pipeline, "+strconv.Itoa(maxResubmits)+" times. Restart the pipeline; if it keeps failing, Start over.")
 				return
@@ -233,8 +234,7 @@ func (m *JobManager) lifecycle(ctx context.Context) {
 			_ = m.REST.Cancel(ctx, jobID)
 			m.waitGone(ctx, jobID)
 		case outcomeFatal:
-			_ = m.REST.Cancel(ctx, jobID)
-			return
+			return // watch cancelled the job
 		case outcomeFailed:
 			// The job used up Flink's restarts: submit again from the newest stored state, like a
 			// crashed container that restarts.
@@ -412,6 +412,8 @@ func (m *JobManager) watch(ctx context.Context, jobID string) outcome {
 		lastState = job.State
 		m.progress(ctx, job)
 		if code, text, ok := fatalOf(excs); ok {
+			// Cancel before reporting: whoever reads "failed" finds the job already stopped.
+			_ = m.REST.Cancel(ctx, jobID)
 			m.fail(PhaseFailed, code, text)
 			return outcomeFatal
 		}
