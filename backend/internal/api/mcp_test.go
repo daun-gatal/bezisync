@@ -368,6 +368,7 @@ func TestEveryMCPReadToolReachesItsRoute(t *testing.T) {
 		"check_secret_reference":      {"store_id": db0, "path": "x"},
 		"list_secret_store_secrets":   {"store_id": db0},
 		"list_secret_keys":            {"store_id": db0, "path": "x"},
+		"list_saved_positions":        {"pipeline": "orders-cdc"},
 	}
 	for _, tool := range e.admin.get("/api/v1/mcp/tools").List() {
 		name := at(t, tool, "name").(string)
@@ -391,5 +392,44 @@ func TestEveryMCPReadToolReachesItsRoute(t *testing.T) {
 		if strings.Contains(text, "HTTP 405") || strings.HasPrefix(text, "Not Found (HTTP 404") || strings.Contains(text, "Missing argument") {
 			t.Errorf("%s: %s", name, text)
 		}
+	}
+}
+
+// Agents choose the engine, read engines and saved positions, and restore or start over like people.
+func TestMCPFlinkCDCTools(t *testing.T) {
+	e := newPipelineEnv(t)
+	enableMCP(t, e.admin, map[string]any{"tools": map[string]any{"reset_pipeline_offsets": true, "restore_saved_position": true}})
+	tok := token(t, e.admin, map[string]any{"name": "flink"})
+	text, isErr := callTool(t, e.srv, tok, "list_engines", nil)
+	if isErr || !strings.Contains(text, `"flink-cdc"`) || !strings.Contains(text, `"available": false`) {
+		t.Fatal(text)
+	}
+	if text, isErr := callTool(t, e.srv, tok, "add_debezium_catalog_image", map[string]any{"image": "registry.example/flink:1", "engine": "flink-cdc"}); isErr {
+		t.Fatal(text)
+	}
+	lake := icebergSink(t, e)
+	text, isErr = callTool(t, e.srv, tok, "create_pipeline", map[string]any{"name": "lake-mcp", "source": "shop-pg", "destination": lake, "runtime": e.ids.Runtime, "engine": "flink-cdc",
+		"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}}}})
+	if isErr || !strings.Contains(text, `"engine": "flink-cdc"`) {
+		t.Fatal(text)
+	}
+	if text, isErr := callTool(t, e.srv, tok, "get_debezium_catalog", map[string]any{"engine": "flink-cdc"}); isErr || !strings.Contains(text, "registry.example/flink:1") {
+		t.Fatal(text)
+	}
+	if text, isErr := callTool(t, e.srv, tok, "list_saved_positions", map[string]any{"pipeline": "lake-mcp"}); isErr || !strings.Contains(text, `"positions": []`) {
+		t.Fatal(text)
+	}
+	// Not deployed yet: restoring is refused with the API's reason, and a PostgreSQL slot can't go back in time.
+	if text, isErr := callTool(t, e.srv, tok, "restore_saved_position", map[string]any{"pipeline": "lake-mcp", "position_id": 1, "confirm": "lake-mcp"}); !isErr {
+		t.Fatal(text)
+	}
+	exec(t, `UPDATE pipelines SET deployed_version_id = current_version_id, desired_state = 'paused' WHERE name = 'lake-mcp'`)
+	text, isErr = callTool(t, e.srv, tok, "reset_pipeline_offsets", map[string]any{"pipeline": "lake-mcp", "mode": "from_time", "from_time": "2026-01-01T00:00:00Z",
+		"confirm": "lake-mcp"})
+	if !isErr || !strings.Contains(text, "PostgreSQL") {
+		t.Fatal(text)
+	}
+	if text, isErr := callTool(t, e.srv, tok, "get_pipeline_logs", map[string]any{"pipeline": "lake-mcp", "component": "taskmanager-1"}); isErr || !strings.Contains(text, "logs of taskmanager-1") {
+		t.Fatal(text)
 	}
 }

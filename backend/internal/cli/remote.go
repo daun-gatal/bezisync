@@ -287,7 +287,7 @@ func remoteCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "%-32s %-13s %-9s %-8s SOURCE → DESTINATION\n", "NAME", "LIFECYCLE", "HEALTH", "DEPLOYED")
+			fmt.Fprintf(stdout, "%-32s %-13s %-9s %-8s %-9s SOURCE → DESTINATION\n", "NAME", "LIFECYCLE", "HEALTH", "DEPLOYED", "ENGINE")
 			list, _ := rows.([]any)
 			for _, r := range list {
 				p, _ := r.(map[string]any)
@@ -300,7 +300,8 @@ func remoteCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 					deployed = fmt.Sprintf("v%d", int(v))
 				}
 				source, _ := p["source"].(map[string]any)
-				fmt.Fprintf(stdout, "%-32s %-13s %-9s %-8s %s → %s\n", str(p["name"]), str(p["lifecycle"]), str(p["health"]), deployed, str(source["name"]), sink)
+				fmt.Fprintf(stdout, "%-32s %-13s %-9s %-8s %-9s %s → %s\n", str(p["name"]), str(p["lifecycle"]), str(p["health"]), deployed, str(p["engine"]),
+					str(source["name"]), sink)
 			}
 			return nil
 		}}
@@ -429,6 +430,7 @@ func remoteCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		addProject(cmd)
 		pipelines.AddCommand(cmd)
 	}
+	pipelines.AddCommand(positionsCmd(&project, stdout, stderr), restoreCmd(&project, stdout, stderr), startOverCmd(&project, stdout, stderr))
 	remote.AddCommand(login, get, export, apply, diff, pipelines)
 	return remote
 }

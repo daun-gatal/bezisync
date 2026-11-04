@@ -12,6 +12,7 @@ import (
 
 	"github.com/daun-gatal/bezisync/backend/internal/contract"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
@@ -372,8 +373,8 @@ func TestManifestsMatchPython(t *testing.T) {
 	specA, _ := domain.ParseSpec(&val.V{}, nil, generic(t, fx.ToYAML.SpecA))
 	specB, _ := domain.ParseSpec(&val.V{}, nil, generic(t, fx.ToYAML.SpecB))
 	sink, rt := "kafka", "rt"
-	doc := domain.ToDocument("p1", "default", "d", "me", map[string]string{"team": "x", "a": "b"}, "pg", &sink, &rt, specA)
-	doc2 := domain.ToDocument("p2", "default", "", "", map[string]string{}, "pg", nil, nil, specB)
+	doc := domain.ToDocument("p1", "default", "d", "me", map[string]string{"team": "x", "a": "b"}, "pg", &sink, &rt, specA, "")
+	doc2 := domain.ToDocument("p2", "default", "", "", map[string]string{}, "pg", nil, nil, specB, "")
 	if got := domain.ToYAML([]any{doc, doc2}); got != fx.ToYAML.YAML {
 		t.Errorf("to_yaml\n--- got\n%s\n--- want\n%s", got, fx.ToYAML.YAML)
 	}
@@ -533,5 +534,37 @@ func TestDeriveEngineReasons(t *testing.T) {
 	in.Phase = "restarting"
 	if got := domain.Derive(in); got.Reasons[0] != *failed {
 		t.Fatalf("restarting workload: %+v", got)
+	}
+}
+
+// A Flink CDC pipeline's manifest says so; Debezium manifests don't change.
+func TestManifestEngine(t *testing.T) {
+	spec := domain.DefaultSpec()
+	spec.Source.Tables.Include = []string{"public.orders"}
+	img := "registry.example/flink:1"
+	spec.FlinkCDCImage = &img
+	doc := domain.ToDocument("lake", "default", "", "", nil, "pg", nil, nil, spec, "flink-cdc")
+	body, _ := doc.Get("spec")
+	if e, _ := body.(*om.Map).Get("engine"); e != "flink-cdc" {
+		t.Fatal(doc)
+	}
+	if i, _ := body.(*om.Map).Get("flinkCdcImage"); i != img {
+		t.Fatal(doc)
+	}
+	docs, err := domain.ParseDocuments(domain.ToYAML([]any{doc}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := domain.FromDocument(docs[0])
+	if err != nil || parsed.Engine != "flink-cdc" || parsed.Spec.FlinkCDCImage == nil || *parsed.Spec.FlinkCDCImage != img {
+		t.Fatalf("%+v %v", parsed, err)
+	}
+	deb := domain.ToDocument("orders", "default", "", "", nil, "pg", nil, nil, domain.DefaultSpec(), "debezium")
+	if b, _ := deb.Get("spec"); b.(*om.Map).Keys()[0] == "engine" {
+		t.Fatal("a Debezium manifest names its engine")
+	}
+	docs[0]["spec"].(map[string]any)["engine"] = "spark"
+	if _, err := domain.FromDocument(docs[0]); err == nil || !strings.Contains(err.Error(), "debezium or flink-cdc") {
+		t.Fatal(err)
 	}
 }

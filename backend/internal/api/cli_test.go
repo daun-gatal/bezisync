@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -201,5 +202,45 @@ func TestCLIDocumentsAndKeys(t *testing.T) {
 	}
 	if code, out, _ := runCLI(t, "", "--version"); code != 0 || !strings.Contains(out, version.Version) {
 		t.Fatal(code, out)
+	}
+}
+
+// Saved positions and Start over from the command line, with --yes for what changes the resume point.
+func TestCLIFlinkPositions(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe, _ := flinkPipeline(t, e)
+	ids := savePositions(t, shortOf(pipe.Str("id")), 2)
+	token := e.admin.post("/api/v1/auth/tokens", map[string]any{"name": "cli"}).expect(201).Str("token")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BEZISYNC_URL", e.srv.URL)
+	t.Setenv("BEZISYNC_TOKEN", token)
+	code, out, stderr := runCLI(t, "", "remote", "get")
+	if code != 0 || !strings.Contains(out, "ENGINE") || !strings.Contains(out, "flink-cdc") {
+		t.Fatal(code, out, stderr)
+	}
+	code, out, _ = runCLI(t, "", "remote", "pipelines", "positions", "lake-flink")
+	if code != 0 || !strings.Contains(out, "checkpoint") || strings.Count(out, "\n") != 3 {
+		t.Fatal(code, out)
+	}
+	first := strconv.FormatInt(ids[0], 10)
+	if code, _, stderr := runCLI(t, "", "remote", "pipelines", "restore", "lake-flink", first); code == 0 || !strings.Contains(stderr, "--yes") {
+		t.Fatal(code, stderr)
+	}
+	code, out, stderr = runCLI(t, "", "remote", "pipelines", "restore", "lake-flink", first, "--yes")
+	if code != 0 || !strings.Contains(out, "resumes from position #") {
+		t.Fatal(code, out, stderr)
+	}
+	if code, _, stderr := runCLI(t, "", "remote", "pipelines", "start-over", "lake-flink", "--from-now", "--from-scratch", "--yes"); code == 0 ||
+		!strings.Contains(stderr, "choose one") {
+		t.Fatal(code, stderr)
+	}
+	// A PostgreSQL slot can't go back: the server's reason reaches the terminal.
+	if code, _, stderr := runCLI(t, "", "remote", "pipelines", "start-over", "lake-flink", "--since", "2026-01-01T00:00:00Z", "--yes"); code == 0 ||
+		!strings.Contains(stderr, "PostgreSQL") {
+		t.Fatal(code, stderr)
+	}
+	code, out, stderr = runCLI(t, "", "remote", "pipelines", "start-over", "lake-flink", "--from-scratch", "--yes")
+	if code != 0 || !strings.Contains(out, "starts over") {
+		t.Fatal(code, out, stderr)
 	}
 }

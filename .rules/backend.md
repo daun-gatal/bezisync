@@ -283,6 +283,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   are refused. Debezium's sizes, row-identity and partitioning checks are skipped
   (`PipelineFacts.FlinkCDC`); the controller's latency target allows the commit interval. iceberg-go
   applies the equality deletes Flink writes, so the Rows view is right.
+- Flink CDC for agents and scripts: MCP tools `list_engines`, `list_saved_positions`,
+  `restore_saved_position` (destructive, off by default), `engine` on `create_pipeline` /
+  `update_pipeline` / `add_debezium_catalog_image` / `get_debezium_catalog`, `from_time` on
+  `reset_pipeline_offsets`, `component` on `get_pipeline_logs`. Manifests carry `spec.engine` (written
+  only for Flink CDC, so Debezium manifests never change) and `flinkCdcImage`. The CLI adds
+  `remote pipelines positions|restore|start-over` (the last two need `--yes`) and an ENGINE column.
 - Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll
   never hands a Flink CDC workload to an agent without it (an older agent would start it as a
   Debezium container), and `AgentDriver.Apply` refuses it with the release to upgrade to

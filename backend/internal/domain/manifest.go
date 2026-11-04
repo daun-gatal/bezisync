@@ -32,6 +32,8 @@ type ParsedPipeline struct {
 	SinkConnection   *string
 	Runtime          *string
 	Spec             PipelineSpec
+	// Engine is spec.engine ("" when the manifest leaves it to BeziSync).
+	Engine string
 }
 
 // ParseDocuments splits YAML text into manifest documents (mappings).
@@ -164,6 +166,20 @@ func FromDocument(doc map[string]any) (*ParsedPipeline, error) {
 		delete(body, "debeziumImage")
 		body["debezium_image"] = img
 	}
+	if img, ok := body["flinkCdcImage"]; ok {
+		delete(body, "flinkCdcImage")
+		body["flink_cdc_image"] = img
+	}
+	engine := ""
+	if e, ok := body["engine"]; ok {
+		delete(body, "engine")
+		s, ok := e.(string)
+		if !ok || (s != "debezium" && s != "flink-cdc") {
+			return nil, &ManifestError{Message: "spec.engine is debezium or flink-cdc.",
+				Errors: []map[string]any{{"loc": []string{"spec", "engine"}, "message": "must be debezium or flink-cdc"}}}
+		}
+		engine = s
+	}
 	sv := &val.V{}
 	parsed, ok := ParseSpec(sv, nil, body)
 	if !ok {
@@ -175,7 +191,7 @@ func FromDocument(doc map[string]any) (*ParsedPipeline, error) {
 	}
 	return &ParsedPipeline{
 		Name: meta.name, Description: meta.description, Owner: meta.owner, Labels: meta.labels,
-		SourceConnection: sc, SinkConnection: sinkName, Runtime: runtimeName, Spec: parsed,
+		SourceConnection: sc, SinkConnection: sinkName, Runtime: runtimeName, Spec: parsed, Engine: engine,
 	}, nil
 }
 
@@ -192,10 +208,12 @@ func copyMap(x any) map[string]any {
 }
 
 // ToDocument renders a pipeline as a manifest document (ordered like the Python dict).
+// engine is written only for Flink CDC (Debezium manifests stay as they always were).
 func ToDocument(name, project, description, owner string, labels map[string]string,
-	sourceConnection string, sinkConnection, runtime *string, spec PipelineSpec) *om.Map {
+	sourceConnection string, sinkConnection, runtime *string, spec PipelineSpec, engine string) *om.Map {
 	body := spec.Dump()
 	image, _ := body.Pop("debezium_image")
+	flinkImage, _ := body.Pop("flink_cdc_image")
 	src, _ := body.Get("source")
 	newSrc := om.New().Set("connection", sourceConnection)
 	for _, k := range src.(*om.Map).Keys() {
@@ -218,6 +236,12 @@ func ToDocument(name, project, description, owner string, labels map[string]stri
 	}
 	if s, ok := image.(string); ok && s != "" {
 		body.Set("debeziumImage", s)
+	}
+	if s, ok := flinkImage.(string); ok && s != "" {
+		body.Set("flinkCdcImage", s)
+	}
+	if engine == "flink-cdc" {
+		body.SetFirst("engine", engine)
 	}
 	metadata := om.New().Set("name", name).Set("project", project)
 	if description != "" {

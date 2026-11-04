@@ -196,14 +196,15 @@ func buildCatalog() []*Tool {
 				return cl.do(http.MethodGet, p+"/metrics"+query("range", cl.s("range")), nil)
 			}},
 		{Name: "get_pipeline_logs", Title: "Connector logs", Kind: Read, Project: true, Perm: auth.PipelineView,
-			Description: "The latest Debezium Server log lines of the pipeline's connector.",
-			Params:      []Param{pipelineArg, opt("tail", num("How many lines (default 200)."))},
+			Description: "The latest log lines of the pipeline's connector (a Flink CDC pipeline: of one component).",
+			Params: []Param{pipelineArg, opt("tail", num("How many lines (default 200).")),
+				opt("component", str("Flink CDC only: jobmanager (default), taskmanager-<n> or tunnel."))},
 			Call: func(cl *call) (any, error) {
 				p, err := cl.pipeline()
 				if err != nil {
 					return nil, err
 				}
-				return cl.do(http.MethodGet, p+"/logs"+query("tail", cl.intArg("tail")), nil)
+				return cl.do(http.MethodGet, p+"/logs"+query("tail", cl.intArg("tail"), "component", cl.s("component")), nil)
 			}},
 		{Name: "read_pipeline_events", Title: "Read delivered events", Kind: Read, Project: true, Perm: auth.PipelinePreviewData,
 			Description: "Recent events as the destination received them. Values that look like personal data are always masked here.",
@@ -251,13 +252,14 @@ func buildCatalog() []*Tool {
 			Params: []Param{req("name", str("A unique name in the project.")), req("source", str("The source connection's id or name.")),
 				opt("destination", str("The destination connection's id or name.")), opt("runtime", str("The runtime's id or name.")),
 				opt("spec", pipelineSpec), opt("owner", str("Owning team.")), opt("description", str("What it is for.")),
-				opt("labels", obj("Labels (string values).")), opt("template_id", str("Start from this template."))},
+				opt("labels", obj("Labels (string values).")), opt("template_id", str("Start from this template.")),
+				opt("engine", oneOf("The engine: debezium (events, the default where it fits) or flink-cdc (tables kept in sync; StarRocks, Doris, Fluss and Iceberg).", "debezium", "flink-cdc"))},
 			Call: func(cl *call) (any, error) {
 				b, err := cl.base()
 				if err != nil {
 					return nil, err
 				}
-				body := cl.body("name", "spec", "owner", "description", "labels", "template_id")
+				body := cl.body("name", "spec", "owner", "description", "labels", "template_id", "engine")
 				if body["source_id"], err = cl.connection("source"); err != nil {
 					return nil, err
 				}
@@ -277,13 +279,13 @@ func buildCatalog() []*Tool {
 			Description: "Saves the change as a version: your undeployed draft is updated in place, otherwise a new version starts (deployed pipelines keep running the deployed version until deploy_pipeline).",
 			Params: []Param{pipelineArg, opt("spec", pipelineSpec), opt("name", str("New name.")), opt("description", str("")), opt("owner", str("")),
 				opt("labels", obj("")), opt("destination", str("Another destination connection (id or name).")), opt("runtime", str("Another runtime (id or name).")),
-				opt("note", str("Why you changed it (shown in the version history).")), expectedVersion()},
+				opt("note", str("Why you changed it (shown in the version history).")), opt("engine", oneOf("The engine: debezium (events, the default where it fits) or flink-cdc (tables kept in sync; StarRocks, Doris, Fluss and Iceberg).", "debezium", "flink-cdc")), expectedVersion()},
 			Call: func(cl *call) (any, error) {
 				p, err := cl.pipeline()
 				if err != nil {
 					return nil, err
 				}
-				body := cl.body("spec", "name", "description", "owner", "labels", "note")
+				body := cl.body("spec", "name", "description", "owner", "labels", "note", "engine")
 				if cl.has("destination") {
 					if body["sink_id"], err = cl.connection("destination"); err != nil {
 						return nil, err
@@ -361,9 +363,23 @@ func buildCatalog() []*Tool {
 			Description: "Maps an existing Debezium Server application.properties to a BeziSync spec without saving anything (plain passwords are never kept).",
 			Params:      []Param{req("properties", str("The file's text."))}, Call: send(http.MethodPost, at("/pipelines:adopt"), "properties")},
 		{Name: "reset_pipeline_offsets", Title: "Reset the stored position", Kind: Destructive, Project: true, Perm: auth.OffsetsReset,
-			Description: "Re-copies everything (resnapshot) or skips to now (changes in between are lost). Type the pipeline's name in confirm.",
-			Params:      []Param{pipelineArg, req("mode", oneOf("What to do.", "resnapshot", "skip_to_now")), req("confirm", str("The pipeline's name, to confirm."))},
-			Call:        send(http.MethodPost, onPipeline("/offsets/reset"), "mode", "confirm")},
+			Description: "Starts a paused pipeline over: re-copies everything (resnapshot), skips to now (changes in between are lost) or, on Flink CDC from MySQL or SQL Server, reads changes since from_time. Type the pipeline's name in confirm.",
+			Params: []Param{pipelineArg, req("mode", oneOf("What to do.", "resnapshot", "skip_to_now", "from_time")), req("confirm", str("The pipeline's name, to confirm.")),
+				opt("from_time", str("With from_time: an RFC 3339 time in the past."))},
+			Call: send(http.MethodPost, onPipeline("/offsets/reset"), "mode", "confirm", "from_time")},
+		{Name: "list_saved_positions", Title: "Saved positions", Kind: Read, Project: true, Perm: auth.PipelineView,
+			Description: "A Flink CDC pipeline's saved positions, newest first; it resumes from the newest current one.",
+			Params:      []Param{pipelineArg}, Call: get(onPipeline("/positions"))},
+		{Name: "restore_saved_position", Title: "Restore a saved position", Kind: Destructive, Project: true, Perm: auth.OffsetsReset,
+			Description: "Makes a paused Flink CDC pipeline resume from an earlier saved position (changes after it are read again). Type the pipeline's name in confirm.",
+			Params:      []Param{pipelineArg, req("position_id", num("The saved position's id (list_saved_positions).")), req("confirm", str("The pipeline's name, to confirm."))},
+			Call: func(cl *call) (any, error) {
+				p, err := cl.pipeline()
+				if err != nil {
+					return nil, err
+				}
+				return cl.do(http.MethodPost, p+"/positions/"+cl.intArg("position_id")+"/restore", cl.body("confirm"))
+			}},
 		{Name: "delete_pipeline", Title: "Delete a pipeline", Kind: Destructive, Project: true, Perm: auth.PipelineEdit,
 			Description: "Stops the connector and removes the replication slot and its artifacts.",
 			Params:      []Param{pipelineArg, opt("drop_destinations", flag("Also delete the topics/tables it wrote to."))},
@@ -379,16 +395,24 @@ func buildCatalog() []*Tool {
 		{Name: "list_debezium_versions", Title: "Debezium versions in use", Kind: Read, Project: true, Perm: auth.PipelineView,
 			Description: "Pipelines grouped by the Debezium Server image they run, and how each image stands in the catalog.",
 			Call:        get(at("/debezium-images"))},
-		{Name: "get_debezium_catalog", Title: "Debezium version catalog", Kind: Read,
-			Description: "The images Admins offer, the default and deprecated ones.", Call: get(fixed("/api/v1/debezium-catalog"))},
+		{Name: "get_debezium_catalog", Title: "Engine image catalog", Kind: Read,
+			Description: "The images Admins offer for an engine (Debezium by default), the default and deprecated ones.",
+			Params:      []Param{opt("engine", oneOf("Which engine's images.", "debezium", "flink-cdc"))},
+			Call: func(cl *call) (any, error) {
+				return cl.do(http.MethodGet, "/api/v1/debezium-catalog"+query("engine", cl.s("engine")), nil)
+			}},
+		{Name: "list_engines", Title: "Engines", Kind: Read,
+			Description: "The engines, whether each can run pipelines now (Flink CDC once an Admin registers an image), what each reads and writes, and Flink CDC's settings and sizes.",
+			Call:        get(fixed("/api/v1/engines"))},
 		{Name: "move_pipelines_to_debezium_version", Title: "Move pipelines to a Debezium version", Kind: Write, Project: true, Perm: auth.PipelineDeploy,
 			Description: "Saves a new version of each pipeline with another image; deploy true ships them (approvals apply).",
 			Params:      []Param{req("pipeline_ids", strs("Pipeline ids.")), opt("image", str("The image; the default when left out.")), opt("deploy", flag("Deploy each after saving."))},
 			Call:        send(http.MethodPost, at("/debezium-images:apply"), "pipeline_ids", "image", "deploy")},
-		{Name: "add_debezium_catalog_image", Title: "Add a Debezium image", Kind: Write, Admin: true,
-			Description: "Offers another Debezium Server image to every project.",
-			Params:      []Param{req("image", str("Image reference.")), opt("label", str("")), opt("notes", str("")), opt("is_default", flag("Make it the default."))},
-			Call:        send(http.MethodPost, fixed("/api/v1/debezium-catalog"), "image", "label", "notes", "is_default")},
+		{Name: "add_debezium_catalog_image", Title: "Add an engine image", Kind: Write, Admin: true,
+			Description: "Offers another image to every project: a Debezium Server image, or a Flink CDC image (the first one turns Flink CDC on).",
+			Params: []Param{req("image", str("Image reference.")), opt("label", str("")), opt("notes", str("")), opt("is_default", flag("Make it the default.")),
+				opt("engine", oneOf("The engine the image runs (default debezium).", "debezium", "flink-cdc"))},
+			Call: send(http.MethodPost, fixed("/api/v1/debezium-catalog"), "image", "label", "notes", "is_default", "engine")},
 		{Name: "update_debezium_catalog_image", Title: "Change a Debezium image", Kind: Write, Admin: true,
 			Description: "Labels, deprecates or makes an image the default.",
 			Params:      []Param{req("image_id", str("Catalog entry id.")), opt("label", str("")), opt("notes", str("")), opt("deprecated", flag("")), opt("is_default", flag(""))},
