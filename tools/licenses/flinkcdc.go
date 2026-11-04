@@ -26,5 +26,6 @@ var FlinkCDCArtifacts = []Artifact{
 	{"hadoop-client-api-3.3.6.jar", "Apache-2.0"},
 	{"hadoop-client-runtime-3.3.6.jar", "Apache-2.0"},
 	{"commons-logging-1.3.5.jar", "Apache-2.0"},
+	{"iceberg-aws-bundle-1.10.1.jar", "Apache-2.0"},
 	{"flink-shaded-guava-31.1-jre-17.0.jar", "Apache-2.0"},
 }

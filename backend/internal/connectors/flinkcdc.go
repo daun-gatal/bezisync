@@ -47,6 +47,12 @@ type FlinkBlock struct {
 	Connector string
 	// Drivers are JDBC drivers the image must add (drivers/), e.g. "mysql".
 	Drivers []string
+	// Extra are more connector JARs the destination needs (e.g. Iceberg's AWS bundle).
+	Extra []string
+	// Projection are columns a destination adds to every table ("__data_event_type__ AS __op"),
+	// and Converter how its transform turns changes into rows ("SOFT_DELETE": keep deleted rows).
+	Projection []string
+	Converter  string
 }
 
 // FlinkEndpoint is where the pipeline reaches the source: the connection's host, or the SSH

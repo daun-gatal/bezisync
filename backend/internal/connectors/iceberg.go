@@ -597,7 +597,9 @@ func (s *icebergSink) CheckPipeline(ctx context.Context, conn Resolved, c Compil
 			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Choose \"Every change appended\" in the Destination step."}})
 	}
 	keys, _ := facts.Options["partitions"].(map[string]any)
-	if facts.Tables != nil && upsert {
+	// On Flink CDC a table without a key fails preflight (flink_primary_key), and tables are not
+	// partitioned.
+	if facts.Tables != nil && upsert && !facts.FlinkCDC {
 		var keyless, stale []string
 		for _, t := range facts.Tables {
 			key := t.PrimaryKey

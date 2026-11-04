@@ -190,7 +190,7 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 		owner[dest], destinations[t] = t, dest
 		routes = append(routes, yamlMap{{"source-table", fsrc.FlinkTableID(source, t)}, {"sink-table", dest}})
 	}
-	transforms, err := flinkTransforms(c, fsrc, source, in.Columns, fc.NewColumns)
+	transforms, err := flinkTransforms(c, fsrc, source, in.Columns, fc.NewColumns, snkBlock)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +218,7 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	drivers := append(slices.Clone(srcBlock.Drivers), snkBlock.Drivers...)
 	slices.Sort(drivers)
 	settings, err := json.MarshalIndent(flinkhelper.Settings{PipelineID: c.PipelineID, ShortID: c.ShortID,
-		Connectors: flinkConnectors(srcBlock.Connector, snkBlock.Connector), Drivers: slices.Compact(drivers), TaskManagers: size.TaskManagers,
+		Connectors: append(flinkConnectors(srcBlock.Connector, snkBlock.Connector), snkBlock.Extra...), Drivers: slices.Compact(drivers), TaskManagers: size.TaskManagers,
 		Restore: "latest", RestoreAfter: in.RestoreAfter, StateDir: runtime.FlinkStateDir, KeepCheckpoints: 5, HealthPort: HTTPPort,
 		StopTimeoutSeconds: FlinkStopTimeout}, "", "  ")
 	if err != nil {

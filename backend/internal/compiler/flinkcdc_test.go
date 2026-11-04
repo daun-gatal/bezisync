@@ -31,8 +31,12 @@ func (*flinkTestSink) CompileSink(connectors.Resolved, connectors.CompileContext
 	return nil, nil, nil
 }
 func (*flinkTestSink) FlinkSink(conn connectors.Resolved, _ connectors.CompileContext) (*connectors.FlinkBlock, error) {
-	return &connectors.FlinkBlock{Options: connectors.FlinkOptions{{"type", "values"}, {"token", "${BZ_SINK_TOKEN}"}},
-		Env: map[string]string{"BZ_SINK_TOKEN": conn.Secrets["token"].(string)}, Connector: "values"}, nil
+	b := &connectors.FlinkBlock{Options: connectors.FlinkOptions{{"type", "values"}, {"token", "${BZ_SINK_TOKEN}"}},
+		Env: map[string]string{"BZ_SINK_TOKEN": conn.Secrets["token"].(string)}, Connector: "values"}
+	if conn.Config["soft"] == true { // a destination that keeps deleted rows, marked
+		b.Projection, b.Converter, b.Extra = []string{"__data_event_type__ AS `__op`"}, "SOFT_DELETE", []string{"values-extra"}
+	}
+	return b, nil
 }
 func (*flinkTestSink) FlinkDestination(_ connectors.Resolved, _ connectors.CompileContext, routed string) string {
 	return "lake." + routed
@@ -277,5 +281,23 @@ func TestCompileFlinkRefuses(t *testing.T) {
 				t.Fatalf("got %v, want %s", err, c.code)
 			}
 		})
+	}
+}
+
+// A destination's own columns and converter reach every table's transform, even one written as
+// it is; its extra JARs are linked.
+func TestCompileFlinkSinkTransform(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"sink": map[string]any{"naming": "{schema}_{table}"}, "flink_cdc": map[string]any{"new_columns": "send"}})
+	soft := testSink
+	soft.Config = map[string]any{"soft": true}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, soft, "acme/flink-cdc:3.7.0", secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Pipeline, "projection: \"*, __data_event_type__ AS `__op`\"") || !strings.Contains(got.Pipeline, `converter-after-transform: "SOFT_DELETE"`) ||
+		!strings.Contains(got.Settings, `"values-extra"`) {
+		t.Fatal(got.Pipeline, got.Settings)
 	}
 }

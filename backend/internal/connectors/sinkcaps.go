@@ -359,6 +359,8 @@ type PipelineFacts struct {
 	Tables []TableInfo
 	// Options are the validated sink options.
 	Options map[string]any
+	// FlinkCDC: the pipeline runs on Flink CDC (Debezium's sizes, keys and partitioning don't apply).
+	FlinkCDC bool
 }
 
 // PipelineChecker is implemented by sinks with checks that depend on the pipeline (its tables,

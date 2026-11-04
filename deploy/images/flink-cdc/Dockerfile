@@ -51,6 +51,10 @@ ADD --checksum=sha256:15f01bc804294df06d2effc87de363a83cf589f50558bdbf48f72541ad
 ADD --checksum=sha256:6d7a744e4027649fbb50895df9497d109f98c766a637062fe8d2eabbb3140ba4 \
     ${MAVEN}/commons-logging/commons-logging/1.3.5/commons-logging-1.3.5.jar /fetch/connectors/commons-logging.jar
 # Flink CDC on Flink 2.2 also needs the older shaded Guava on Flink's own classpath (FLINK-39429).
+# Iceberg's S3 file IO, Glue catalog and request signing need the AWS SDK (the Flink CDC connector
+# bundles Iceberg 1.10.1 without it).
+ADD --checksum=sha256:86bf20892ea5b4c17688f19b075399885f6aa5303f6b2dc9f491e76ceef9633b \
+    ${MAVEN}/org/apache/iceberg/iceberg-aws-bundle/1.10.1/iceberg-aws-bundle-1.10.1.jar /fetch/connectors/iceberg-aws.jar
 ADD --checksum=sha256:03442ae97c4ca34388568cbce0e67e9911b0137b2b3849dff7a550008d5a4336 \
     ${MAVEN}/org/apache/flink/flink-shaded-guava/31.1-jre-17.0/flink-shaded-guava-31.1-jre-17.0.jar /fetch/flink-lib/flink-shaded-guava-31.1-jre-17.0.jar
 RUN set -eu; cd /fetch; \

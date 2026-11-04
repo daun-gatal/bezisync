@@ -426,7 +426,11 @@ func (c *Controller) Reconcile(ctx context.Context, id uuid.UUID) error {
 			risk = &domain.Reason{Code: "source_at_risk", Message: fmt.Sprint(impact["risk"]), Fix: strOf(impact["risk_fix"]), Severity: sev}
 		}
 		latencyTarget := float64(spec.Policies.LatencyTargetSeconds * 1000)
-		if sinkType, err := services.SinkTypeOf(ctx, tx, p); err == nil {
+		if flink {
+			// Changes wait for the next save (Iceberg commits then) or load on purpose.
+			fc := spec.FlinkCDC.Effective()
+			latencyTarget = max(latencyTarget, 1.5*float64(max(fc.CommitSeconds, fc.FreshnessSeconds)*1000))
+		} else if sinkType, err := services.SinkTypeOf(ctx, tx, p); err == nil {
 			// A sink that commits at an interval (Iceberg) holds changes back on purpose.
 			latencyTarget = max(latencyTarget, 1.5*float64(connectors.DeliveryDelay(sinkType, spec).Milliseconds()))
 		}

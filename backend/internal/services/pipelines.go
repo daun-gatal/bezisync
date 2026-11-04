@@ -952,7 +952,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	configChecks = append(configChecks, personalDataChecks(ctx, srcDesc, discover, spec)...)
 	if sinkDesc != nil && compiled != nil {
 		cctx := connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec}
-		configChecks = append(configChecks, sinkChecks(ctx, sink, sinkDesc, cctx, compiled.Destinations, discover)...)
+		configChecks = append(configChecks, sinkChecks(ctx, sink, sinkDesc, cctx, compiled.Destinations, discover, flink)...)
 	}
 	sections = append(sections, PreflightSection{Key: "config", Title: "Configuration", Report: checks.Summarize(configChecks, started)})
 	if flink {

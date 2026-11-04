@@ -271,6 +271,16 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   sign-in only (no TLS documented upstream). A Flink CDC
   pipeline resolves its image with `ResolvePipelineImage` (deploy) and is left out of the Debezium
   versions usage and upgrades; the sink spec's event format is checked for Debezium only.
+- Iceberg on Flink CDC (`connectors/iceberg_flink.go`): the same REST/Glue connections; Iceberg 1.10
+  comes with the Flink CDC connector, its AWS SDK from `iceberg-aws-bundle` (reference image,
+  `settings.json` connector `iceberg-aws` via `FlinkBlock.Extra`). Storage and signing keys are
+  catalog properties with placeholders (the TaskManagers write the files and get no environment
+  secrets); Glue signs in with the runtime's role, so static keys are refused there. "Keep deleted
+  rows" (`upsert_keep_deletes`) is Flink CDC's `SOFT_DELETE` with `__op` = its change type
+  (`FlinkBlock.Projection`/`Converter` reach every table's transform); append and bucket partitions
+  are refused. Debezium's sizes, row-identity and partitioning checks are skipped
+  (`PipelineFacts.FlinkCDC`); the controller's latency target allows the commit interval. iceberg-go
+  applies the equality deletes Flink writes, so the Rows view is right.
 - Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll
   never hands a Flink CDC workload to an agent without it (an older agent would start it as a
   Debezium container), and `AgentDriver.Apply` refuses it with the release to upgrade to

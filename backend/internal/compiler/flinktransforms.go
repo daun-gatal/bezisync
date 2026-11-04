@@ -20,7 +20,7 @@ import (
 var flinkEventTypes = map[string][]string{"insert": {"+I"}, "snapshot": {"+I"}, "update": {"-U", "+U"}, "delete": {"-D"}}
 
 func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, source connectors.Resolved, columns map[string][]string,
-	newColumns string) ([]yamlMap, error) {
+	newColumns string, sink *connectors.FlinkBlock) ([]yamlMap, error) {
 	spec := c.Spec
 	if masked := maskedColumns(spec); len(masked) > 0 {
 		return nil, problem.New(422, "mask_unsupported",
@@ -96,9 +96,9 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		} else {
 			projection = []string{"*"}
 		}
-		projection = append(projection, added...)
+		projection = append(append(projection, added...), sink.Projection...)
 		keys := spec.Keys[table]
-		if !explicit && len(added) == 0 && len(filters) == 0 && len(keys) == 0 {
+		if !explicit && len(added) == 0 && len(filters) == 0 && len(keys) == 0 && len(sink.Projection) == 0 && sink.Converter == "" {
 			continue // written as it is
 		}
 		rule := yamlMap{{"source-table", src.FlinkTableID(source, table)}, {"projection", strings.Join(projection, ", ")}}
@@ -117,6 +117,9 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				names[i] = k
 			}
 			rule = append(rule, yamlKV{"primary-keys", strings.Join(names, ",")})
+		}
+		if sink.Converter != "" {
+			rule = append(rule, yamlKV{"converter-after-transform", sink.Converter})
 		}
 		out = append(out, rule)
 	}
