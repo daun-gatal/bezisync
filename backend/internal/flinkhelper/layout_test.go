@@ -121,6 +121,36 @@ func TestPrepareWritesTheKeystore(t *testing.T) {
 	}
 }
 
+// Secret settings (the keystore password) go into the private config.yaml, quoted, never into
+// the dynamic properties a command line carries.
+func TestPrepareAppendsSecretSettings(t *testing.T) {
+	l := fakeImage(t, []string{"mysql"})
+	l.SecretsDir = filepath.Join(t.TempDir(), "secrets")
+	if err := os.MkdirAll(l.SecretsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(l.SecretsDir, SecretSettingsFile), []byte("security.ssl.internal.keystore-password: p\"w: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Prepare(validSettings("mysql")); err != nil {
+		t.Fatal(err)
+	}
+	conf, _ := os.ReadFile(filepath.Join(l.ConfDir(), "config.yaml"))
+	if !strings.HasPrefix(string(conf), "image: default\n") || !strings.Contains(string(conf), `security.ssl.internal.keystore-password: "p\"w: x"`) {
+		t.Fatalf("%s", conf)
+	}
+	dyn, _ := l.DynamicProperties()
+	if strings.Contains(strings.Join(dyn, " "), "keystore-password") {
+		t.Fatal("a secret reached the dynamic properties")
+	}
+	if err := os.WriteFile(filepath.Join(l.SecretsDir, SecretSettingsFile), []byte("no colon\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Prepare(validSettings("mysql")); err == nil {
+		t.Fatal("accepted a bad line")
+	}
+}
+
 func TestPrepareExplainsWhatTheImageLacks(t *testing.T) {
 	l := fakeImage(t, []string{"mysql", "starrocks"})
 	s := validSettings("mysql", "starrocks")

@@ -100,9 +100,66 @@ func (l Layout) Prepare(s Settings) error {
 			return err
 		}
 	}
+	if err := l.appendSecretSettings(filepath.Join(conf, "config.yaml")); err != nil {
+		return err
+	}
 	// Logs go to the console only: the root filesystem is read-only, and rolling files in tmpfs
 	// would hold up to a gigabyte of memory. The runtime keeps the container's output.
 	return os.WriteFile(filepath.Join(conf, "log4j-console.properties"), []byte(consoleLogging), 0o600) //nolint:gosec // the helper's own work dir
+}
+
+// SecretSettingsFile (in the secrets dir) holds Flink settings that are secrets (the keystore
+// password), one "key: value" per line. They go into the private config.yaml, never onto a
+// command line, which the JVM logs.
+const SecretSettingsFile = "flink-secrets.conf" //nolint:gosec // a file name, not a credential
+
+func (l Layout) appendSecretSettings(configYAML string) error {
+	if l.SecretsDir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(l.SecretsDir, SecretSettingsFile)) //nolint:gosec // BeziSync's secrets dir
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	lines, err := settingLines(string(raw), SecretSettingsFile)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.WriteString("\n# BeziSync: secret settings\n")
+	for _, kv := range lines {
+		b.WriteString(kv[0] + ": " + quoteScalar(kv[1]) + "\n")
+	}
+	f, err := os.OpenFile(configYAML, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600) //nolint:gosec // the helper's own work dir
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(b.String()); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// settingLines reads "key: value" lines (blank lines and # comments skipped).
+func settingLines(raw, name string) ([][2]string, error) {
+	var out [][2]string
+	for n, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if !ok || key == "" || strings.ContainsAny(key, " \t") {
+			return nil, fmt.Errorf("%s line %d: want \"key: value\"", name, n+1)
+		}
+		out = append(out, [2]string{key, value})
+	}
+	return out, nil
 }
 
 // consoleLogging is log4j-console.properties: Flink's console appender and levels, no files.
@@ -132,18 +189,13 @@ func (l Layout) DynamicProperties() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []string
-	for n, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, ":")
-		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
-		if !ok || key == "" || strings.ContainsAny(key, " \t") {
-			return nil, fmt.Errorf("flink-conf.yaml line %d: want \"key: value\"", n+1)
-		}
-		out = append(out, "-D", key+"="+value)
+	lines, err := settingLines(string(raw), "flink-conf.yaml")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, 2*len(lines))
+	for _, kv := range lines {
+		out = append(out, "-D", kv[0]+"="+kv[1])
 	}
 	return out, nil
 }

@@ -2,6 +2,7 @@ package flinkhelper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -320,6 +321,26 @@ func (m *JobManager) extract(ctx context.Context, id int64) (string, error) {
 	return dir, nil
 }
 
+// RenderSecrets replaces each ${BZ_…} placeholder (always a whole YAML value) with the
+// variable's value as a double-quoted scalar, so no value can end the scalar or add keys.
+func RenderSecrets(tmpl string, getenv func(string) string) string {
+	return os.Expand(tmpl, func(name string) string {
+		if strings.HasPrefix(name, "BZ_") {
+			return quoteScalar(getenv(name))
+		}
+		return "${" + name + "}"
+	})
+}
+
+// quoteScalar is s as a YAML double-quoted scalar (JSON string escapes are valid YAML).
+func quoteScalar(s string) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
 var jobIDLine = regexp.MustCompile(`Job ID:\s*([0-9a-f]{32})`)
 
 // submit renders the pipeline with its secrets into a private file, submits it and deletes the
@@ -330,12 +351,7 @@ func (m *JobManager) submit(ctx context.Context, restore string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	rendered := os.Expand(string(tmpl), func(name string) string {
-		if strings.HasPrefix(name, "BZ_") {
-			return m.Getenv(name)
-		}
-		return "${" + name + "}"
-	})
+	rendered := RenderSecrets(string(tmpl), m.Getenv)
 	path := filepath.Join(m.Layout.WorkDir, "pipeline.yaml")
 	if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil { //nolint:gosec // the helper's own work dir
 		return "", err

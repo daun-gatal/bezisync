@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // fakeJob is one job of the fake cluster: its states advance on every poll of /jobs/{id}.
@@ -329,7 +331,7 @@ func TestJobManagerRunsStoresAndStopsWithSavepoint(t *testing.T) {
 	if strings.Contains(strings.Join(args, " "), "-s ") || args[1] != "-t" || args[2] != "remote" {
 		t.Fatal(args)
 	}
-	if r := rendered[0]; !strings.Contains(r, "password: s3cret") || !strings.Contains(r, "${NOT_OURS}") {
+	if r := rendered[0]; !strings.Contains(r, `password: "s3cret"`) || !strings.Contains(r, "${NOT_OURS}") {
 		t.Fatal(r)
 	}
 	if _, err := os.Stat(args[0]); !os.IsNotExist(err) {
@@ -498,5 +500,28 @@ func TestJobManagerExitsWhenFlinkDies(t *testing.T) {
 		h.result <- nil
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run kept going after the JobManager died")
+	}
+}
+
+// A secret can't end its YAML value or add keys, whatever it contains.
+func TestRenderSecretsQuotesValues(t *testing.T) {
+	tmpl := "source:\n  password: ${BZ_PW}\n  user: \"u\"\nsink:\n  token: ${BZ_EMPTY}\n"
+	for _, pw := range []string{`p"w`, "a\nsink:\n  type: evil", `back\slash: {x}`, "#not-a-comment", "unicode ✓  ", "${BZ_PW}"} {
+		out := RenderSecrets(tmpl, func(k string) string {
+			if k == "BZ_PW" {
+				return pw
+			}
+			return ""
+		})
+		var doc struct {
+			Source map[string]string `yaml:"source"`
+			Sink   map[string]string `yaml:"sink"`
+		}
+		if err := yaml.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatalf("%q: %v\n%s", pw, err, out)
+		}
+		if doc.Source["password"] != pw || doc.Source["user"] != "u" || len(doc.Sink) != 1 || doc.Sink["token"] != "" {
+			t.Fatalf("%q rendered as %+v", pw, doc)
+		}
 	}
 }

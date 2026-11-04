@@ -25,6 +25,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/logging"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
@@ -899,6 +900,12 @@ func (c *Controller) prepareIfNeeded(ctx context.Context, tx pgx.Tx, p *models.P
 	sourceResults, err := src.Prepare(ctx, resolvedSrc, cctx)
 	if err != nil {
 		return err
+	}
+	if services.EngineOf(p) == engine.FlinkCDC {
+		// The deployed version writes the columns its tables have now.
+		if err := services.RefreshFlinkColumns(ctx, tx, p, spec); err != nil {
+			return err
+		}
 	}
 	compiled, err := services.CompileFor(ctx, tx, p, spec, "")
 	if err != nil {

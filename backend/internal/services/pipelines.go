@@ -15,6 +15,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/auth"
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/compiler"
+	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
@@ -597,8 +598,14 @@ func CompileFor(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 	if err != nil {
 		return nil, err
 	}
+	flink := EngineOf(p) == engine.FlinkCDC
 	if image == "" {
-		if image, err = ResolveImage(ctx, q, spec, rt, sink.Type); err != nil {
+		if flink {
+			image, err = ResolveFlinkImage(ctx, q, spec)
+		} else {
+			image, err = ResolveImage(ctx, q, spec, rt, sink.Type)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -613,6 +620,17 @@ func CompileFor(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 	snk, err := Resolve(ctx, q, sink)
 	if err != nil {
 		return nil, err
+	}
+	if flink {
+		in, err := flinkInput(ctx, q, p, spec, rt)
+		if err != nil {
+			return nil, err
+		}
+		f, err := compiler.CompileFlink(cctx, src, snk, image, *in)
+		if err != nil {
+			return nil, err
+		}
+		return compiler.FromFlink(f), nil
 	}
 	return compiler.Compile(cctx, src, snk, image)
 }
@@ -660,6 +678,12 @@ func WorkloadFor(ctx context.Context, q db.Querier, p *models.Pipeline) (*runtim
 	files := c.Files
 	if files == nil {
 		files = map[string]string{}
+	}
+	if c.Flink != nil {
+		return &runtime.Workload{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Image: c.Image, Env: c.Env, Files: files,
+			ConfigHash: c.ConfigHash(), Running: p.DesiredState == "running", ImagePullSecrets: pull, ServiceAccount: sa, Tunnel: c.Tunnel,
+			HealthPort: c.HealthPort, Engine: string(engine.FlinkCDC), Flink: c.Flink.Topology(config.Get().AgentImage),
+			StopGraceSeconds: compiler.FlinkStopGrace}, nil
 	}
 	return &runtime.Workload{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Image: c.Image, Properties: c.Render(),
 		Env: c.Env, Files: files, ConfigHash: c.ConfigHash(), CPU: fmt.Sprint(c.Resources["cpu"]), Memory: fmt.Sprint(c.Resources["memory"]),
@@ -839,6 +863,9 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		destinations = compiled.Destinations
 		cfgCheck = checks.Check{Code: "config_valid", Title: "Configuration", Category: checks.CatDestination, Status: checks.Pass,
 			Message: fmt.Sprintf("Generated %d Debezium Server properties.", len(compiled.Properties))}
+		if compiled.Flink != nil {
+			cfgCheck.Message = fmt.Sprintf("Generated the Flink CDC pipeline: %d tables on %d readers.", len(compiled.Destinations), compiled.Flink.Size.Parallelism())
+		}
 	case errors.As(err, &prob):
 		var msgs []string
 		for _, e := range prob.Errors {
@@ -851,9 +878,19 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		return nil, err
 	}
 	configChecks := []checks.Check{cfgCheck}
-	image, err := ResolveImage(ctx, q, spec, rt, sinkConn.Type)
+	flink := EngineOf(p) == engine.FlinkCDC
+	var image string
+	if flink {
+		image, err = ResolveFlinkImage(ctx, q, spec)
+	} else {
+		image, err = ResolveImage(ctx, q, spec, rt, sinkConn.Type)
+	}
 	if err != nil {
 		return nil, err
+	}
+	catalog := "Debezium"
+	if flink {
+		catalog = "Flink CDC"
 	}
 	standing, err := Standing(ctx, q, image)
 	if connectors.InSinkImageFamily(sinkConn.Type, image) {
@@ -865,17 +902,17 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	}
 	switch standing {
 	case "deprecated":
-		configChecks = append(configChecks, checks.Check{Code: "debezium_image_deprecated", Title: "Debezium version", Category: checks.CatDestination,
-			Status: checks.Warn, Message: image + " is deprecated in the Debezium version catalog.",
+		configChecks = append(configChecks, checks.Check{Code: "debezium_image_deprecated", Title: catalog + " version", Category: checks.CatDestination,
+			Status: checks.Warn, Message: image + " is deprecated in the " + catalog + " version catalog.",
 			Why: "Your Admins marked this image deprecated; move to one they offer."})
 	case "unlisted":
-		configChecks = append(configChecks, checks.Check{Code: "debezium_image_unlisted", Title: "Debezium version", Category: checks.CatDestination,
-			Status: checks.Warn, Message: image + " is not in the Debezium version catalog.",
-			Why: "Your Admins keep a catalog of tested Debezium Server images; this one is not among them."})
+		configChecks = append(configChecks, checks.Check{Code: "debezium_image_unlisted", Title: catalog + " version", Category: checks.CatDestination,
+			Status: checks.Warn, Message: image + " is not in the " + catalog + " version catalog.",
+			Why: "Your Admins keep a catalog of tested " + catalog + " images; this one is not among them."})
 	}
 	srcDesc, _ := connectors.Describe("source", sourceConn.Type)
 	sinkDesc, _ := connectors.Describe("sink", sinkConn.Type)
-	if c := MinimumDebeziumCheck(image, srcDesc); c != nil {
+	if c := MinimumDebeziumCheck(image, srcDesc); c != nil && !flink {
 		configChecks = append(configChecks, *c)
 	}
 	if spec.Policies.DeliveryCanary && !(srcDesc != nil && srcDesc.SupportsCanary && sinkDesc != nil && sinkDesc.Canary) {

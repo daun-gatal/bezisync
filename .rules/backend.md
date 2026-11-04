@@ -226,6 +226,23 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   (hostAliases). Stopping or changing the cluster scales the JobManager to zero alone and touches the
   TaskManagers only once its pod is gone (worked out from the cluster on every Apply, no state).
   The runtime's Role needs `services` (both charts); `Test` reports `details.flink_cdc`.
+- Flink CDC compile (`compiler/flinkcdc.go`, `compiler/flinktransforms.go`, pure): `CompileFlink` renders
+  `pipeline.yaml` (sources and destinations implement `connectors.FlinkSource` / `FlinkSink`; every value
+  is a JSON-quoted YAML scalar and secrets are bare `${BZ_…}` placeholders the helper fills as quoted
+  scalars), `flink-conf.yaml` (BeziSync's keys first, then `engine.FlinkDefaults` and the pipeline's
+  catalogue keys, `engine.FlinkSettings`, which never include anything BeziSync depends on) and
+  `settings.json`. Internal TLS uses the pipeline's ECDSA keystore, so the ECDHE-ECDSA suites are set;
+  its passwords go in the secret file `flink-secrets.conf`, which the helper appends to its private
+  `config.yaml` (never a `-D`: the JVM logs its arguments). Sizes (`engine.FlinkSizes`): parallelism
+  = TaskManagers × 2 slots; managed memory defaults to 5% (the heap state backend never uses it, and
+  Flink's 40% ran a 2 GB TaskManager out of heap on a 2.6M-row copy). Tables are written column by
+  column (exact projection) when new columns are held back, columns are left out or renamed; their
+  columns are read at deploy into `artifacts.flink_columns` (`RefreshFlinkColumns`, in
+  `prepareIfNeeded`) and live only for tables the artifact lacks (previews). Hash masks, scripted
+  filters, outbox, flatten, custom steps, Debezium value formats, advanced properties, copy delays
+  and "copy on every start" are refused with the reason. MySQL server ids: `MyServerIDRange`, blocks
+  of 8 below 2^31 (Flink CDC reads them as signed 32-bit). Table names are letters, digits and `_`
+  only (Flink CDC splits names at dots and reads them as regular expressions).
 - Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll
   never hands a Flink CDC workload to an agent without it (an older agent would start it as a
   Debezium container), and `AgentDriver.Apply` refuses it with the release to upgrade to
