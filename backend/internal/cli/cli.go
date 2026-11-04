@@ -91,6 +91,7 @@ func newRoot(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		Version: version.Version, Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
 	root.CompletionOptions.DisableDefaultCmd = true
+	root.AddCommand(engineCmd(), installSelfCmd())
 	root.AddCommand(apiCmd(), controllerCmd(), agentCmd(), migrateCmd(stdout), openapiCmd(stdout), uninstallCmd(stdout),
 		tunnelCmd(), tunnelProbeCmd(), healthcheckCmd(), checkDocsCmd(stdout), rotateKeyCmd(stdout), generateKeyCmd(stdout), passwordLoginCmd(stdout), licensesCmd(stdout), remoteCmd(stdin, stdout, stderr))
 	return root

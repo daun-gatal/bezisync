@@ -17,6 +17,7 @@ internal/
 ├── agent/            # `bezisync agent` (dials out; never listens)
 ├── connectors/       # sources and sinks (+ descriptors.json: their forms/validation schemas)
 ├── engine/           # the engines (Debezium, Flink CDC): which source/destination pairs each runs, capabilities (pure)
+├── flinkhelper/      # `bezisync engine flink-cdc jobmanager|taskmanager`: runs inside a Flink CDC pipeline's containers
 ├── compiler/         # spec + resolved connections → application.properties + env (pure)
 ├── runtime/          # Docker and Kubernetes drivers (+ GKE/EKS auth)
 ├── secrets/          # external secret store clients (Vault, AWS, GCP, Kubernetes)
@@ -192,6 +193,20 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   reference Admins build (every download pinned and listed in `tools/licenses/flinkcdc.go`, checked
   by a test; MySQL Connector/J only on request). BeziSync's helper is injected into each pipeline at
   start, never baked into that image.
+- The helper (`internal/flinkhelper`, `bezisync engine flink-cdc ROLE`) runs in every container of a
+  Flink CDC pipeline; `bezisync install-self DIR` copies the binary in (the image holds only Flink).
+  Both roles link the image's Flink JARs, `flink-cdc-dist` and only the pipeline's connectors and
+  drivers into a lib dir in tmpfs (`FLINK_LIB_DIR`, with `classloader.resolve-order: parent-first`:
+  per-job `--jar` loading leaked Metaspace until TaskManagers died) and keep the image's
+  `config.yaml` (its JVM options); BeziSync's settings (`config/flink-conf.yaml`) are passed as
+  `-D key=value` pairs. The JobManager helper waits for its TaskManagers, restores the position named
+  in `settings.json` (`latest`, a stored id, or fresh), renders `pipeline.yaml`'s `${BZ_…}` secrets
+  into a 0600 temp file only for the submit, stores every completed checkpoint encrypted
+  (AES-256-GCM, `BZ_STATE_KEY`) in `debezium_state.flink_state_<id>` (newest 5 kept, 64 MB cap),
+  resubmits after Flink CDC's start-up schema-registry race (3 times), cancels and reports failures
+  that don't heal (renamed or missing destination tables, replica identity, transforms), serves
+  `/q/health` and `/bz/status`, and on SIGTERM stops with a canonical savepoint (`drain: false`) it
+  stores before exiting (falling back to the newest checkpoint).
 - `domain.PipelineSpec` is the contract (API body, YAML, wizard); it serialises in declaration order.
   One change is one `PipelineVersion`: while the current version is unsealed (`sealed_at` null) and
   the caller made it, `UpdatePipeline` updates it in place (wizard steps and autosave never pile up
