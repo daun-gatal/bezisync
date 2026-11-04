@@ -46,6 +46,9 @@ type Settings struct {
 	// Restore is the saved position to start from: "" (start fresh with the pipeline's startup
 	// mode), "latest" (the newest stored checkpoint or savepoint) or a stored state id.
 	Restore string `json:"restore"`
+	// RestoreAfter: saved positions up to this id were set aside (Start over) and are never
+	// restored by "latest".
+	RestoreAfter int64 `json:"restore_after"`
 	// AllowNonRestored drops saved state of operators the new pipeline no longer has (a removed
 	// table).
 	AllowNonRestored bool `json:"allow_non_restored"`

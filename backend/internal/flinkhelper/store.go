@@ -142,10 +142,10 @@ func (s *Store) List(ctx context.Context) ([]Saved, error) {
 	return out, rows.Err()
 }
 
-// Latest is the newest stored state (nil when there is none).
-func (s *Store) Latest(ctx context.Context) (*Saved, error) {
+// LatestAfter is the newest stored state with an id above after (nil when there is none).
+func (s *Store) LatestAfter(ctx context.Context, after int64) (*Saved, error) {
 	l, err := s.List(ctx)
-	if err != nil || len(l) == 0 {
+	if err != nil || len(l) == 0 || l[0].ID <= after {
 		return nil, err
 	}
 	return &l[0], nil

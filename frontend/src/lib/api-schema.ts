@@ -1326,6 +1326,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List saved positions (Flink CDC) */
+        get: operations["list_positions_api_v1_projects__project_id__pipelines__pipeline_id__positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions/{position_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a paused Flink CDC pipeline from a saved position */
+        post: operations["restore_position_api_v1_projects__project_id__pipelines__pipeline_id__positions__position_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/preflight": {
         parameters: {
             query?: never;
@@ -3677,10 +3711,16 @@ export interface components {
              */
             confirm: string;
             /**
+             * From Time
+             * @description Where mode from_time starts.
+             */
+            from_time?: string | null;
+            /**
              * Mode
+             * @description resnapshot: copy every table again; skip_to_now: changes from now; from_time: changes since from_time (Flink CDC on MySQL or SQL Server).
              * @enum {string}
              */
-            mode: "resnapshot" | "skip_to_now";
+            mode: "resnapshot" | "skip_to_now" | "from_time";
         };
         /** OffsetsRead */
         OffsetsRead: {
@@ -4715,6 +4755,35 @@ export interface components {
             project: string | null;
             /** Role */
             role: ("viewer" | "operator" | "editor") | null;
+        };
+        /**
+         * SavedPositionRead
+         * @description A stored checkpoint or savepoint of a Flink CDC pipeline.
+         */
+        SavedPositionRead: {
+            /**
+             * Current
+             * @description After the last Start over: the pipeline resumes from the newest current position.
+             */
+            current: boolean;
+            /** Flink Id */
+            flink_id: number;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "checkpoint" | "savepoint";
+            /** Reason */
+            reason: string;
+            /** Size */
+            size: number;
+            /**
+             * Taken At
+             * Format: date-time
+             */
+            taken_at: string;
         };
         /** SchemaChangeRead */
         SchemaChangeRead: {
@@ -8684,6 +8753,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_positions_api_v1_projects__project_id__pipelines__pipeline_id__positions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Positions */
+                        positions: components["schemas"]["SavedPositionRead"][];
+                    };
+                };
+            };
+        };
+    };
+    restore_position_api_v1_projects__project_id__pipelines__pipeline_id__positions__position_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+                position_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Confirm
+                     * @description The pipeline name, typed by the user.
+                     */
+                    confirm: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        position: components["schemas"]["SavedPositionRead"];
+                    };
                 };
             };
         };

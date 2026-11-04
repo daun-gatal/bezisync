@@ -4102,10 +4102,25 @@
             "title": "Confirm",
             "type": "string"
           },
+          "from_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where mode from_time starts.",
+            "title": "From Time"
+          },
           "mode": {
+            "description": "resnapshot: copy every table again; skip_to_now: changes from now; from_time: changes since from_time (Flink CDC on MySQL or SQL Server).",
             "enum": [
               "resnapshot",
-              "skip_to_now"
+              "skip_to_now",
+              "from_time"
             ],
             "title": "Mode",
             "type": "string"
@@ -6884,6 +6899,56 @@
           "approver"
         ],
         "title": "SSORuleRead",
+        "type": "object"
+      },
+      "SavedPositionRead": {
+        "description": "A stored checkpoint or savepoint of a Flink CDC pipeline.",
+        "properties": {
+          "current": {
+            "description": "After the last Start over: the pipeline resumes from the newest current position.",
+            "title": "Current",
+            "type": "boolean"
+          },
+          "flink_id": {
+            "title": "Flink Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "checkpoint",
+              "savepoint"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "taken_at": {
+            "format": "date-time",
+            "title": "Taken At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "reason",
+          "flink_id",
+          "taken_at",
+          "size",
+          "current"
+        ],
+        "title": "SavedPositionRead",
         "type": "object"
       },
       "SchemaChangeRead": {
@@ -14030,6 +14095,144 @@
           }
         },
         "summary": "Pause",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions": {
+      "get": {
+        "operationId": "list_positions_api_v1_projects__project_id__pipelines__pipeline_id__positions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "positions": {
+                      "items": {
+                        "$ref": "#/components/schemas/SavedPositionRead"
+                      },
+                      "title": "Positions",
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "positions"
+                  ],
+                  "title": "SavedPositionsRead",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List saved positions (Flink CDC)",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions/{position_id}/restore": {
+      "post": {
+        "operationId": "restore_position_api_v1_projects__project_id__pipelines__pipeline_id__positions__position_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "confirm": {
+                    "description": "The pipeline name, typed by the user.",
+                    "title": "Confirm",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "confirm"
+                ],
+                "title": "RestorePositionRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "position": {
+                      "$ref": "#/components/schemas/SavedPositionRead"
+                    }
+                  },
+                  "required": [
+                    "position"
+                  ],
+                  "title": "RestoredPositionRead",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Resume a paused Flink CDC pipeline from a saved position",
         "tags": [
           "pipelines"
         ]

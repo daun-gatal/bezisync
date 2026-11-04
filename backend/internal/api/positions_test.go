@@ -1,0 +1,196 @@
+package api_test
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"software.sslmate.com/src/go-pkcs12"
+
+	"github.com/daun-gatal/bezisync/backend/internal/config"
+	"github.com/daun-gatal/bezisync/backend/internal/db"
+	"github.com/daun-gatal/bezisync/backend/internal/flinkhelper"
+	"github.com/daun-gatal/bezisync/backend/internal/models"
+	"github.com/daun-gatal/bezisync/backend/internal/runtime"
+	"github.com/daun-gatal/bezisync/backend/internal/services"
+	"github.com/daun-gatal/bezisync/backend/internal/testdb"
+)
+
+// flinkPipeline creates a deployed, paused Flink CDC pipeline (Iceberg destination) whose cluster
+// is gone, as after a pause.
+func flinkPipeline(t *testing.T, e *pipelineEnv) (*resp, string) {
+	t.Helper()
+	enableFlink(t, e.admin)
+	lake := icebergSink(t, e)
+	body := map[string]any{"name": "lake-flink", "source_id": e.ids.Source, "sink_id": lake, "runtime_id": e.ids.Runtime, "engine": "flink-cdc",
+		"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}}}
+	p := e.admin.post("/api/v1/projects/"+e.pid+"/pipelines", body).expect(201)
+	exec(t, `UPDATE pipelines SET deployed_version_id = current_version_id, desired_state = 'paused' WHERE id = '`+p.Str("id")+`'`)
+	return p, "/api/v1/projects/" + e.pid + "/pipelines/" + p.Str("id")
+}
+
+// savePositions stores n checkpoints for a pipeline the way its helper does.
+func savePositions(t *testing.T, shortID string, n int) []int64 {
+	t.Helper()
+	ctx := context.Background()
+	cfg, err := pgxpool.ParseConfig(db.NormalizeURL(config.Get().EffectiveStateDatabaseURL()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	store, err := flinkhelper.OpenStore(ctx, cfg, shortID, base64.StdEncoding.EncodeToString(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	dir := t.TempDir()
+	var ids []int64
+	for i := 1; i <= n; i++ {
+		rel := filepath.Join("cp", "job", "chk-"+string(rune('0'+i)))
+		if err := os.MkdirAll(filepath.Join(dir, rel), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel, "_metadata"), []byte(rel), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s, err := store.Save(ctx, "checkpoint", "periodic", int64(i), dir, rel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, s.ID)
+	}
+	t.Cleanup(func() { _ = services.DropSavedPositions(context.Background(), shortID) })
+	return ids
+}
+
+func shortOf(id string) string { return strings.ReplaceAll(id, "-", "")[:12] }
+
+func TestFlinkSecretsAreGeneratedOnceAndSealed(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe, _ := flinkPipeline(t, e)
+	ctx := context.Background()
+	q := testdb.Pool(t)
+	p, err := db.Find[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE id = $1`, pipe.Str("id"))
+	if err != nil || p == nil || p.EngineSecretsEnc != nil {
+		t.Fatal(err, p)
+	}
+	first, err := services.FlinkSecretsOf(ctx, q, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := db.Find[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE id = $1`, pipe.Str("id"))
+	if err != nil || again.EngineSecretsEnc == nil || strings.Contains(*again.EngineSecretsEnc, first.KeystorePassword) {
+		t.Fatal("secrets were not sealed")
+	}
+	second, err := services.FlinkSecretsOf(ctx, q, again)
+	if err != nil || *second != *first {
+		t.Fatal("secrets changed on the second read")
+	}
+	if key, err := base64.StdEncoding.DecodeString(first.StateKey); err != nil || len(key) != 32 {
+		t.Fatal("state key")
+	}
+	raw, err := base64.StdEncoding.DecodeString(first.Keystore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, cert, err := pkcs12.Decode(raw, first.KeystorePassword)
+	if err != nil || cert.Subject.CommonName != "bezisync-flink-"+p.ShortID() || cert.NotAfter.Before(time.Now().AddDate(10, 0, 0)) {
+		t.Fatal(err, cert)
+	}
+	if _, _, err := pkcs12.Decode(raw, "wrong"); err == nil {
+		t.Fatal("the keystore opened with a wrong password")
+	}
+}
+
+func TestSavedPositionsListRestoreAndStartOver(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe, url := flinkPipeline(t, e)
+	short := shortOf(pipe.Str("id"))
+	// Never started: no positions, no error.
+	if l := e.admin.get(url + "/positions").expect(200).List("positions"); len(l) != 0 {
+		t.Fatal(l)
+	}
+	ids := savePositions(t, short, 3)
+	l := e.admin.get(url + "/positions").expect(200).List("positions")
+	if len(l) != 3 || at(t, l[0], "id") != float64(ids[2]) || at(t, l[0], "current") != true || at(t, l[0], "kind") != "checkpoint" {
+		t.Fatal(l)
+	}
+	// Restoring needs the name typed, a paused pipeline and a stopped cluster.
+	restore := url + "/positions/" + strconv.FormatInt(ids[0], 10) + "/restore"
+	e.admin.post(restore, map[string]any{"confirm": "nope"}).expect(422)
+	e.driver.mu.Lock()
+	e.driver.Workloads[short] = runtime.Workload{ShortID: short, Running: true}
+	e.driver.mu.Unlock()
+	if r := e.admin.post(restore, map[string]any{"confirm": "lake-flink"}).expect(409); r.Code() != "still_running" {
+		t.Fatal(string(r.Raw))
+	}
+	e.driver.mu.Lock()
+	delete(e.driver.Workloads, short)
+	e.driver.mu.Unlock()
+	e.admin.post(url+"/positions/999999/restore", map[string]any{"confirm": "lake-flink"}).expect(404)
+	got := e.admin.post(restore, map[string]any{"confirm": "lake-flink"}).expect(200)
+	if got.At("position", "id").(float64) <= float64(ids[2]) || !strings.Contains(got.Str("position", "reason"), "restored from #") {
+		t.Fatal(string(got.Raw))
+	}
+	read := e.admin.get(url).expect(200)
+	if read.At("artifacts", "flink_restore_after") != got.At("position", "id").(float64)-1 {
+		t.Fatal(read.At("artifacts"))
+	}
+	l = e.admin.get(url + "/positions").expect(200).List("positions")
+	if at(t, l[0], "current") != true || at(t, l[1], "current") != false {
+		t.Fatal("only the restored copy is current", l)
+	}
+
+	// Start over: every position is set aside and the next start copies every table again.
+	reset := url + "/offsets/reset"
+	r := e.admin.post(reset, map[string]any{"mode": "resnapshot", "confirm": "lake-flink"}).expect(200)
+	if r.Str("mode") != "resnapshot" {
+		t.Fatal(string(r.Raw))
+	}
+	read = e.admin.get(url).expect(200)
+	if read.At("artifacts", "flink_startup", "mode") != "initial" || read.At("artifacts", "flink_restore_after") != got.At("position", "id") {
+		t.Fatal(read.At("artifacts"))
+	}
+	for _, p := range e.admin.get(url + "/positions").expect(200).List("positions") {
+		if at(t, p, "current") != false {
+			t.Fatal("a position survived Start over", p)
+		}
+	}
+	// A PostgreSQL slot can't go back in time.
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	if r := e.admin.post(reset, map[string]any{"mode": "from_time", "from_time": past, "confirm": "lake-flink"}).expect(422); r.Code() != "engine_unsupported" ||
+		!strings.Contains(r.Str("detail"), "PostgreSQL") {
+		t.Fatal(string(r.Raw))
+	}
+	e.admin.post(reset, map[string]any{"mode": "from_time", "confirm": "lake-flink"}).expect(422)
+	// Running pipelines are refused.
+	exec(t, `UPDATE pipelines SET desired_state = 'running' WHERE id = '`+pipe.Str("id")+`'`)
+	if r := e.admin.post(reset, map[string]any{"mode": "skip_to_now", "confirm": "lake-flink"}).expect(409); r.Code() != "not_paused" {
+		t.Fatal(string(r.Raw))
+	}
+}
+
+func TestDebeziumHasNoSavedPositions(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
+	url := "/api/v1/projects/" + e.pid + "/pipelines/" + pipe.Str("id")
+	if l := e.admin.get(url + "/positions").expect(200).List("positions"); len(l) != 0 {
+		t.Fatal(l)
+	}
+	exec(t, `UPDATE pipelines SET deployed_version_id = current_version_id, desired_state = 'paused' WHERE id = '`+pipe.Str("id")+`'`)
+	if r := e.admin.post(url+"/positions/1/restore", map[string]any{"confirm": "orders-cdc"}).expect(409); r.Code() != "engine_unsupported" {
+		t.Fatal(string(r.Raw))
+	}
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	if r := e.admin.post(url+"/offsets/reset", map[string]any{"mode": "from_time", "from_time": past, "confirm": "orders-cdc"}).expect(422); r.Code() != "engine_unsupported" {
+		t.Fatal(string(r.Raw))
+	}
+}

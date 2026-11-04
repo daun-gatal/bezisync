@@ -207,6 +207,14 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   that don't heal (renamed or missing destination tables, replica identity, transforms), serves
   `/q/health` and `/bz/status`, and on SIGTERM stops with a canonical savepoint (`drain: false`) it
   stores before exiting (falling back to the newest checkpoint).
+- Control-plane side (`services/flinkcdc.go`): each Flink CDC pipeline's own secrets (state key,
+  TLS keystore shared by its JobManager and TaskManagers, PKCS#12 via `go-pkcs12`) are generated once
+  and sealed in `pipelines.engine_secrets_enc` (re-encrypted by `rotate-master-key`). Saved positions
+  are listed from the state database (`GET …/positions`); the helper resumes from the newest one above
+  `artifacts.flink_restore_after`. Restore (`POST …/positions/{id}/restore`, name typed, paused and
+  stopped) copies the chosen one above that floor; Start over (`offsets/reset`, also `from_time` for
+  MySQL/SQL Server) raises the floor and sets `artifacts.flink_startup` until the next deploy, moving a
+  PostgreSQL slot like Debezium's skip-to-now. Earlier positions stay listed (`current: false`).
 - `domain.PipelineSpec` is the contract (API body, YAML, wizard); it serialises in declaration order.
   One change is one `PipelineVersion`: while the current version is unsealed (`sealed_at` null) and
   the caller made it, `UpdatePipeline` updates it in place (wizard steps and autosave never pile up

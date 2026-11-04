@@ -193,10 +193,10 @@ func (s *memStore) Save(_ context.Context, kind, reason string, flinkID int64, s
 	return &v, nil
 }
 
-func (s *memStore) Latest(context.Context) (*Saved, error) {
+func (s *memStore) LatestAfter(_ context.Context, after int64) (*Saved, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.saved) == 0 {
+	if len(s.saved) == 0 || s.saved[len(s.saved)-1].ID <= after {
 		return nil, nil
 	}
 	v := s.saved[len(s.saved)-1]
@@ -382,6 +382,18 @@ func TestJobManagerRestoresTheLatestPosition(t *testing.T) {
 	args := strings.Join(submits[0], " ")
 	if !strings.Contains(args, "-s file://"+stateDirFile) || !strings.Contains(args, "-cm no_claim") || !strings.Contains(args, " -n") {
 		t.Fatal(args)
+	}
+}
+
+func TestJobManagerStartsFreshAfterAStartOver(t *testing.T) {
+	h := start(t, []string{"mysql", "starrocks"}, func(m *JobManager, _ *fakeFlink, s *memStore) {
+		m.Settings.Restore, m.Settings.RestoreAfter = "latest", 7
+		s.saved = []Saved{{ID: 7, Kind: "savepoint", Path: "sp/old"}}
+	})
+	st := h.waitFor(t, "running", func(s Status) bool { return s.Phase == PhaseRunning })
+	_, _, submits, _ := h.f.counts()
+	if st.RestoredFrom != nil || strings.Contains(strings.Join(submits[0], " "), "-s ") {
+		t.Fatalf("restored a position set aside by Start over: %+v %v", st.RestoredFrom, submits[0])
 	}
 }
 

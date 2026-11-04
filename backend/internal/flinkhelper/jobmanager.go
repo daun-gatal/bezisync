@@ -15,7 +15,7 @@ import (
 // StateStore is where saved positions live (Store, or a fake in tests).
 type StateStore interface {
 	Save(ctx context.Context, kind, reason string, flinkID int64, stateDir, rel string) (*Saved, error)
-	Latest(ctx context.Context) (*Saved, error)
+	LatestAfter(ctx context.Context, after int64) (*Saved, error)
 	List(ctx context.Context) ([]Saved, error)
 	Extract(ctx context.Context, id int64, stateDir string) (string, error)
 	Prune(ctx context.Context, keep int) error
@@ -290,9 +290,10 @@ func (m *JobManager) restorePoint(ctx context.Context) (string, error) {
 	}
 }
 
-// latestPoint is the newest stored state ("" when there is none: a first start).
+// latestPoint is the newest stored state after the Start over floor ("" when there is none: a
+// first start, or a start over).
 func (m *JobManager) latestPoint(ctx context.Context) (string, error) {
-	latest, err := m.Store.Latest(ctx)
+	latest, err := m.Store.LatestAfter(ctx, m.Settings.RestoreAfter)
 	if err != nil {
 		return "", fmt.Errorf("can't read the saved positions: %w", err)
 	}

@@ -239,6 +239,7 @@ pipelines.deployed_version_id uuid YES
 pipelines.description text NO 
 pipelines.desired_state character varying(16) NO 
 pipelines.engine character varying(20) NO 'debezium'::character varying
+pipelines.engine_secrets_enc text YES 
 pipelines.health character varying(16) NO 
 pipelines.id uuid NO 
 pipelines.labels jsonb NO 

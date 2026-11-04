@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -962,13 +963,23 @@ func pipelineRoutes(r chi.Router) {
 		if err != nil {
 			return err
 		}
-		type request struct{ Mode, Confirm string }
+		type request struct {
+			Mode, Confirm string
+			FromMS        int64
+		}
 		b, err := body(r, func(v *val.V, o *val.Object) request {
 			req := request{}
 			if f := o.Get("mode"); f.Required() {
-				req.Mode, _ = v.Literal(f.Loc, f.Raw, "resnapshot", "skip_to_now")
+				req.Mode, _ = v.Literal(f.Loc, f.Raw, "resnapshot", "skip_to_now", "from_time")
 			}
 			req.Confirm = str(v, o, "confirm", "", val.StrRules{}, true)
+			if f := o.Get("from_time"); f.Present && !f.IsNull() {
+				if t, ok := v.Datetime(f.Loc, f.Raw); ok {
+					req.FromMS = t.UnixMilli()
+				}
+			} else if req.Mode == "from_time" {
+				v.Fail(f.Loc, "missing", "Field required")
+			}
 			return req
 		})
 		if err != nil {
@@ -987,13 +998,68 @@ func pipelineRoutes(r chi.Router) {
 			if b.Confirm != p.Name {
 				return problem.New(422, "confirmation_mismatch", "Type the pipeline name to confirm.")
 			}
-			out, err = services.ResetOffsets(ctx, q, a, p, b.Mode)
+			out, err = services.ResetOffsets(ctx, q, a, p, b.Mode, b.FromMS)
 			return err
 		})
 		if err != nil {
 			return err
 		}
 		httpapi.JSON(w, http.StatusOK, out)
+		return nil
+	}))
+	r.Get(base+"/{pipeline_id}/positions", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		_, p, err := viewPipeline(r, auth.PipelineView, false)
+		if err != nil {
+			return err
+		}
+		if services.EngineOf(p) != engine.FlinkCDC {
+			httpapi.JSON(w, http.StatusOK, obj("positions", []services.SavedPosition{}))
+			return nil
+		}
+		positions, err := services.SavedPositions(r.Context(), p)
+		if err != nil {
+			return problem.New(503, "state_db_unavailable", "The state database is not reachable: "+err.Error())
+		}
+		httpapi.JSON(w, http.StatusOK, obj("positions", positions))
+		return nil
+	}))
+	r.Post(base+"/{pipeline_id}/positions/{position_id}/restore", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		id, err := pathID(r, "pipeline_id")
+		if err != nil {
+			return err
+		}
+		position, err := strconv.ParseInt(chi.URLParam(r, "position_id"), 10, 64)
+		if err != nil || position <= 0 {
+			return problem.NotFound("Saved position")
+		}
+		a, err := project(r)
+		if err != nil {
+			return err
+		}
+		b, err := body(r, func(v *val.V, o *val.Object) string { return str(v, o, "confirm", "", val.StrRules{}, true) })
+		if err != nil {
+			return err
+		}
+		if err := a.Require(auth.OffsetsReset); err != nil {
+			return err
+		}
+		ctx := r.Context()
+		var out *services.SavedPosition
+		err = tx(ctx, func(q db.Querier) error {
+			p, err := services.GetPipeline(ctx, q, a, id, false)
+			if err != nil {
+				return err
+			}
+			if b != p.Name {
+				return problem.New(422, "confirmation_mismatch", "Type the pipeline name to confirm.")
+			}
+			out, err = services.RestoreSavedPosition(ctx, q, a, p, position)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		httpapi.JSON(w, http.StatusOK, obj("position", out))
 		return nil
 	}))
 	r.Get(base+"/{pipeline_id}/diff", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {

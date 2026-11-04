@@ -71,7 +71,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	src := t.TempDir()
 	writeState(t, src, "cp/abc/chk-3", map[string]string{"_metadata": "inline-state-3"})
 	writeState(t, src, "cp/abc/chk-4", map[string]string{"_metadata": "inline-state-4", "extra/part": "spilled"})
-	if latest, err := s.Latest(ctx); err != nil || latest != nil {
+	if latest, err := s.LatestAfter(ctx, 0); err != nil || latest != nil {
 		t.Fatalf("an empty store has a latest state: %v %v", latest, err)
 	}
 	a, err := s.Save(ctx, "checkpoint", "periodic", 3, src, "cp/abc/chk-3")
@@ -85,9 +85,12 @@ func TestStoreRoundTrip(t *testing.T) {
 	if b.ID <= a.ID || b.Size == 0 || len(b.SHA256) != 64 {
 		t.Fatalf("saved %+v %+v", a, b)
 	}
-	latest, err := s.Latest(ctx)
+	latest, err := s.LatestAfter(ctx, 0)
 	if err != nil || latest.ID != b.ID || latest.FlinkID != 4 || latest.Path != "cp/abc/chk-4" {
 		t.Fatalf("latest = %+v, %v", latest, err)
+	}
+	if after, err := s.LatestAfter(ctx, b.ID); err != nil || after != nil {
+		t.Fatalf("a position at or below the floor was returned: %+v %v", after, err)
 	}
 	// A new container restores it at the path it was taken from.
 	dst := t.TempDir()

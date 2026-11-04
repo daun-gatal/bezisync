@@ -256,16 +256,18 @@ type Pipeline struct {
 	DeployedAt        *time.Time `db:"deployed_at"`
 	DeployedImage     *string    `db:"deployed_image"`
 	// Engine is "debezium" or "flink-cdc" (internal/engine); fixed once deployed.
-	Engine      string     `db:"engine"`
-	Status      db.Map     `db:"status"`
-	Lifecycle   string     `db:"lifecycle"`
-	Health      string     `db:"health"`
-	Artifacts   db.Map     `db:"artifacts"`
-	DeletedAt   *time.Time `db:"deleted_at"`
-	Version     int        `db:"version"`
-	CreatedByID *uuid.UUID `db:"created_by_id"`
-	CreatedAt   time.Time  `db:"created_at"`
-	UpdatedAt   time.Time  `db:"updated_at"`
+	Engine string `db:"engine"`
+	// EngineSecretsEnc seals a Flink CDC pipeline's state key and TLS keystore (services.FlinkSecretsOf).
+	EngineSecretsEnc *string    `db:"engine_secrets_enc"`
+	Status           db.Map     `db:"status"`
+	Lifecycle        string     `db:"lifecycle"`
+	Health           string     `db:"health"`
+	Artifacts        db.Map     `db:"artifacts"`
+	DeletedAt        *time.Time `db:"deleted_at"`
+	Version          int        `db:"version"`
+	CreatedByID      *uuid.UUID `db:"created_by_id"`
+	CreatedAt        time.Time  `db:"created_at"`
+	UpdatedAt        time.Time  `db:"updated_at"`
 }
 
 // ShortID is the first 12 hex characters of the id (workload names).

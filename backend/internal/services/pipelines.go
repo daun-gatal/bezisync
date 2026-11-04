@@ -1134,8 +1134,19 @@ func Enqueue(ctx context.Context, q db.Querier, kind string, p *models.Pipeline,
 	return j, db.Insert(ctx, q, "jobs", j)
 }
 
-// ResetOffsets resets the stored position of a paused pipeline.
-func ResetOffsets(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, mode string) (map[string]any, error) {
+// ResetOffsets resets the stored position of a paused pipeline. fromMS is the start of mode
+// "from_time" (Flink CDC on MySQL or SQL Server).
+func ResetOffsets(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, mode string, fromMS int64) (map[string]any, error) {
+	if EngineOf(p) == engine.FlinkCDC {
+		if err := requireStoppedFlink(ctx, q, p); err != nil {
+			return nil, err
+		}
+		return resetFlink(ctx, q, a, p, mode, fromMS)
+	}
+	if mode == "from_time" {
+		caps := engine.CapsFor(engine.Debezium, "")
+		return nil, problem.New(422, "engine_unsupported", caps.Why["start_from_time"])
+	}
 	if p.DeployedVersionID == nil {
 		return nil, problem.Conflict("not_deployed", "The pipeline has never run; there is no position to reset.", nil)
 	}
