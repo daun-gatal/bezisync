@@ -12,6 +12,43 @@ func icebergSink(t *testing.T, e *pipelineEnv) string {
 		"config": map[string]any{"catalog_type": "rest", "uri": "http://127.0.0.1:9/catalog", "warehouse": "s3://lake/warehouse"}}).expect(201).Str("id")
 }
 
+// enableFlink registers a Flink CDC image, which turns the engine on.
+func enableFlink(t *testing.T, admin *client) {
+	t.Helper()
+	admin.post("/api/v1/debezium-catalog", map[string]any{"image": "registry.example/bezisync-flink-cdc:3.7.0-2.2.1", "engine": "flink-cdc"}).expect(201)
+}
+
+func TestFlinkCDCOffUntilAnImageIsRegistered(t *testing.T) {
+	e := newPipelineEnv(t)
+	lake := icebergSink(t, e)
+	engines := e.admin.get("/api/v1/engines").expect(200)
+	l := engines.List()
+	if len(l) != 2 || at(t, l[0], "id") != "debezium" || at(t, l[0], "available") != true || at(t, l[1], "id") != "flink-cdc" ||
+		at(t, l[1], "available") != false || !strings.Contains(at(t, l[1], "reason").(string), "Engine versions") || at(t, l[1], "default_image") != nil {
+		t.Fatal(string(engines.Raw))
+	}
+	if c := e.admin.get("/api/v1/debezium-catalog?engine=flink-cdc").expect(200); c.At("default_image") != nil || len(c.List("entries")) != 0 {
+		t.Fatal(string(c.Raw))
+	}
+	body := map[string]any{"name": "lake", "source_id": e.ids.Source, "sink_id": lake, "engine": "flink-cdc"}
+	r := e.admin.post("/api/v1/projects/"+e.pid+"/pipelines", body).expect(422)
+	if r.Code() != "engine_unavailable" || !strings.Contains(r.Str("detail"), "Engine versions") {
+		t.Fatal(string(r.Raw))
+	}
+	// Iceberg falls back to Debezium while Flink CDC is off.
+	delete(body, "engine")
+	if p := e.admin.post("/api/v1/projects/"+e.pid+"/pipelines", body).expect(201); p.Str("engine") != "debezium" {
+		t.Fatal(string(p.Raw))
+	}
+	enableFlink(t, e.admin)
+	on := e.admin.get("/api/v1/engines").expect(200).List()
+	if at(t, on[1], "available") != true || at(t, on[1], "reason") != nil || at(t, on[1], "default_image") != "registry.example/bezisync-flink-cdc:3.7.0-2.2.1" {
+		t.Fatal(on)
+	}
+	body["name"], body["engine"] = "lake2", "flink-cdc"
+	e.admin.post("/api/v1/projects/"+e.pid+"/pipelines", body).expect(201)
+}
+
 func TestPipelineEngineDefaultsAndCaps(t *testing.T) {
 	e := newPipelineEnv(t)
 	pipe := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
@@ -28,6 +65,7 @@ func TestPipelineEngineDefaultsAndCaps(t *testing.T) {
 
 func TestPipelineEngineChoice(t *testing.T) {
 	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
 	lake := icebergSink(t, e)
 	base := "/api/v1/projects/" + e.pid + "/pipelines"
 	body := map[string]any{"name": "lake-flink", "source_id": e.ids.Source, "sink_id": lake, "runtime_id": e.ids.Runtime, "engine": "flink-cdc",
@@ -84,6 +122,7 @@ func TestPipelineEngineChoice(t *testing.T) {
 
 func TestPipelineEngineFixedAfterDeploy(t *testing.T) {
 	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
 	lake := icebergSink(t, e)
 	pipe := createPipeline(t, e.admin, e.pid, ids{Source: e.ids.Source, Sink: lake, Runtime: e.ids.Runtime}, "shop.orders")
 	exec(t, `UPDATE pipelines SET deployed_version_id = current_version_id WHERE id = '`+pipe.Str("id")+`'`)
@@ -98,6 +137,7 @@ func TestPipelineEngineFixedAfterDeploy(t *testing.T) {
 
 func TestAllowedEnginesPolicy(t *testing.T) {
 	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
 	lake := icebergSink(t, e)
 	pol := e.admin.put("/api/v1/projects/"+e.pid+"/policies", map[string]any{"allowed_engines": []string{"debezium"}}).expect(200)
 	if l := pol.List("allowed_engines"); len(l) != 1 || l[0] != "debezium" {
@@ -125,7 +165,7 @@ func TestCatalogPerEngine(t *testing.T) {
 		t.Fatal(string(deb.Raw))
 	}
 	fl := admin.get("/api/v1/debezium-catalog?engine=flink-cdc").expect(200)
-	if fl.Str("engine") != "flink-cdc" || !strings.HasPrefix(fl.Str("default_image"), "ghcr.io/daun-gatal/bezisync-flink-cdc:") {
+	if fl.Str("engine") != "flink-cdc" || fl.At("default_image") != nil {
 		t.Fatal(string(fl.Raw))
 	}
 	admin.get("/api/v1/debezium-catalog?engine=spark").expect(422)

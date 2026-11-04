@@ -58,8 +58,8 @@ type Settings struct {
 	LogLevel                          string
 	LogJSON                           bool
 	DebeziumDefaultImage              string
-	// FlinkCDCDefaultImage is the Flink CDC image pipelines run unless the catalog sets another
-	// default; BeziSync builds it with the same version as the app.
+	// FlinkCDCDefaultImage is an Admin-built Flink CDC image (deploy/images/flink-cdc) registered at
+	// install time. The Flink CDC engine is off until it or a catalog image is registered.
 	FlinkCDCDefaultImage string
 	// IcebergImage overrides the Iceberg sink image (a mirror); "" uses the pinned upstream image.
 	IcebergImage          string
@@ -212,7 +212,7 @@ func Load(lookup func(string) (string, bool)) (*Settings, error) {
 		LogLevel:                          l.str("LOG_LEVEL", "INFO"),
 		LogJSON:                           l.boolean("LOG_JSON", true),
 		DebeziumDefaultImage:              l.str("DEBEZIUM_DEFAULT_IMAGE", "quay.io/debezium/server:3.7.0.Final"),
-		FlinkCDCDefaultImage:              l.str("FLINK_CDC_DEFAULT_IMAGE", "ghcr.io/daun-gatal/bezisync-flink-cdc:"+version.Version),
+		FlinkCDCDefaultImage:              l.str("FLINK_CDC_DEFAULT_IMAGE", ""),
 		IcebergImage:                      l.str("ICEBERG_IMAGE", ""),
 		AgentURL:                          l.str("AGENT_URL", ""),
 		AgentImage:                        l.str("AGENT_IMAGE", "ghcr.io/daun-gatal/bezisync:"+version.Version),

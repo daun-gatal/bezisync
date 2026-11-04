@@ -247,6 +247,23 @@ export interface paths {
         patch: operations["update_image_api_v1_debezium_catalog__image_id__patch"];
         trace?: never;
     };
+    "/api/v1/engines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Engines */
+        get: operations["list_engines_api_v1_engines_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/feedback": {
         parameters: {
             query?: never;
@@ -2237,8 +2254,11 @@ export interface components {
         };
         /** CatalogRead */
         CatalogRead: {
-            /** Default Image */
-            default_image: string;
+            /**
+             * Default Image
+             * @description The engine's default image (null while the engine has none).
+             */
+            default_image: string | null;
             /**
              * Engine
              * @enum {string}
@@ -2881,6 +2901,28 @@ export interface components {
             why: {
                 [key: string]: string;
             };
+        };
+        /**
+         * EngineRead
+         * @description An engine and whether this install can run it. Flink CDC is available once an Admin registers a Flink CDC image.
+         */
+        EngineRead: {
+            /** Available */
+            available: boolean;
+            /** Default Image */
+            default_image: string | null;
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "debezium" | "flink-cdc";
+            /**
+             * Reason
+             * @description Why the engine is unavailable and how to turn it on.
+             */
+            reason: string | null;
+            /** Title */
+            title: string;
         };
         /** ErrorPolicy */
         ErrorPolicy: {
@@ -6133,6 +6175,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_engines_api_v1_engines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngineRead"][];
                 };
             };
         };

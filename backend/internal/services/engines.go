@@ -16,8 +16,9 @@ import (
 
 // ChooseEngine is the engine of a pipeline from sourceType to sinkType (sinkType "" while no
 // destination is chosen): the requested one when given, else the current one while it still runs
-// the pair, else the pair's default.
-func ChooseEngine(requested, current, sourceType, sinkType string) (engine.ID, error) {
+// the pair, else the pair's default. Only available engines (EngineAvailable) are chosen.
+func ChooseEngine(ctx context.Context, q db.Querier, requested, current, sourceType, sinkType string) (engine.ID, error) {
+	available := func(id engine.ID) (Availability, error) { return EngineAvailable(ctx, q, id) }
 	if requested != "" {
 		id := engine.ID(requested)
 		if !id.Valid() {
@@ -26,17 +27,37 @@ func ChooseEngine(requested, current, sourceType, sinkType string) (engine.ID, e
 		if !engine.Supports(id, sourceType, sinkType) {
 			return "", unsupported(id, sourceType, sinkType)
 		}
+		if a, err := available(id); err != nil {
+			return "", err
+		} else if !a.Available {
+			return "", problem.New(422, "engine_unavailable", a.Reason)
+		}
 		return id, nil
 	}
 	if current != "" && engine.Supports(engine.Of(current), sourceType, sinkType) {
-		return engine.Of(current), nil
+		if a, err := available(engine.Of(current)); err != nil {
+			return "", err
+		} else if a.Available {
+			return engine.Of(current), nil
+		}
 	}
-	id := engine.Default(sourceType, sinkType)
-	if id == "" {
-		return "", problem.New(422, "engine_unsupported",
-			fmt.Sprintf("No engine can run a pipeline from %s to %s.", typeTitle("source", sourceType), typeTitle("sink", sinkType)))
+	var reason string
+	for _, id := range engine.Choices(sourceType, sinkType) {
+		a, err := available(id)
+		if err != nil {
+			return "", err
+		}
+		if a.Available {
+			return id, nil
+		}
+		reason = a.Reason
 	}
-	return id, nil
+	if reason != "" {
+		return "", problem.New(422, "engine_unavailable",
+			fmt.Sprintf("Only Flink CDC writes %s. %s", typeTitle("sink", sinkType), reason))
+	}
+	return "", problem.New(422, "engine_unsupported",
+		fmt.Sprintf("No engine can run a pipeline from %s to %s.", typeTitle("source", sourceType), typeTitle("sink", sinkType)))
 }
 
 func unsupported(id engine.ID, sourceType, sinkType string) error {

@@ -622,8 +622,16 @@
       "CatalogRead": {
         "properties": {
           "default_image": {
-            "title": "Default Image",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The engine's default image (null while the engine has none).",
+            "title": "Default Image"
           },
           "engine": {
             "enum": [
@@ -2145,6 +2153,59 @@
           "why"
         ],
         "title": "EngineCaps",
+        "type": "object"
+      },
+      "EngineRead": {
+        "description": "An engine and whether this install can run it. Flink CDC is available once an Admin registers a Flink CDC image.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "default_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Image"
+          },
+          "id": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the engine is unavailable and how to turn it on.",
+            "title": "Reason"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "available",
+          "reason",
+          "default_image"
+        ],
+        "title": "EngineRead",
         "type": "object"
       },
       "ErrorPolicy": {
@@ -9782,6 +9843,31 @@
           }
         },
         "summary": "Update Image",
+        "tags": [
+          "debezium-images"
+        ]
+      }
+    },
+    "/api/v1/engines": {
+      "get": {
+        "operationId": "list_engines_api_v1_engines_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EngineRead"
+                  },
+                  "title": "Response List Engines Api V1 Engines Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Engines",
         "tags": [
           "debezium-images"
         ]

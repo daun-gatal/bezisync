@@ -91,7 +91,20 @@ func readCatalog(ctx context.Context, q db.Querier, p *auth.Principal, id engine
 		}
 		out[i] = er
 	}
-	return obj("engine", string(id), "default_image", def, "entries", out), nil
+	var defImage any
+	if def != "" {
+		defImage = def
+	}
+	return obj("engine", string(id), "default_image", defImage, "entries", out), nil
+}
+
+// engineRead is an engine and whether this install can run it.
+type engineRead struct {
+	ID           string  `json:"id"`
+	Title        string  `json:"title"`
+	Available    bool    `json:"available"`
+	Reason       *string `json:"reason"`
+	DefaultImage *string `json:"default_image"`
 }
 
 // catalogEngine reads the ?engine= of a catalog request (Debezium when absent).
@@ -123,6 +136,34 @@ func getImage(ctx context.Context, q db.Querier, id uuid.UUID) (*models.Debezium
 }
 
 func catalogRoutes(r chi.Router) {
+	r.Get("/engines", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		if _, err := principal(r); err != nil {
+			return err
+		}
+		ctx := r.Context()
+		q := pool(ctx)
+		out := make([]engineRead, 0, len(engine.All))
+		for _, id := range engine.All {
+			a, err := services.EngineAvailable(ctx, q, id)
+			if err != nil {
+				return err
+			}
+			def, err := services.DefaultImageFor(ctx, q, id)
+			if err != nil {
+				return err
+			}
+			e := engineRead{ID: string(id), Title: id.Title(), Available: a.Available}
+			if a.Reason != "" {
+				e.Reason = &a.Reason
+			}
+			if def != "" {
+				e.DefaultImage = &def
+			}
+			out = append(out, e)
+		}
+		httpapi.JSON(w, http.StatusOK, out)
+		return nil
+	}))
 	r.Get("/debezium-catalog", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
 		p, err := principal(r)
 		if err != nil {

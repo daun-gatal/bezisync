@@ -185,6 +185,13 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `allowed_engines` (`policy_engine`) limits engines. The image catalog (`debezium_images`, routes
   `/debezium-catalog?engine=`) holds both engines' images with one default per engine; each engine's
   install default comes from `BEZISYNC_DEBEZIUM_DEFAULT_IMAGE` / `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`.
+- Flink CDC is optional: `services.EngineAvailable` is false until a Flink CDC image is registered
+  (install default, empty by default, or a catalog image that is not deprecated); `ChooseEngine`
+  then never picks it (`engine_unavailable` with how to turn it on) and `GET /engines` reports it.
+  BeziSync does not build or publish a Flink CDC image: `deploy/images/flink-cdc/Dockerfile` is a
+  reference Admins build (every download pinned and listed in `tools/licenses/flinkcdc.go`, checked
+  by a test; MySQL Connector/J only on request). BeziSync's helper is injected into each pipeline at
+  start, never baked into that image.
 - `domain.PipelineSpec` is the contract (API body, YAML, wizard); it serialises in declaration order.
   One change is one `PipelineVersion`: while the current version is unsealed (`sealed_at` null) and
   the caller made it, `UpdatePipeline` updates it in place (wizard steps and autosave never pile up

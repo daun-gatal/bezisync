@@ -325,7 +325,7 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	if err != nil {
 		return nil, err
 	}
-	eng, err := ChooseEngine(n.Engine, "", source.Type, sinkType)
+	eng, err := ChooseEngine(ctx, q, n.Engine, "", source.Type, sinkType)
 	if err != nil {
 		return nil, err
 	}
@@ -455,7 +455,7 @@ func nextEngine(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *mod
 		if err != nil {
 			return "", err
 		}
-		if id, err = ChooseEngine(requested, p.Engine, sourceType, sinkType); err != nil {
+		if id, err = ChooseEngine(ctx, q, requested, p.Engine, sourceType, sinkType); err != nil {
 			return "", err
 		}
 	}

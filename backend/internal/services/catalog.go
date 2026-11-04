@@ -11,7 +11,9 @@ import (
 
 // The image catalog: which images of each engine Admins offer, and each engine's effective
 // default. The install default of an engine (BEZISYNC_DEBEZIUM_DEFAULT_IMAGE,
-// BEZISYNC_FLINK_CDC_DEFAULT_IMAGE) is always offered; nothing is seeded.
+// BEZISYNC_FLINK_CDC_DEFAULT_IMAGE) is offered when set; nothing is seeded. Flink CDC has no
+// install default unless an Admin sets one: until a Flink CDC image is registered, the engine is
+// unavailable (EngineAvailable).
 
 // InstallDefaultImage is an engine's image from configuration.
 func InstallDefaultImage(id engine.ID) string {
@@ -37,7 +39,39 @@ func DefaultImageFor(ctx context.Context, q db.Querier, id engine.ID) (string, e
 	if img != nil && img.Image != "" {
 		return img.Image, nil
 	}
-	return InstallDefaultImage(id), nil
+	if install := InstallDefaultImage(id); install != "" {
+		return install, nil
+	}
+	// No default chosen: the oldest offered image, if any ("" when the engine has none).
+	first, err := db.Find[struct {
+		Image string `db:"image"`
+	}](ctx, q, `SELECT image FROM debezium_images WHERE engine = $1 AND deprecated IS FALSE ORDER BY created_at LIMIT 1`, string(id))
+	if err != nil || first == nil {
+		return "", err
+	}
+	return first.Image, nil
+}
+
+// Availability says whether an engine can run pipelines on this install, and why not.
+type Availability struct {
+	Available bool
+	Reason    string
+}
+
+// EngineAvailable reports an engine's availability: Debezium always; Flink CDC once an Admin has
+// registered a Flink CDC image (the install default or a catalog image that is not deprecated).
+func EngineAvailable(ctx context.Context, q db.Querier, id engine.ID) (Availability, error) {
+	if id != engine.FlinkCDC {
+		return Availability{Available: true}, nil
+	}
+	image, err := DefaultImageFor(ctx, q, id)
+	if err != nil {
+		return Availability{}, err
+	}
+	if image == "" {
+		return Availability{Reason: "Flink CDC isn't turned on: an Admin registers a Flink CDC image under Settings → Engine versions."}, nil
+	}
+	return Availability{Available: true}, nil
 }
 
 // CatalogEntry is one offered image.
@@ -61,7 +95,7 @@ func CatalogEntriesFor(ctx context.Context, q db.Querier, id engine.ID) ([]Catal
 		return nil, err
 	}
 	install := InstallDefaultImage(id)
-	hasDefault, listed := false, false
+	hasDefault, listed := false, install == ""
 	for _, r := range rows {
 		hasDefault = hasDefault || r.IsDefault
 		listed = listed || r.Image == install
