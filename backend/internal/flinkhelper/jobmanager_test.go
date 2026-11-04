@@ -41,6 +41,7 @@ type fakeFlink struct {
 	stopFail    bool
 	stopCalls   int
 	cancelCalls int
+	streaming   bool // the binlog split exists: the first copy is done
 }
 
 // counts reads the fake's counters under its lock.
@@ -128,9 +129,13 @@ func (f *fakeFlink) serve(w http.ResponseWriter, r *http.Request) {
 		out(map[string]any{"status": map[string]any{"id": "COMPLETED"}, "operation": map[string]any{"location": "file:" + dir}})
 	case strings.HasSuffix(path, "/subtasks/metrics"):
 		if r.URL.Query().Get("get") == "" {
-			out([]any{map[string]any{"id": "Source__mysql.split.shop_orders_4.watermark.currentWatermark"},
+			names := []any{map[string]any{"id": "Source__mysql.split.shop_orders_4.watermark.currentWatermark"},
 				map[string]any{"id": "Source__mysql.split.shop_orders_9.watermark.currentWatermark"},
-				map[string]any{"id": "Source__mysql.currentEmitEventTimeLag"}})
+				map[string]any{"id": "Source__mysql.currentEmitEventTimeLag"}}
+			if f.streaming {
+				names = append(names, map[string]any{"id": "Source__mysql.split.binlog-split.watermark.currentWatermark"})
+			}
+			out(names)
 			return
 		}
 		out([]any{map[string]any{"id": "Source__mysql.currentEmitEventTimeLag", "max": 1250.0}})
@@ -322,9 +327,14 @@ func TestJobManagerRunsStoresAndStopsWithSavepoint(t *testing.T) {
 	}
 	// Progress: the highest chunk each table reached, and the source lag.
 	st = h.waitFor(t, "progress", func(s Status) bool { return s.Chunks["shop_orders"] == 10 && s.LagMS != nil })
-	if *st.LagMS != 1250 {
-		t.Fatal(*st.LagMS)
+	if *st.LagMS != 1250 || st.Streaming {
+		t.Fatal(*st.LagMS, st.Streaming)
 	}
+	// The binlog split appears once the copy is done.
+	h.f.mu.Lock()
+	h.f.streaming = true
+	h.f.mu.Unlock()
+	h.waitFor(t, "streaming", func(s Status) bool { return s.Streaming })
 	// A fresh start submits without a saved position; secrets are rendered and the file removed.
 	_, _, submits, rendered := h.f.counts()
 	args := submits[0]

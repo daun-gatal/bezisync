@@ -61,8 +61,11 @@ type Status struct {
 	// Chunks counts the copy chunks each table's readers reached, keyed as Flink names its split
 	// metrics: the table id with dots as underscores ("shop_orders" → 37). BeziSync matches the
 	// keys to the pipeline's tables.
-	Chunks    map[string]int64 `json:"chunks,omitempty"`
-	UpdatedAt time.Time        `json:"updated_at"`
+	Chunks map[string]int64 `json:"chunks,omitempty"`
+	// Streaming: the first copy is done and changes are read from the log (the source's binlog
+	// or stream split exists). Tables added later are copied while it streams.
+	Streaming bool      `json:"streaming"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Launcher starts Flink's processes and the client that submits the pipeline.
@@ -511,7 +514,11 @@ func (m *JobManager) storeCheckpoint(ctx context.Context, cps *Checkpoints) {
 	}
 }
 
-var splitMetric = regexp.MustCompile(`\.split\.(.+)_(\d+)\.watermark\.currentWatermark$`)
+var (
+	splitMetric = regexp.MustCompile(`\.split\.(.+)_(\d+)\.watermark\.currentWatermark$`)
+	// The split that reads changes: MySQL's binlog-split, PostgreSQL's and SQL Server's stream-split.
+	streamSplit = regexp.MustCompile(`\.split\.(binlog|stream)-split\.watermark\.currentWatermark$`)
+)
 
 // progress reads copy progress (the chunk each table's readers reached) and source lag.
 func (m *JobManager) progress(ctx context.Context, job *Job) {
@@ -525,7 +532,9 @@ func (m *JobManager) progress(ctx context.Context, job *Job) {
 	}
 	chunks := map[string]int64{}
 	var lag []string
+	streaming := false
 	for _, n := range names {
+		streaming = streaming || streamSplit.MatchString(n)
 		if mm := splitMetric.FindStringSubmatch(n); mm != nil {
 			if c, err := strconv.ParseInt(mm[2], 10, 64); err == nil && c+1 > chunks[mm[1]] {
 				chunks[mm[1]] = c + 1
@@ -556,6 +565,7 @@ func (m *JobManager) progress(ctx context.Context, job *Job) {
 			}
 		}
 		s.LagMS = lagMS
+		s.Streaming = s.Streaming || streaming
 	})
 }
 

@@ -501,3 +501,30 @@ func TestSnapshotCountsOnlyTheChosenTables(t *testing.T) {
 		}
 	}
 }
+
+// An engine that explains itself (Flink CDC) replaces Debezium's log diagnosis: starting is
+// deploying while young, then a failure with its own words; a failed job says why.
+func TestDeriveEngineReasons(t *testing.T) {
+	now := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	young, old := now.Add(-time.Second), now.Add(-2*domain.DeployGrace)
+	down := false
+	starting := &domain.Reason{Code: "health_down", Message: "Waiting for TaskManagers: 1 of 2 connected.", Severity: "error"}
+	in := domain.DeriveInput{Now: now, Deployed: true, Desired: "running", DeployedAt: &young, Phase: "running", HealthUp: &down, EngineDown: starting,
+		Logs: "ERROR Cannot create connection: Communications link failure"}
+	if got := domain.Derive(in); got.Lifecycle != domain.LifecycleDeploying {
+		t.Fatalf("young: %+v", got)
+	}
+	in.DeployedAt = &old
+	if got := domain.Derive(in); got.Lifecycle != domain.LifecycleFailed || got.Summary != starting.Message || got.Reasons[0].Code != "health_down" {
+		t.Fatalf("old: %+v", got)
+	}
+	failed := &domain.Reason{Code: "destination_renamed", Message: "The destination table changed name.", Severity: "error"}
+	in.DeployedAt, in.EngineDown = &young, failed
+	if got := domain.Derive(in); got.Lifecycle != domain.LifecycleFailed || got.Reasons[0] != *failed {
+		t.Fatalf("failed job: %+v", got)
+	}
+	in.Phase = "restarting"
+	if got := domain.Derive(in); got.Reasons[0] != *failed {
+		t.Fatalf("restarting workload: %+v", got)
+	}
+}

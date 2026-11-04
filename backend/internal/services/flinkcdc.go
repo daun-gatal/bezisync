@@ -360,3 +360,40 @@ func resetFlink(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *mod
 	}
 	return map[string]any{"mode": mode, "results": results}, nil
 }
+
+// Saved positions set aside by Start over or Restore (at or below the floor), and savepoints
+// beyond the newest keptSavepoints, expire after SavedPositionRetention unless someone kept them.
+// Checkpoints are pruned by the helper as it saves (newest 5).
+const (
+	SavedPositionRetention = 7 * 24 * time.Hour
+	keptSavepoints         = 10
+)
+
+// ExpireSavedPositions removes expired saved positions of every Flink CDC pipeline.
+func ExpireSavedPositions(ctx context.Context, q db.Querier, now time.Time) (int64, error) {
+	pipes, err := db.Select[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE engine = $1 AND deleted_at IS NULL`, string(engine.FlinkCDC))
+	if err != nil || len(pipes) == 0 {
+		return 0, err
+	}
+	conn, err := stateConn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	var removed int64
+	for i := range pipes {
+		p := &pipes[i]
+		t := stateTable(p.ShortID())
+		tag, err := conn.Exec(ctx, `DELETE FROM `+t+` WHERE NOT kept AND taken_at < $1 AND (id <= $2 OR (kind = 'savepoint' AND id NOT IN (
+			SELECT id FROM `+t+` WHERE kind = 'savepoint' AND id > $2 ORDER BY id DESC LIMIT `+fmt.Sprint(keptSavepoints)+`)))`,
+			now.Add(-SavedPositionRetention), restoreFloor(p))
+		if tableMissing(err) {
+			continue
+		}
+		if err != nil {
+			return removed, err
+		}
+		removed += tag.RowsAffected()
+	}
+	return removed, nil
+}

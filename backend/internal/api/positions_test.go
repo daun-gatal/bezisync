@@ -194,3 +194,55 @@ func TestDebeziumHasNoSavedPositions(t *testing.T) {
 		t.Fatal(string(r.Raw))
 	}
 }
+
+// Positions set aside and savepoints beyond the newest ten expire after a week, unless kept.
+func TestSavedPositionsExpire(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe, url := flinkPipeline(t, e)
+	short := shortOf(pipe.Str("id"))
+	ids := savePositions(t, short, 3)
+	e.admin.post(url+"/offsets/reset", map[string]any{"mode": "resnapshot", "confirm": "lake-flink"}).expect(200) // sets all three aside
+	ctx := context.Background()
+	cfg, err := pgxpool.ParseConfig(db.NormalizeURL(config.Get().EffectiveStateDatabaseURL()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	table := "debezium_state.flink_state_" + short
+	// Twelve savepoints above the floor.
+	for i := range 12 {
+		if _, err := pool.Exec(ctx, `INSERT INTO `+table+` (kind, reason, flink_id, path, size, sha256, payload) VALUES ('savepoint', 'stop', $1, 'sp/x', 1, '', '\x00')`, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `UPDATE `+table+` SET kept = true WHERE id = $1`, ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := services.ExpireSavedPositions(ctx, testdb.Pool(t), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	count := func() (n int) {
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM `+table).Scan(&n)
+		return n
+	}
+	if n := count(); n != 15 {
+		t.Fatalf("nothing is a week old yet: %d rows", n)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE `+table+` SET taken_at = now() - interval '8 days'`); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := services.ExpireSavedPositions(ctx, testdb.Pool(t), time.Now())
+	if err != nil || removed != 4 {
+		t.Fatalf("removed %d, %v", removed, err)
+	}
+	var keptLeft, setAside, savepoints int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE kept), count(*) FILTER (WHERE id <= $1), count(*) FILTER (WHERE kind = 'savepoint') FROM `+table, ids[2]).
+		Scan(&keptLeft, &setAside, &savepoints)
+	if keptLeft != 1 || setAside != 1 || savepoints != 10 {
+		t.Fatalf("kept %d, set aside %d, savepoints %d", keptLeft, setAside, savepoints)
+	}
+}

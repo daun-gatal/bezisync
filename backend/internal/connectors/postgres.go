@@ -144,6 +144,15 @@ func pgOne[T any](ctx context.Context, c *pgx.Conn, sql string, args ...any) (T,
 	return v, err
 }
 
+// pgAll reads the first column of every row.
+func pgAll[T any](ctx context.Context, c *pgx.Conn, sql string, args ...any) ([]T, error) {
+	rows, err := c.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[T])
+}
+
 func (s *postgresSource) Check(ctx context.Context, conn Resolved, tables []string) (checks.Report, error) {
 	started := time.Now()
 	cfg, _, err := pgCfg(conn)
@@ -739,6 +748,19 @@ func (s *postgresSource) Cleanup(ctx context.Context, conn Resolved, c CompileCo
 			return nil, err
 		}
 		results = append(results, ArtifactResult{Kind: "replication_slot", Name: slot, Outcome: "removed", Detail: "The database no longer retains WAL for this pipeline."})
+	}
+	// Flink CDC copies with temporary slots <slot>_<n> and can leave them behind (FLINK-CDC #4522):
+	// every inactive one of this pipeline goes too.
+	extra, err := pgAll[string](ctx, pg, `SELECT slot_name FROM pg_replication_slots WHERE slot_name LIKE $1 AND NOT active ORDER BY 1`,
+		strings.ReplaceAll(slot, "_", `\_`)+`\_%`)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range extra {
+		if _, err := pg.Exec(ctx, "SELECT pg_drop_replication_slot($1)", name); err != nil {
+			return nil, err
+		}
+		results = append(results, ArtifactResult{Kind: "replication_slot", Name: name, Outcome: "removed"})
 	}
 	exists, err := pgOne[bool](ctx, pg, "SELECT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = $1)", slot)
 	if err != nil {

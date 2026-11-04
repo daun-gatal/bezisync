@@ -243,6 +243,15 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   and "copy on every start" are refused with the reason. MySQL server ids: `MyServerIDRange`, blocks
   of 8 below 2^31 (Flink CDC reads them as signed 32-bit). Table names are letters, digits and `_`
   only (Flink CDC splits names at dots and reads them as regular expressions).
+- Flink CDC in the controller (`controller/flinkcdc.go`): evidence comes from the helper, `/q/health`
+  (UP once the job runs on every TaskManager) and `/bz/status`, mapped onto `domain.Metrics`
+  (connected while the job runs; copying until the source's log split, `binlog-split` or
+  `stream-split`, exists: `Status.Streaming`; lag from the readers' emit lag) and onto
+  `DeriveInput.EngineDown` (why it is down, replacing Debezium's log diagnosis; "health_down" while a
+  young pipeline starts). `status.flink` keeps the job, its saves, copy chunks per table and the
+  cluster's components. Delete also drops the saved positions; PostgreSQL cleanup drops inactive
+  `<slot>_<n>` copy slots. `ExpireSavedPositions` (retention tick) removes set-aside positions and
+  savepoints beyond the newest ten after a week unless kept.
 - Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll
   never hands a Flink CDC workload to an agent without it (an older agent would start it as a
   Debezium container), and `AgentDriver.Apply` refuses it with the release to upgrade to
