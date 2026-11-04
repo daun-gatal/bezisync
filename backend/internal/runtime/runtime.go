@@ -178,6 +178,15 @@ type Driver interface {
 	Capacity(ctx context.Context) map[string]any
 }
 
+// ComponentLogs is a driver that reads one component of a Flink CDC pipeline ("" or "jobmanager",
+// "taskmanager-<n>", "tunnel").
+type ComponentLogs interface {
+	LogsOf(ctx context.Context, shortID, component string, tail int, previous bool) (string, error)
+}
+
+// FeatureFlinkCDC is the agent feature: the agent runs Flink CDC workloads.
+const FeatureFlinkCDC = "flink_cdc"
+
 // JVMEnv is the workload environment plus JVM settings.
 func JVMEnv(w Workload) map[string]string {
 	out := make(map[string]string, len(w.Env)+3)

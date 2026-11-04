@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -148,7 +149,7 @@ func DriverFor(ctx context.Context, q db.Querier, rt *models.Runtime) (runtime.D
 // AgentOfflineAfter: no poll for this long ⇒ the runtime is unreachable.
 const AgentOfflineAfter = 30 * time.Second
 
-var cachedPaths = map[string]string{"/q/health": "health", "/metrics": "metrics"}
+var cachedPaths = map[string]string{"/q/health": "health", "/metrics": "metrics", "/bz/status": "status"}
 
 // AgentDriver drives a runtime served by an agent.
 type AgentDriver struct{ RuntimeID uuid.UUID }
@@ -199,6 +200,16 @@ func workloads(st map[string]any) map[string]any {
 func (a *AgentDriver) Apply(ctx context.Context, w runtime.Workload) error {
 	w.Owner = a.RuntimeID.String()
 	w.Normalize()
+	if w.IsFlink() {
+		st, seen, err := a.state(ctx)
+		if err != nil {
+			return err
+		}
+		if seen != nil && !hasFeature(st, runtime.FeatureFlinkCDC) {
+			return runtime.Errorf("The agent on this runtime (%v) can't run Flink CDC pipelines. Upgrade it to BeziSync %s or later.",
+				st["version"], FlinkCDCAgentVersion)
+		}
+	}
 	pulls := sha256Hex(strings.Join(append(append([]string{}, w.ImagePullSecrets...), w.ServiceAccount), ","))[:6]
 	running := 0
 	if w.Running {
@@ -227,6 +238,15 @@ func (a *AgentDriver) Apply(ctx context.Context, w runtime.Workload) error {
 	}
 	_, err = q.Exec(ctx, `UPDATE agent_workloads SET config_hash = $1, spec_enc = $2, updated_at = $3 WHERE id = $4`, key, enc, db.Now(), row.ID)
 	return err
+}
+
+// FlinkCDCAgentVersion is the first agent release that runs Flink CDC pipelines.
+const FlinkCDCAgentVersion = "0.3.0"
+
+// hasFeature reports a feature the agent's latest poll listed.
+func hasFeature(st map[string]any, feature string) bool {
+	features, _ := st["features"].([]any)
+	return slices.Contains(features, any(feature))
 }
 
 // WorkloadDict is dataclasses.asdict(workload) (field order kept).
@@ -270,6 +290,7 @@ func (a *AgentDriver) Observe(ctx context.Context, shortID string) (runtime.Obse
 	if h, ok := report["config_hash"].(string); ok {
 		obs.ConfigHash = &h
 	}
+	obs.Details, _ = report["details"].(map[string]any)
 	return obs, nil
 }
 
@@ -343,6 +364,16 @@ func AgentRunCheck(ctx context.Context, runtimeID uuid.UUID, kind string, conn c
 // Logs asks the agent for log lines.
 func (a *AgentDriver) Logs(ctx context.Context, shortID string, tail int, previous bool) (string, error) {
 	res, err := a.request(ctx, "logs", map[string]any{"short_id": shortID, "tail": tail, "previous": previous}, 12*time.Second)
+	if err != nil {
+		return "", err
+	}
+	s, _ := res["text"].(string)
+	return s, nil
+}
+
+// LogsOf asks the agent for one component's log lines.
+func (a *AgentDriver) LogsOf(ctx context.Context, shortID, component string, tail int, previous bool) (string, error) {
+	res, err := a.request(ctx, "logs", map[string]any{"short_id": shortID, "component": component, "tail": tail, "previous": previous}, 12*time.Second)
 	if err != nil {
 		return "", err
 	}

@@ -130,17 +130,28 @@ func (a *Agent) Report(ctx context.Context) *om.Map {
 		if obs.ImagePull != "" {
 			item.Set("image_pull", obs.ImagePull)
 		}
+		if len(obs.Details) > 0 {
+			item.Set("details", obs.Details)
+		}
 		if obs.Phase == "running" {
-			healthPort := 8080
+			healthPort, flink := 8080, false
 			if w, ok := a.desired[id]; ok {
-				healthPort = w.Health()
+				healthPort, flink = w.Health(), w.IsFlink()
 			}
 			item.Set("health_port", healthPort)
+			second := struct {
+				key  string
+				port int
+				path string
+			}{"metrics", 9404, "/metrics"}
+			if flink { // the helper's evidence instead of Debezium's JMX metrics
+				second.key, second.port, second.path = "status", healthPort, "/bz/status"
+			}
 			for _, p := range []struct {
 				key  string
 				port int
 				path string
-			}{{"health", healthPort, "/q/health"}, {"metrics", 9404, "/metrics"}} {
+			}{{"health", healthPort, "/q/health"}, second} {
 				code, body, err := a.Driver.HTTPGet(ctx, id, p.port, p.path, 4*time.Second)
 				if err != nil {
 					item.Set(p.key, nil)
@@ -155,7 +166,7 @@ func (a *Agent) Report(ctx context.Context) *om.Map {
 	if results == nil {
 		results = []map[string]any{}
 	}
-	return om.New().Set("version", version.Version).Set("kind", a.Kind).Set("features", []any{"health_port"}).Set("capacity", a.Driver.Capacity(ctx)).
+	return om.New().Set("version", version.Version).Set("kind", a.Kind).Set("features", []any{"health_port", runtime.FeatureFlinkCDC}).Set("capacity", a.Driver.Capacity(ctx)).
 		Set("local_test", om.New().Set("ok", test.OK).Set("message", test.Message)).Set("workloads", workloads).Set("results", results)
 }
 
@@ -336,6 +347,14 @@ func (a *Agent) run(ctx context.Context, op string, args map[string]any) (any, e
 	switch op {
 	case "logs":
 		previous, _ := args["previous"].(bool)
+		if component, _ := args["component"].(string); component != "" {
+			c, ok := a.Driver.(runtime.ComponentLogs)
+			if !ok {
+				return nil, fmt.Errorf("this runtime has no component %s", component)
+			}
+			text, err := c.LogsOf(ctx, fmt.Sprint(args["short_id"]), component, intArg(args["tail"], 300), previous)
+			return map[string]any{"text": text}, err
+		}
 		text, err := a.Driver.Logs(ctx, fmt.Sprint(args["short_id"]), intArg(args["tail"], 300), previous)
 		return map[string]any{"text": text}, err
 	case "check":

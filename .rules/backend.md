@@ -226,6 +226,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   (hostAliases). Stopping or changing the cluster scales the JobManager to zero alone and touches the
   TaskManagers only once its pod is gone (worked out from the cluster on every Apply, no state).
   The runtime's Role needs `services` (both charts); `Test` reports `details.flink_cdc`.
+- Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll
+  never hands a Flink CDC workload to an agent without it (an older agent would start it as a
+  Debezium container), and `AgentDriver.Apply` refuses it with the release to upgrade to
+  (`FlinkCDCAgentVersion`). For Flink CDC workloads agents report `/bz/status` as `status` (instead
+  of `metrics`) and the runtime's `details` (components); `logs` takes a `component`
+  (`runtime.ComponentLogs`).
 - The helper writes its own `log4j-console.properties` (console only): the image's would also write
   rolling files, which a read-only rootfs refuses and tmpfs would hold in memory.
 - Control-plane side (`services/flinkcdc.go`): each Flink CDC pipeline's own secrets (state key,

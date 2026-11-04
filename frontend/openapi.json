@@ -9093,6 +9093,19 @@
             ],
             "title": "Config Hash"
           },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the runtime reports about the workload, such as a Flink CDC pipeline's components. Older agents never send it.",
+            "title": "Details"
+          },
           "exit_code": {
             "anyOf": [
               {
@@ -9193,6 +9206,28 @@
               }
             ],
             "title": "Started At"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A Flink CDC pipeline's helper status (/bz/status): HTTP status and body. Older agents never send it.",
+            "title": "Status"
           }
         },
         "required": [

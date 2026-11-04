@@ -5671,6 +5671,13 @@ export interface components {
         WorkloadReport: {
             /** Config Hash */
             config_hash?: string | null;
+            /**
+             * Details
+             * @description What the runtime reports about the workload, such as a Flink CDC pipeline's components. Older agents never send it.
+             */
+            details?: {
+                [key: string]: unknown;
+            } | null;
             /** Exit Code */
             exit_code?: number | null;
             /** Health */
@@ -5709,6 +5716,14 @@ export interface components {
             restarts: number;
             /** Started At */
             started_at?: string | null;
+            /**
+             * Status
+             * @description A Flink CDC pipeline's helper status (/bz/status): HTTP status and body. Older agents never send it.
+             */
+            status?: [
+                number,
+                string
+            ] | null;
         };
     };
     responses: never;

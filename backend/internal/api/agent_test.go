@@ -372,3 +372,82 @@ func TestAgentReportsHealthOnTheWorkloadsPort(t *testing.T) {
 		t.Fatal("health on 8080 was served for a workload that serves it on 9000")
 	}
 }
+
+// Flink CDC workloads reach only agents that run them (an older agent would start a Debezium
+// container); their components, helper status and component logs come back through the poll.
+func TestAgentRunsFlinkCDCOnlyWhenItCan(t *testing.T) {
+	srv := server(t)
+	admin := adminClient(t, srv)
+	pid := defaultProject(t, admin)
+	e := enroll(t, srv, admin, pid)
+	ctx := context.Background()
+	rid := e.body.Str("id")
+	proxy := &services.AgentDriver{RuntimeID: uuid.MustParse(rid)}
+	w := runtime.Workload{PipelineID: "p", ShortID: "lake", Name: "n", Image: "flink", ConfigHash: "h1", Running: true, Engine: "flink-cdc",
+		Flink: &runtime.FlinkTopology{TaskManagers: 1, HelperImage: "bezisync"}}
+	// Never connected: stored, and handed out once an agent that runs Flink CDC polls.
+	if err := proxy.Apply(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	agentPoll(t, e.agent)
+	agentPoll(t, e.agent)
+	if got := e.local.Workloads["lake"]; !got.IsFlink() || got.Flink.HelperImage != "bezisync" {
+		t.Fatalf("%+v", got)
+	}
+	obs, err := proxy.Observe(ctx, "lake")
+	if err != nil || obs.Details["components"] == nil {
+		t.Fatalf("%+v %v", obs, err)
+	}
+	if code, body, err := proxy.HTTPGet(ctx, "lake", 8080, "/bz/status", time.Second); err != nil || code != 200 || !strings.Contains(body, "running") {
+		t.Fatal(code, body, err)
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_, _ = e.agent.Poll(ctx)
+			time.Sleep(200 * time.Millisecond)
+		}
+	})
+	logs, err := proxy.LogsOf(ctx, "lake", "taskmanager-1", 100, false)
+	close(stop)
+	wg.Wait()
+	if err != nil || logs != "logs of taskmanager-1" {
+		t.Fatal(logs, err)
+	}
+
+	// An agent from before Flink CDC: Apply says to upgrade, and the poll withholds the workload.
+	exec(t, `UPDATE runtimes SET agent_state = jsonb_set(agent_state, '{features}', '["health_port"]') WHERE id = '`+rid+`'`)
+	w.ConfigHash = "h2"
+	if err := proxy.Apply(ctx, w); err == nil || !strings.Contains(err.Error(), "can't run Flink CDC pipelines. Upgrade it to BeziSync 0.3.0") {
+		t.Fatal(err)
+	}
+	poll := func(features string) []any {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/api/v1/agent/poll",
+			strings.NewReader(`{"version": "0.2.0", "kind": "docker", "features": `+features+`, "workloads": {}, "results": []}`))
+		req.Header.Set("Authorization", "Bearer "+e.body.Str("agent_token"))
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		var out struct{ Workloads []any }
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil || res.StatusCode != http.StatusOK {
+			t.Fatal(res.StatusCode, err)
+		}
+		return out.Workloads
+	}
+	if got := poll(`["health_port"]`); len(got) != 0 {
+		t.Fatal("an agent without flink_cdc got a Flink CDC workload", got)
+	}
+	if got := poll(`["health_port", "flink_cdc"]`); len(got) != 1 {
+		t.Fatal("the upgraded agent did not get it", got)
+	}
+}
