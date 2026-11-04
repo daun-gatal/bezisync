@@ -18,6 +18,20 @@ export interface Caps {
 
 export const NO_CAPS: Caps = { value_formats: {}, key_columns: false, row_filters: false };
 
+/** Step types that run only on Debezium (the Flink CDC compiler refuses them). */
+export const DEBEZIUM_ONLY_STEPS: readonly TransformType[] = ['outbox', 'flatten', 'custom'];
+
+/**
+ * What the Transform step offers: the source's capabilities, without epoch timestamps for a
+ * destination that can't read them (time_precision), and without value formats on Flink CDC,
+ * which writes each column with its own type.
+ */
+export function stepCaps(source: Caps, timePrecision: boolean, flink: boolean): Caps {
+  if (flink) return { ...source, value_formats: {} };
+  if (!timePrecision) return source;
+  return { ...source, value_formats: { ...source.value_formats, timestamps: source.value_formats.timestamps?.filter((m) => m !== 'epoch') } };
+}
+
 export const TYPE_TITLE: Record<TransformType, string> = {
   unwrap: 'Event shape',
   filter: 'Keep only some events',

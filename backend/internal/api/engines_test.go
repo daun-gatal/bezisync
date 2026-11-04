@@ -103,6 +103,11 @@ func TestPipelineEngineChoice(t *testing.T) {
 	if r := e.admin.post(base, fl).expect(422); r.Code() != "engine_settings" {
 		t.Fatal(string(r.Raw))
 	}
+	// Value formats are Debezium's: refused when saved, not only when the configuration is built.
+	fv := map[string]any{"name": "fv", "source_id": e.ids.Source, "sink_id": lake, "engine": "flink-cdc", "spec": map[string]any{"values": map[string]any{"decimals": "double"}}}
+	if r := e.admin.post(base, fv).expect(422); r.Code() != "engine_settings" || !strings.Contains(r.Str("detail"), "Value formats") {
+		t.Fatal(string(r.Raw))
+	}
 
 	// Moving a Flink CDC draft to a destination Flink CDC can't write moves it to Debezium,
 	// unless its spec holds Flink CDC settings.
