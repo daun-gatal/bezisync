@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -23,18 +24,28 @@ type fakeDocker struct {
 	pulls      int
 	// pull streams one download; it runs in the request handler, so it can be slow.
 	pull func(ctx context.Context, ref string, w http.ResponseWriter)
+
+	networks map[string]map[string]any // name → create body
+	volumes  map[string]map[string]any // name → create body
+	stopped  []string                  // container names in stop order, with "?t=" timeouts
+	exit     int                       // exit code /wait reports
+	stopErr  map[string]bool           // containers whose stop fails
 }
 
 type fakeContainer struct {
-	Image  string
-	Labels map[string]string
-	Status string
+	Image    string
+	Labels   map[string]string
+	Status   string
+	Body     map[string]any // the create request
+	Archive  []byte         // the last copy into the container
+	Networks []string       // networks connected after create
 }
 
 var apiVersion = regexp.MustCompile(`^/v[0-9.]+`)
 
 func newFakeDocker(t *testing.T) (*fakeDocker, string) {
-	f := &fakeDocker{images: map[string]bool{}, containers: map[string]*fakeContainer{}}
+	f := &fakeDocker{images: map[string]bool{}, containers: map[string]*fakeContainer{}, networks: map[string]map[string]any{},
+		volumes: map[string]map[string]any{}, stopErr: map[string]bool{}}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	return f, "tcp://" + strings.TrimPrefix(srv.URL, "http://")
@@ -67,17 +78,24 @@ func (f *fakeDocker) serve(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 		f.pull(r.Context(), ref, w)
 	case path == "/containers/create":
+		var raw map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		b, _ := json.Marshal(raw)
 		var body struct {
 			Image  string
 			Labels map[string]string
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.Unmarshal(b, &body)
 		name := r.URL.Query().Get("name")
 		f.mu.Lock()
-		f.containers[name] = &fakeContainer{Image: body.Image, Labels: body.Labels, Status: "created"}
+		f.containers[name] = &fakeContainer{Image: body.Image, Labels: body.Labels, Status: "created", Body: raw}
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"Id": name})
+	case path == "/containers/json":
+		f.list(w, r)
+	case strings.HasPrefix(path, "/networks") || strings.HasPrefix(path, "/volumes"):
+		f.resources(w, r, path)
 	case strings.HasPrefix(path, "/containers/"):
 		parts := strings.Split(strings.TrimPrefix(path, "/containers/"), "/")
 		f.mu.Lock()
@@ -93,19 +111,88 @@ func (f *fakeDocker) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		case len(parts) == 2 && parts[1] == "json":
 			_ = json.NewEncoder(w).Encode(map[string]any{"Id": parts[0], "Name": "/" + parts[0],
-				"Config": map[string]any{"Image": c.Image, "Labels": c.Labels}, "State": map[string]any{"Status": c.Status},
+				"Config": map[string]any{"Image": c.Image, "Labels": c.Labels, "StopTimeout": c.Body["StopTimeout"]}, "State": map[string]any{"Status": c.Status},
 				"HostConfig": map[string]any{"RestartPolicy": map[string]any{"Name": "unless-stopped"}}})
 		case len(parts) == 2 && parts[1] == "archive":
+			c.Archive, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusOK)
+		case len(parts) == 2 && parts[1] == "wait":
+			_ = json.NewEncoder(w).Encode(map[string]any{"StatusCode": f.exit})
 		case len(parts) == 2 && parts[1] == "start":
 			c.Status = "running"
 			w.WriteHeader(http.StatusNoContent)
 		case len(parts) == 2 && parts[1] == "stop":
+			f.stopped = append(f.stopped, parts[0]+"?t="+r.URL.Query().Get("t"))
+			if f.stopErr[parts[0]] {
+				http.Error(w, `{"message":"cannot stop"}`, http.StatusInternalServerError)
+				return
+			}
 			c.Status = "exited"
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "unexpected "+r.Method+" "+path, http.StatusNotImplemented)
 		}
+	default:
+		http.Error(w, "unexpected "+r.Method+" "+path, http.StatusNotImplemented)
+	}
+}
+
+// list answers GET /containers/json, filtered by label ("k" or "k=v").
+func (f *fakeDocker) list(w http.ResponseWriter, r *http.Request) {
+	var filters map[string]map[string]bool
+	_ = json.Unmarshal([]byte(r.URL.Query().Get("filters")), &filters)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []map[string]any{}
+	for name, c := range f.containers {
+		if r.URL.Query().Get("all") == "" && c.Status != "running" {
+			continue
+		}
+		ok := true
+		for want := range filters["label"] {
+			k, v, hasV := strings.Cut(want, "=")
+			got, has := c.Labels[k]
+			ok = ok && has && (!hasV || got == v)
+		}
+		if ok {
+			out = append(out, map[string]any{"Id": name, "Names": []string{"/" + name}, "Labels": c.Labels, "State": c.Status})
+		}
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// resources answers the network and volume calls.
+func (f *fakeDocker) resources(w http.ResponseWriter, r *http.Request, path string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	kind, store := parts[0], f.networks
+	if kind == "volumes" {
+		store = f.volumes
+	}
+	switch {
+	case len(parts) == 2 && parts[1] == "create":
+		store[fmt.Sprint(body["Name"])] = body
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": body["Name"], "Name": body["Name"]})
+	case len(parts) == 3 && parts[2] == "connect":
+		c := f.containers[fmt.Sprint(body["Container"])]
+		if c == nil {
+			http.Error(w, `{"message":"No such container"}`, http.StatusNotFound)
+			return
+		}
+		c.Networks = append(c.Networks, parts[1])
+		w.WriteHeader(http.StatusOK)
+	case len(parts) == 2 && store[parts[1]] == nil:
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "No such " + kind})
+	case len(parts) == 2 && r.Method == http.MethodDelete:
+		delete(store, parts[1])
+		w.WriteHeader(http.StatusNoContent)
+	case len(parts) == 2:
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": parts[1], "Name": parts[1]})
 	default:
 		http.Error(w, "unexpected "+r.Method+" "+path, http.StatusNotImplemented)
 	}

@@ -25,6 +25,8 @@ const (
 	// ConfigDir holds the files BeziSync writes: settings.json, flink-conf.yaml, pipeline.yaml and
 	// the TLS keystore.
 	DefaultConfigDir = "/opt/bezisync/config"
+	// SecretsDir holds secret files BeziSync writes (keystore.p12.b64).
+	DefaultSecretsDir = "/opt/bezisync/secrets" //nolint:gosec // a directory path, not a credential
 	// WorkDir is writable scratch space (tmpfs or emptyDir): the per-pipeline lib and conf dirs.
 	DefaultWorkDir = "/tmp/bezisync"
 	// FlinkHome and FlinkCDCHome are where the image keeps Flink and Flink CDC.

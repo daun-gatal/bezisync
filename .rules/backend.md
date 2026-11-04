@@ -207,6 +207,16 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   that don't heal (renamed or missing destination tables, replica identity, transforms), serves
   `/q/health` and `/bz/status`, and on SIGTERM stops with a canonical savepoint (`drain: false`) it
   stores before exiting (falling back to the newest checkpoint).
+- Flink CDC on Docker (`runtime/docker_flink.go`, `Workload.Flink`): a private network
+  `bz-<id>-net` (the runtime's network is joined too), volumes `bz-<id>-opt` (the helper, copied by
+  a short-lived container from `Flink.HelperImage` running `install-self`; `config/` and `secrets/`
+  owned by uid 9999, secrets 0600) and `bz-<id>-state` (tmpfs, `StateSize`), the JobManager `bz-<id>`
+  (the only container with `Workload.Env`), TaskManagers `bz-<id>-tm-N` and the tunnel on the private
+  network as `bz-tunnel` (`tunnel --listen-host 0.0.0.0`). Every container has a read-only rootfs,
+  no capabilities and an exec tmpfs `/tmp`. A config-hash or TaskManager change stops the running
+  cluster first, then recreates it on a later Apply; stops run in the background, JobManager first
+  within `StopGraceSeconds` (it saves the position), and Observe reports them as pending. `LogsOf`
+  reads one component (`jobmanager`, `taskmanager-N`, `tunnel`).
 - Control-plane side (`services/flinkcdc.go`): each Flink CDC pipeline's own secrets (state key,
   TLS keystore shared by its JobManager and TaskManagers, PKCS#12 via `go-pkcs12`) are generated once
   and sealed in `pipelines.engine_secrets_enc` (re-encrypted by `rotate-master-key`). Saved positions

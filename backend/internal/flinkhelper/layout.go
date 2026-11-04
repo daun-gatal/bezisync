@@ -1,6 +1,7 @@
 package flinkhelper
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +13,12 @@ import (
 
 // Layout is where things are in the container.
 type Layout struct {
-	ConfigDir, WorkDir, FlinkHome, FlinkCDCHome string
+	ConfigDir, SecretsDir, WorkDir, FlinkHome, FlinkCDCHome string
 }
 
 // DefaultLayout is the layout of the reference image (deploy/images/flink-cdc).
 func DefaultLayout() Layout {
-	return Layout{ConfigDir: DefaultConfigDir, WorkDir: DefaultWorkDir, FlinkHome: DefaultFlinkHome, FlinkCDCHome: DefaultFlinkCDCHome}
+	return Layout{ConfigDir: DefaultConfigDir, SecretsDir: DefaultSecretsDir, WorkDir: DefaultWorkDir, FlinkHome: DefaultFlinkHome, FlinkCDCHome: DefaultFlinkCDCHome}
 }
 
 // LibDir and ConfDir are the per-pipeline Flink lib and conf directories the helper builds.
@@ -81,6 +82,10 @@ func (l Layout) Prepare(s Settings) error {
 			return fmt.Errorf("classpath: %w", err)
 		}
 	}
+	// The TLS keystore BeziSync generated travels base64-encoded; Flink reads the binary file.
+	if err := l.writeKeystore(); err != nil {
+		return err
+	}
 	// Flink's own configuration (logging, the image's config.yaml with its JVM options); BeziSync's
 	// settings are passed as dynamic properties on top (DynamicProperties).
 	entries, err := os.ReadDir(filepath.Join(l.FlinkHome, "conf"))
@@ -121,6 +126,27 @@ func (l Layout) DynamicProperties() ([]string, error) {
 		out = append(out, "-D", key+"="+value)
 	}
 	return out, nil
+}
+
+// KeystorePath is where the pipeline's TLS keystore is written for Flink.
+func (l Layout) KeystorePath() string { return filepath.Join(l.WorkDir, "keystore.p12") }
+
+func (l Layout) writeKeystore() error {
+	if l.SecretsDir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(l.SecretsDir, "keystore.p12.b64")) //nolint:gosec // BeziSync's secrets dir
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	ks, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return fmt.Errorf("the pipeline's keystore is not valid base64: %w", err)
+	}
+	return os.WriteFile(l.KeystorePath(), ks, 0o600) //nolint:gosec // BeziSync's own work dir
 }
 
 // hasDriver reports a driver JAR for name among the image's drivers ("mysql" matches

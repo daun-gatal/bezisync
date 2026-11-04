@@ -91,6 +91,34 @@ func TestPrepareBuildsClasspathAndConf(t *testing.T) {
 	}
 }
 
+func TestPrepareWritesTheKeystore(t *testing.T) {
+	l := fakeImage(t, []string{"mysql"})
+	l.SecretsDir = filepath.Join(t.TempDir(), "secrets")
+	if err := os.MkdirAll(l.SecretsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Prepare(validSettings("mysql")); err != nil {
+		t.Fatal(err) // no keystore: nothing to write
+	}
+	if err := os.WriteFile(filepath.Join(l.SecretsDir, "keystore.p12.b64"), []byte("a2V5c3RvcmUtYnl0ZXM=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Prepare(validSettings("mysql")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(l.KeystorePath())
+	got, _ := os.ReadFile(l.KeystorePath())
+	if err != nil || string(got) != "keystore-bytes" || info.Mode().Perm() != 0o600 {
+		t.Fatalf("keystore %q %v %v", got, info, err)
+	}
+	if err := os.WriteFile(filepath.Join(l.SecretsDir, "keystore.p12.b64"), []byte("not base64!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Prepare(validSettings("mysql")); err == nil || !strings.Contains(err.Error(), "base64") {
+		t.Fatalf("invalid keystore: %v", err)
+	}
+}
+
 func TestPrepareExplainsWhatTheImageLacks(t *testing.T) {
 	l := fakeImage(t, []string{"mysql", "starrocks"})
 	s := validSettings("mysql", "starrocks")
