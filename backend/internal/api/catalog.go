@@ -9,6 +9,7 @@ import (
 
 	"github.com/daun-gatal/bezisync/backend/internal/auth"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/httpapi"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
@@ -40,8 +41,8 @@ type catalogEntryRead struct {
 	Projects        *[]catalogProjectUsage `json:"projects"`
 }
 
-// readCatalog is the install-wide image catalog; Admins also see where each image runs.
-func readCatalog(ctx context.Context, q db.Querier, p *auth.Principal) (*om.Map, error) {
+// readCatalog is an engine's install-wide image catalog; Admins also see where each image runs.
+func readCatalog(ctx context.Context, q db.Querier, p *auth.Principal, id engine.ID) (*om.Map, error) {
 	admin := p.User.IsSuperuser
 	usage := map[string][]catalogProjectUsage{}
 	if admin {
@@ -60,11 +61,11 @@ func readCatalog(ctx context.Context, q db.Querier, p *auth.Principal) (*om.Map,
 			}
 		}
 	}
-	def, err := services.DefaultImage(ctx, q)
+	def, err := services.DefaultImageFor(ctx, q, id)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := services.CatalogEntries(ctx, q)
+	entries, err := services.CatalogEntriesFor(ctx, q, id)
 	if err != nil {
 		return nil, err
 	}
@@ -90,11 +91,23 @@ func readCatalog(ctx context.Context, q db.Querier, p *auth.Principal) (*om.Map,
 		}
 		out[i] = er
 	}
-	return obj("default_image", def, "entries", out), nil
+	return obj("engine", string(id), "default_image", def, "entries", out), nil
+}
+
+// catalogEngine reads the ?engine= of a catalog request (Debezium when absent).
+func catalogEngine(r *http.Request) (engine.ID, error) {
+	raw := r.URL.Query().Get("engine")
+	if raw == "" {
+		return engine.Debezium, nil
+	}
+	if id := engine.ID(raw); id.Valid() {
+		return id, nil
+	}
+	return "", problem.New(422, "unknown_engine", "Unknown engine '"+raw+"'.")
 }
 
 func makeDefault(ctx context.Context, q db.Querier, row *models.DebeziumImage) error {
-	if _, err := q.Exec(ctx, `UPDATE debezium_images SET is_default = FALSE WHERE id != $1`, row.ID); err != nil {
+	if _, err := q.Exec(ctx, `UPDATE debezium_images SET is_default = FALSE WHERE id != $1 AND engine = $2`, row.ID, row.Engine); err != nil {
 		return err
 	}
 	row.IsDefault, row.Deprecated = true, false
@@ -115,8 +128,12 @@ func catalogRoutes(r chi.Router) {
 		if err != nil {
 			return err
 		}
+		id, err := catalogEngine(r)
+		if err != nil {
+			return err
+		}
 		ctx := r.Context()
-		out, err := readCatalog(ctx, pool(ctx), p)
+		out, err := readCatalog(ctx, pool(ctx), p, id)
 		if err != nil {
 			return err
 		}
@@ -131,11 +148,16 @@ func catalogRoutes(r chi.Router) {
 		type create struct {
 			Image, Label, Notes string
 			IsDefault           bool
+			Engine              engine.ID
 		}
 		b, err := body(r, func(v *val.V, o *val.Object) create {
-			return create{Image: str(v, o, "image", "", val.StrRules{Max: 300, Pattern: imagePattern}, true),
+			c := create{Image: str(v, o, "image", "", val.StrRules{Max: 300, Pattern: imagePattern}, true),
 				Label: str(v, o, "label", "", val.StrRules{Max: 100}, false), Notes: str(v, o, "notes", "", val.StrRules{Max: 2000}, false),
-				IsDefault: boolean(v, o, "is_default", false)}
+				IsDefault: boolean(v, o, "is_default", false), Engine: engine.Debezium}
+			if e := optEngine(v, o); e != nil {
+				c.Engine = engine.ID(*e)
+			}
+			return c
 		})
 		if err != nil {
 			return err
@@ -151,7 +173,8 @@ func catalogRoutes(r chi.Router) {
 				return problem.Conflict("image_exists", b.Image+" is already in the catalog.", nil)
 			}
 			now := db.Now()
-			row := &models.DebeziumImage{ID: db.NewID(), Image: b.Image, Label: b.Label, Notes: b.Notes, CreatedByID: &p.User.ID, CreatedAt: now, UpdatedAt: now}
+			row := &models.DebeziumImage{ID: db.NewID(), Image: b.Image, Label: b.Label, Notes: b.Notes, Engine: string(b.Engine),
+				CreatedByID: &p.User.ID, CreatedAt: now, UpdatedAt: now}
 			if b.IsDefault {
 				if err := makeDefault(ctx, q, row); err != nil {
 					return err
@@ -160,7 +183,7 @@ func catalogRoutes(r chi.Router) {
 			if err := db.Insert(ctx, q, "debezium_images", row); err != nil {
 				return err
 			}
-			summary := "Added Debezium image " + b.Image
+			summary := "Added " + b.Engine.Title() + " image " + b.Image
 			if b.IsDefault {
 				summary += " as the default"
 			}
@@ -168,7 +191,7 @@ func catalogRoutes(r chi.Router) {
 				ResourceType: "debezium_image", ResourceID: &row.ID}); err != nil {
 				return err
 			}
-			out, err = readCatalog(ctx, q, p)
+			out, err = readCatalog(ctx, q, p, b.Engine)
 			return err
 		})
 		if err != nil {
@@ -229,7 +252,7 @@ func catalogRoutes(r chi.Router) {
 			if err := db.Update(ctx, q, "debezium_images", row); err != nil {
 				return err
 			}
-			summary := "Updated Debezium image " + row.Image
+			summary := "Updated " + engine.Of(row.Engine).Title() + " image " + row.Image
 			if b.IsDefault != nil && *b.IsDefault {
 				summary += " (now the default)"
 			}
@@ -240,7 +263,7 @@ func catalogRoutes(r chi.Router) {
 				ResourceType: "debezium_image", ResourceID: &row.ID}); err != nil {
 				return err
 			}
-			out, err = readCatalog(ctx, q, p)
+			out, err = readCatalog(ctx, q, p, engine.Of(row.Engine))
 			return err
 		})
 		if err != nil {
@@ -271,11 +294,11 @@ func catalogRoutes(r chi.Router) {
 			if err := db.Delete(ctx, q, "debezium_images", row.ID); err != nil {
 				return err
 			}
-			if _, err := services.Record(ctx, q, services.AuditEvent{Kind: "debezium_image.removed", Summary: "Removed Debezium image " + row.Image + " from the catalog",
+			if _, err := services.Record(ctx, q, services.AuditEvent{Kind: "debezium_image.removed", Summary: "Removed " + engine.Of(row.Engine).Title() + " image " + row.Image + " from the catalog",
 				Principal: p, ResourceType: "debezium_image", ResourceID: &row.ID}); err != nil {
 				return err
 			}
-			out, err = readCatalog(ctx, q, p)
+			out, err = readCatalog(ctx, q, p, engine.Of(row.Engine))
 			return err
 		})
 		if err != nil {

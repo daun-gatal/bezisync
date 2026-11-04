@@ -175,6 +175,16 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   engine can do (edit offsets, copy a table again, saved positions, event formats…), with `Why` for
   every unavailable action. Capabilities always come from the engine, never from the destination
   type; a source's own `capture` limits still apply on top.
+- A pipeline's engine is stored on its row (`pipelines.engine`, `services.ChooseEngine`): chosen with
+  the destination (the requested one, else the current one while it still runs the pair, else the
+  default), fixed once deployed (`engine_after_deploy`). The spec's Flink CDC block (`flink_cdc`:
+  schema changes, new columns, freshness, commit interval, Flink settings) and `flink_cdc_image` are
+  refused on Debezium pipelines and `debezium_image` on Flink CDC ones (`ValidateEngineSpec`); on Flink
+  CDC, `keys` are the destination primary key of a table that has none. Both new spec fields are
+  dumped only when set, so existing specs and their hashes never change. Project policy
+  `allowed_engines` (`policy_engine`) limits engines. The image catalog (`debezium_images`, routes
+  `/debezium-catalog?engine=`) holds both engines' images with one default per engine; each engine's
+  install default comes from `BEZISYNC_DEBEZIUM_DEFAULT_IMAGE` / `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`.
 - `domain.PipelineSpec` is the contract (API body, YAML, wizard); it serialises in declaration order.
   One change is one `PipelineVersion`: while the current version is unsealed (`sealed_at` null) and
   the caller made it, `UpdatePipeline` updates it in place (wizard steps and autosave never pile up

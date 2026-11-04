@@ -18,6 +18,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
@@ -307,14 +308,31 @@ type NewPipeline struct {
 	SourceID                 uuid.UUID
 	SinkID, RuntimeID        *uuid.UUID
 	Spec                     domain.PipelineSpec
+	// Engine is the requested engine ("" = the default for the source and destination).
+	Engine string
 }
 
 // CreatePipeline creates a draft pipeline with version 1.
 func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n NewPipeline) (*models.Pipeline, error) {
-	if _, err := GetConnectionOfKind(ctx, q, a.Project.ID, n.SourceID, "source"); err != nil {
+	source, err := GetConnectionOfKind(ctx, q, a.Project.ID, n.SourceID, "source")
+	if err != nil {
 		return nil, err
 	}
 	if err := ValidateSinkSpec(ctx, q, a.Project.ID, n.SinkID, n.Spec); err != nil {
+		return nil, err
+	}
+	sinkType, err := connectionType(ctx, q, n.SinkID)
+	if err != nil {
+		return nil, err
+	}
+	eng, err := ChooseEngine(n.Engine, "", source.Type, sinkType)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateEngineSpec(eng, n.Spec); err != nil {
+		return nil, err
+	}
+	if err := enforceEnginePolicy(ctx, q, a.Project.ID, eng); err != nil {
 		return nil, err
 	}
 	if n.RuntimeID != nil {
@@ -334,7 +352,7 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	}
 	now := db.Now()
 	p := &models.Pipeline{ID: db.NewID(), ProjectID: a.Project.ID, Name: n.Name, Description: n.Description, Owner: n.Owner,
-		Labels: labels, SourceID: n.SourceID, SinkID: n.SinkID, RuntimeID: n.RuntimeID, DesiredState: "paused",
+		Labels: labels, SourceID: n.SourceID, SinkID: n.SinkID, RuntimeID: n.RuntimeID, DesiredState: "paused", Engine: string(eng),
 		Status: db.Map{"lifecycle": "draft", "health": "unknown", "summary": "Not deployed yet."}, Lifecycle: "draft",
 		Health: "unknown", Artifacts: db.Map{}, Version: 1, CreatedByID: &a.Principal.User.ID, CreatedAt: now, UpdatedAt: now}
 	if err := db.Insert(ctx, q, "pipelines", p); err != nil {
@@ -405,10 +423,64 @@ type PipelineEdit struct {
 	Labels                   map[string]string
 	LabelsSet                bool
 	RuntimeID, SinkID        *uuid.UUID
-	Note                     string
+	// Engine is a requested engine; nil keeps the current one while it still runs the pipeline.
+	Engine *string
+	Note   string
 	// Separate always starts a new version (a change that must be its own, like a Debezium image
 	// move), instead of updating the caller's working draft.
 	Separate bool
+}
+
+// nextEngine is the engine a pipeline has after an edit: the requested one, or the current one
+// while it still runs the (new) destination, else the pair's default. A deployed pipeline keeps
+// its engine; the spec must hold only settings of that engine.
+func nextEngine(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, e PipelineEdit) (engine.ID, error) {
+	current := EngineOf(p)
+	sinkID := p.SinkID
+	if e.SinkID != nil {
+		sinkID = e.SinkID
+	}
+	requested := ""
+	if e.Engine != nil {
+		requested = *e.Engine
+	}
+	id := current
+	sinkChanged := e.SinkID != nil && (p.SinkID == nil || *e.SinkID != *p.SinkID)
+	if requested != "" || sinkChanged {
+		sourceType, err := connectionType(ctx, q, &p.SourceID)
+		if err != nil {
+			return "", err
+		}
+		sinkType, err := connectionType(ctx, q, sinkID)
+		if err != nil {
+			return "", err
+		}
+		if id, err = ChooseEngine(requested, p.Engine, sourceType, sinkType); err != nil {
+			return "", err
+		}
+	}
+	if id != current {
+		if p.DeployedVersionID != nil {
+			return "", problem.Conflict("engine_after_deploy", "The engine of a deployed pipeline can't change. Create a new pipeline.", nil)
+		}
+		if err := enforceEnginePolicy(ctx, q, a.Project.ID, id); err != nil {
+			return "", err
+		}
+	}
+	spec := e.Spec
+	if spec == nil && id != current {
+		if spec, err := SpecOf(ctx, q, p.CurrentVersionID); err != nil {
+			return "", err
+		} else if spec != nil {
+			return id, ValidateEngineSpec(id, *spec)
+		}
+	}
+	if spec != nil {
+		if err := ValidateEngineSpec(id, *spec); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
 }
 
 // UpdatePipeline applies an edit; returns the version holding the spec when it changed: the
@@ -418,6 +490,10 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 	if e.ExpectedVersion != p.Version {
 		return nil, problem.New(412, "version_conflict", "Someone else changed this pipeline. Reload and try again.").
 			WithExtra(map[string]any{"current_version": p.Version})
+	}
+	eng, err := nextEngine(ctx, q, a, p, e)
+	if err != nil {
+		return nil, err
 	}
 	var created *models.PipelineVersion
 	if e.Spec != nil {
@@ -500,6 +576,7 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		}
 		p.RuntimeID = e.RuntimeID
 	}
+	p.Engine = string(eng)
 	p.Version++
 	if err := SavePipeline(ctx, q, p); err != nil {
 		return nil, err
@@ -508,7 +585,7 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 	if created != nil {
 		summary += fmt.Sprintf(" → v%d", created.Number)
 	}
-	_, err := Record(ctx, q, AuditEvent{Kind: "pipeline.updated", Summary: summary, ProjectID: &a.Project.ID, Principal: a.Principal,
+	_, err = Record(ctx, q, AuditEvent{Kind: "pipeline.updated", Summary: summary, ProjectID: &a.Project.ID, Principal: a.Principal,
 		ResourceType: "pipeline", ResourceID: &p.ID})
 	return created, err
 }

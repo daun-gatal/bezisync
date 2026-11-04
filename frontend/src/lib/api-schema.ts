@@ -2173,6 +2173,11 @@ export interface components {
         };
         /** CatalogCreate */
         CatalogCreate: {
+            /**
+             * Engine
+             * @description The engine the image runs (default debezium).
+             */
+            engine?: ("debezium" | "flink-cdc") | null;
             /** Image */
             image: string;
             /**
@@ -2234,6 +2239,11 @@ export interface components {
         CatalogRead: {
             /** Default Image */
             default_image: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
             /** Entries */
             entries: components["schemas"]["CatalogEntryRead"][];
         };
@@ -2837,6 +2847,41 @@ export interface components {
             /** Type */
             type: string;
         };
+        /**
+         * EngineCaps
+         * @description What the pipeline's engine can do. Actions it can't do carry a reason in why (action → text).
+         */
+        EngineCaps: {
+            /** Add Tables */
+            add_tables: boolean;
+            /** Edit Position */
+            edit_position: boolean;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
+            /** Event Formats */
+            event_formats: boolean;
+            /** Hash Mask */
+            hash_mask: boolean;
+            /** Parallel Copy */
+            parallel_copy: boolean;
+            /** Recopy Table */
+            recopy_table: boolean;
+            /** Resize Parallelism */
+            resize_parallelism: boolean;
+            /** Saved Positions */
+            saved_positions: boolean;
+            /** Schema Changes */
+            schema_changes: boolean;
+            /** Start From Time */
+            start_from_time: boolean;
+            /** Why */
+            why: {
+                [key: string]: string;
+            };
+        };
         /** ErrorPolicy */
         ErrorPolicy: {
             /**
@@ -3031,6 +3076,39 @@ export interface components {
              * @default DBA
              */
             who: string;
+        };
+        /**
+         * FlinkCDCSpec
+         * @description Choices of a pipeline that runs on Flink CDC. Unset fields take their default; returned only when something is set.
+         */
+        FlinkCDCSpec: {
+            /**
+             * Commit Seconds
+             * @description How often the position is saved and, for Iceberg, new data becomes visible (default 60).
+             */
+            commit_seconds?: (30 | 60 | 300) | null;
+            /**
+             * Flink Conf
+             * @description Flink settings chosen from the catalogue (key → value).
+             */
+            flink_conf?: {
+                [key: string]: string;
+            };
+            /**
+             * Freshness Seconds
+             * @description How long a change may wait in a load batch (StarRocks, Doris; default 5).
+             */
+            freshness_seconds?: (2 | 5 | 30) | null;
+            /**
+             * New Columns
+             * @description hold: a new source column is left out until someone reviews it (default); send: it is sent as it is.
+             */
+            new_columns?: ("hold" | "send") | null;
+            /**
+             * Schema Changes
+             * @description What happens when a source table changes shape (default apply).
+             */
+            schema_changes?: ("apply" | "ignore" | "stop") | null;
         };
         /** FormatSpec */
         FormatSpec: {
@@ -3590,6 +3668,11 @@ export interface components {
              * @default
              */
             description: string;
+            /**
+             * Engine
+             * @description The engine (default: Debezium wherever it can run the source and destination, else Flink CDC). Fixed once deployed.
+             */
+            engine?: ("debezium" | "flink-cdc") | null;
             /** Labels */
             labels?: {
                 [key: string]: string;
@@ -3650,6 +3733,7 @@ export interface components {
             artifacts: {
                 [key: string]: unknown;
             };
+            caps: components["schemas"]["EngineCaps"];
             /**
              * Created At
              * Format: date-time
@@ -3665,6 +3749,11 @@ export interface components {
             description: string;
             /** Desired State */
             desired_state: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
             /** Has Undeployed Changes */
             has_undeployed_changes: boolean;
             /** Health */
@@ -3709,9 +3798,15 @@ export interface components {
             };
             /** Debezium Image */
             debezium_image?: string | null;
+            flink_cdc?: components["schemas"]["FlinkCDCSpec"];
+            /**
+             * Flink Cdc Image
+             * @description Flink CDC image pinned for this pipeline. Returned only when set.
+             */
+            flink_cdc_image?: string | null;
             /**
              * Keys
-             * @description Message key columns per captured table (overrides the primary key). Returned only when set.
+             * @description Key columns per captured table. Debezium: message key (overrides the primary key). Flink CDC: the destination primary key of a table without one. Returned only when set.
              */
             keys?: {
                 [key: string]: string[];
@@ -3728,6 +3823,11 @@ export interface components {
         PipelineUpdate: {
             /** Description */
             description?: string | null;
+            /**
+             * Engine
+             * @description The engine (default: Debezium wherever it can run the source and destination, else Flink CDC). Fixed once deployed.
+             */
+            engine?: ("debezium" | "flink-cdc") | null;
             /** Labels */
             labels?: {
                 [key: string]: string;
@@ -3914,6 +4014,11 @@ export interface components {
              * @description Lets pipelines run filter scripts their authors wrote. Scripts run inside the connector, next to its credentials. Returned only when true.
              */
             allow_scripted_transforms?: boolean;
+            /**
+             * Allowed Engines
+             * @description Engines pipelines may run on (null = every engine). Returned only when set.
+             */
+            allowed_engines?: ("debezium" | "flink-cdc")[] | null;
             /** Allowed Runtime Ids */
             allowed_runtime_ids?: string[] | null;
             /** Allowed Sink Types */
@@ -5912,7 +6017,10 @@ export interface operations {
     };
     read_catalog_api_v1_debezium_catalog_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The engine whose images to list (default debezium). */
+                engine?: "debezium" | "flink-cdc";
+            };
             header?: never;
             path?: never;
             cookie?: never;

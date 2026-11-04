@@ -2072,6 +2072,13 @@ Fix:
 Ask an Admin to change the policy under Settings → Policies.
 ```
 
+<a id="policy-engine"></a>
+### `policy_engine`
+
+**Engine**
+
+- Why: This project does not allow pipelines on {engine}.
+
 <a id="policy-ok"></a>
 ### `policy_ok`
 

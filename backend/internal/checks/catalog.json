@@ -1981,6 +1981,17 @@
    ]
   },
   {
+   "code": "policy_engine",
+   "fixes": [],
+   "section": "Project policies",
+   "titles": [
+    "Engine"
+   ],
+   "whys": [
+    "This project does not allow pipelines on {engine}."
+   ]
+  },
+  {
    "code": "policy_snapshot_mode",
    "fixes": [
     "Pick an allowed snapshot mode in the pipeline settings."

@@ -117,7 +117,11 @@ type PipelineSpec struct {
 	Advanced      map[string]string `json:"advanced"`
 	// Added after the Python releases; dumped only when set.
 	Values ValueFormats        `json:"values"`
-	Keys   map[string][]string `json:"keys"` // table → message key columns
+	Keys   map[string][]string `json:"keys"` // table → message key columns (Flink CDC: destination primary key)
+	// FlinkCDC are the choices of a pipeline that runs on Flink CDC; FlinkCDCImage pins its image
+	// like DebeziumImage does for Debezium. Both are dumped only when set.
+	FlinkCDC      FlinkCDCSpec `json:"flink_cdc"`
+	FlinkCDCImage *string      `json:"flink_cdc_image"`
 }
 
 // DefaultTransform is Transform(type=...) with defaults.
@@ -173,6 +177,11 @@ func (s PipelineSpec) Clone() PipelineSpec {
 	out.Advanced = make(map[string]string, len(s.Advanced))
 	for k, v := range s.Advanced {
 		out.Advanced[k] = v
+	}
+	out.FlinkCDC = s.FlinkCDC.clone()
+	if s.FlinkCDCImage != nil {
+		image := *s.FlinkCDCImage
+		out.FlinkCDCImage = &image
 	}
 	return out
 }
@@ -253,6 +262,12 @@ func (s PipelineSpec) Dump() *om.Map {
 	}
 	if len(s.Keys) > 0 {
 		out.Set("keys", dumpKeys(s.Keys))
+	}
+	if !s.FlinkCDC.Empty() {
+		out.Set("flink_cdc", dumpFlinkCDC(s.FlinkCDC))
+	}
+	if s.FlinkCDCImage != nil {
+		out.Set("flink_cdc_image", *s.FlinkCDCImage)
 	}
 	return out
 }
@@ -368,6 +383,14 @@ func decodeSpec(v *val.V, loc val.Loc, raw any) PipelineSpec {
 	if f := o.Get("keys"); f.Present && !f.IsNull() {
 		if keys := decodeKeys(v, f.Loc, f.Raw); len(keys) > 0 {
 			spec.Keys = keys
+		}
+	}
+	if f := o.Get("flink_cdc"); f.Present && !f.IsNull() {
+		spec.FlinkCDC = decodeFlinkCDC(v, f.Loc, f.Raw)
+	}
+	if f := o.Get("flink_cdc_image"); f.Present && !f.IsNull() {
+		if s, ok := v.Constrained(f.Loc, f.Raw, val.StrRules{Max: 300, Pattern: `^[\w.\-/:@]+$`}); ok {
+			spec.FlinkCDCImage = &s
 		}
 	}
 	o.Forbid()
