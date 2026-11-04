@@ -76,8 +76,16 @@ func ValidateEngineSpec(id engine.ID, spec domain.PipelineSpec) error {
 			return problem.New(422, "engine_settings", "Flink CDC settings apply only to pipelines that run on Flink CDC.")
 		}
 	case engine.FlinkCDC:
-		if spec.DebeziumImage != nil {
+		// The Debezium-only settings the Flink CDC compiler refuses, refused when saved instead.
+		switch {
+		case spec.DebeziumImage != nil:
 			return problem.New(422, "engine_settings", "A Debezium image applies only to pipelines that run on Debezium.")
+		case !spec.Values.Empty():
+			return problem.New(422, "engine_settings", "Value formats are Debezium options; Flink CDC writes each column with its own type.")
+		case len(spec.Advanced) > 0:
+			return problem.New(422, "engine_settings", "Advanced Debezium properties apply only to pipelines that run on Debezium.")
+		case spec.Snapshot.DelaySeconds != 0 || spec.Snapshot.Window != nil:
+			return problem.New(422, "engine_settings", "A copy delay or window is a Debezium option; Flink CDC copies as soon as it starts.")
 		}
 	}
 	return nil

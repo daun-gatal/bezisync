@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, defaultStep, fieldsBefore, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepErrors, summarize, textError, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, fieldsBefore, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -122,5 +122,20 @@ describe('what changes for consumers', () => {
     expect(outputImpact(base, fullSpec({ ...base, transforms: [rename] } as never))[0]).toMatchObject({ kind: 'breaking', text: expect.stringMatching(/full change envelope/) });
     expect(outputImpact(base, fullSpec({ ...base, transforms: [{ ...unwrap, delete_handling: 'drop' }, rename] } as never))[0]?.text).toBe('Deletes change: deletes dropped.');
     expect(outputImpact(fullSpec({ ...base, transforms: [filter, unwrap] } as never), fullSpec({ ...base, transforms: [unwrap] } as never))[0]).toMatchObject({ kind: 'additive' });
+  });
+});
+
+describe('step capabilities per engine', () => {
+  const source: Caps = { value_formats: { decimals: ['precise', 'double', 'string'], timestamps: ['epoch', 'isostring'] }, key_columns: true, row_filters: true };
+  it('offers no value formats on Flink CDC, which writes each column with its own type', () => {
+    expect(stepCaps(source, false, true)).toEqual({ value_formats: {}, key_columns: true, row_filters: true });
+    expect(stepCaps(source, true, true).value_formats).toEqual({});
+  });
+  it('keeps the source formats on Debezium, without epoch timestamps where the destination needs time precision', () => {
+    expect(stepCaps(source, false, false)).toBe(source);
+    expect(stepCaps(source, true, false).value_formats).toEqual({ decimals: ['precise', 'double', 'string'], timestamps: ['isostring'] });
+  });
+  it('marks the steps only Debezium runs', () => {
+    expect([...DEBEZIUM_ONLY_STEPS].sort()).toEqual(['custom', 'flatten', 'outbox']);
   });
 });
