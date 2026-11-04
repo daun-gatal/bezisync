@@ -167,7 +167,17 @@ func (a *Agent) Report(ctx context.Context) *om.Map {
 		results = []map[string]any{}
 	}
 	return om.New().Set("version", version.Version).Set("kind", a.Kind).Set("features", []any{"health_port", runtime.FeatureFlinkCDC}).Set("capacity", a.Driver.Capacity(ctx)).
-		Set("local_test", om.New().Set("ok", test.OK).Set("message", test.Message)).Set("workloads", workloads).Set("results", results)
+		Set("local_test", localTest(test)).Set("workloads", workloads).Set("results", results)
+}
+
+// localTest is the runtime's own test as the control plane reads it; on Kubernetes it says
+// whether Flink CDC pipelines can run (Services).
+func localTest(test runtime.TestResult) *om.Map {
+	out := om.New().Set("ok", test.OK).Set("message", test.Message)
+	if v, ok := test.Details["flink_cdc"].(bool); ok {
+		out.Set("flink_cdc", v)
+	}
+	return out
 }
 
 func sortedKeys(m map[string]bool) []string {

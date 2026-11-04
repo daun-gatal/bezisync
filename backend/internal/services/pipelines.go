@@ -713,19 +713,22 @@ func toFloat(v any) float64 {
 
 // CapacityCheck warns when a runtime has no room for the pipeline's size.
 func CapacityCheck(capacity map[string]any, resources string) *checks.Check {
+	return capacityCheck(capacity, cpuOf(compiler.Resources[resources].CPU), "")
+}
+
+func capacityCheck(capacity map[string]any, need float64, what string) *checks.Check {
 	if len(capacity) == 0 || toFloat(capacity["cpu_allocatable"]) == 0 {
 		return nil
 	}
-	need := cpuOf(compiler.Resources[resources].CPU)
 	free := toFloat(capacity["cpu_allocatable"]) - toFloat(capacity["cpu_requested"])
 	needS := strconv.FormatFloat(need, 'g', -1, 64)
 	if free < need {
 		return &checks.Check{Code: "runtime_capacity", Title: "Runtime capacity", Category: checks.CatCapacity, Status: checks.Warn,
-			Message: fmt.Sprintf("The runtime has %s free CPU; this pipeline asks for %s.", domain.FormatFixed(max(free, 0), 1), needS),
+			Message: fmt.Sprintf("The runtime has %s free CPU; this pipeline asks for %s%s.", domain.FormatFixed(max(free, 0), 1), needS, what),
 			Why:     "The connector may stay pending until resources free up."}
 	}
 	return &checks.Check{Code: "runtime_capacity", Title: "Runtime capacity", Category: checks.CatCapacity, Status: checks.Pass,
-		Message: fmt.Sprintf("%s CPU free; this pipeline needs %s.", domain.FormatFixed(free, 1), needS)}
+		Message: fmt.Sprintf("%s CPU free; this pipeline needs %s%s.", domain.FormatFixed(free, 1), needS, what)}
 }
 
 func runtimeReport(ctx context.Context, q db.Querier, rt *models.Runtime) checks.Report {
@@ -841,7 +844,11 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		{Key: "sink", Title: "Destination · " + sinkConn.Name + agentNote(sinkAgent), Report: sinkReport},
 		{Key: "runtime", Title: "Runtime · " + rt.Name, Report: rtReport},
 	}
-	if c := CapacityCheck(rt.Capacity, spec.Policies.Resources); c != nil {
+	capacity := CapacityCheck(rt.Capacity, spec.Policies.Resources)
+	if EngineOf(p) == engine.FlinkCDC {
+		capacity = FlinkCapacityCheck(rt.Capacity, spec.Policies.Resources)
+	}
+	if c := capacity; c != nil {
 		// Appended after summarizing, like the Python report (no doc link, summary unchanged).
 		sections[2].Report.Checks = append(sections[2].Report.Checks, *c)
 	}
@@ -940,6 +947,13 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		configChecks = append(configChecks, sinkChecks(ctx, sink, sinkDesc, cctx, compiled.Destinations, discover)...)
 	}
 	sections = append(sections, PreflightSection{Key: "config", Title: "Configuration", Report: checks.Summarize(configChecks, started)})
+	if flink {
+		engineChecks, err := FlinkChecks(ctx, q, p, spec, rt, sourceConn, discover)
+		if err != nil {
+			return nil, err
+		}
+		sections = append(sections, PreflightSection{Key: "engine", Title: "Flink CDC", Report: checks.Summarize(engineChecks, started)})
+	}
 	policy, err := PolicyChecks(ctx, q, p, spec)
 	if err != nil {
 		return nil, err

@@ -2041,6 +2041,73 @@ Fix:
 Compare the column with a value of its type, or pick another column.
 ```
 
+## Flink CDC
+
+<a id="flink-agent-version"></a>
+### `flink_agent_version`
+
+**Agent version**
+
+Fix:
+
+```
+Upgrade the agent to BeziSync 0.3.0 or later (Settings → Runtimes shows the install command).
+```
+
+<a id="flink-kubernetes-services"></a>
+### `flink_kubernetes_services`
+
+**Kubernetes Services**
+
+Fix:
+
+```
+# The runtime's Role (both BeziSync charts from 0.2.0 grant it)
+- apiGroups: [""]
+  resources: [configmaps, secrets, services]
+  verbs: [get, list, create, update, patch, delete]
+```
+
+<a id="flink-primary-key"></a>
+### `flink_primary_key`
+
+**Primary keys**
+
+Fix:
+
+```
+Pick key columns for these tables in the Tables step, or add a primary key in the database.
+```
+
+<a id="flink-replica-identity"></a>
+### `flink_replica_identity`
+
+**Whole-row changes**
+
+- Why: PostgreSQL logs the old row of an update only with REPLICA IDENTITY FULL. It makes the WAL larger for these tables.
+
+Fix:
+
+```
+ALTER TABLE "{schema}"."{table}" REPLICA IDENTITY FULL;
+```
+
+<a id="flink-server-ids"></a>
+### `flink_server_ids`
+
+**MySQL server ids**
+
+Fix:
+
+```
+Create this pipeline again: a new pipeline gets other server ids.
+```
+
+<a id="flink-tables-unknown"></a>
+### `flink_tables_unknown`
+
+**Tables for Flink CDC**
+
 ## Secret stores
 
 <a id="secret-missing"></a>

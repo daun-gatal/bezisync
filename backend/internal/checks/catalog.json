@@ -22,6 +22,7 @@
   "Azure Event Hubs",
   "Apache Pulsar",
   "Deploy",
+  "Flink CDC",
   "Secret stores",
   "Project policies"
  ],
@@ -2752,6 +2753,72 @@
    ],
    "whys": [
     "Some sources need a recent Debezium Server: CockroachDB's sinkless changefeed arrived in Debezium 3.7. Blocks for an older official image; warns for a custom image whose release BeziSync can't read."
+   ]
+  },
+  {
+   "code": "flink_agent_version",
+   "section": "Flink CDC",
+   "titles": [
+    "Agent version"
+   ],
+   "whys": [],
+   "fixes": [
+    "Upgrade the agent to BeziSync 0.3.0 or later (Settings → Runtimes shows the install command)."
+   ]
+  },
+  {
+   "code": "flink_kubernetes_services",
+   "section": "Flink CDC",
+   "titles": [
+    "Kubernetes Services"
+   ],
+   "whys": [],
+   "fixes": [
+    "# The runtime's Role (both BeziSync charts from 0.2.0 grant it)\n- apiGroups: [\"\"]\n  resources: [configmaps, secrets, services]\n  verbs: [get, list, create, update, patch, delete]"
+   ]
+  },
+  {
+   "code": "flink_tables_unknown",
+   "section": "Flink CDC",
+   "titles": [
+    "Tables for Flink CDC"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "flink_primary_key",
+   "section": "Flink CDC",
+   "titles": [
+    "Primary keys"
+   ],
+   "whys": [],
+   "fixes": [
+    "Pick key columns for these tables in the Tables step, or add a primary key in the database."
+   ]
+  },
+  {
+   "code": "flink_replica_identity",
+   "section": "Flink CDC",
+   "titles": [
+    "Whole-row changes"
+   ],
+   "whys": [
+    "PostgreSQL logs the old row of an update only with REPLICA IDENTITY FULL. It makes the WAL larger for these tables."
+   ],
+   "fixes": [
+    "ALTER TABLE \"{schema}\".\"{table}\" REPLICA IDENTITY FULL;"
+   ]
+  },
+  {
+   "code": "flink_server_ids",
+   "section": "Flink CDC",
+   "titles": [
+    "MySQL server ids"
+   ],
+   "whys": [],
+   "fixes": [
+    "Create this pipeline again: a new pipeline gets other server ids."
    ]
   }
  ]

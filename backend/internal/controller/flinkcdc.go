@@ -54,7 +54,7 @@ func flinkMetrics(st flinkhelper.Status) *domain.Metrics {
 		m.Connected = &t
 		copying, done := !st.Streaming, st.Streaming
 		m.SnapshotRunning, m.SnapshotCompleted = &copying, &done
-	case st.Phase == flinkhelper.PhaseFailed || st.Phase == flinkhelper.PhaseRestarting:
+	case st.Phase == flinkhelper.PhaseFailed || st.Phase == flinkhelper.PhaseRestarting || st.Phase == flinkhelper.PhaseConfigError:
 		f := false
 		m.Connected = &f
 	}
@@ -75,7 +75,7 @@ func flinkMetrics(st flinkhelper.Status) *domain.Metrics {
 // still deploying); a failed or restarting job says what went wrong.
 func flinkDown(st flinkhelper.Status) *domain.Reason {
 	switch st.Phase {
-	case flinkhelper.PhaseFailed:
+	case flinkhelper.PhaseFailed, flinkhelper.PhaseConfigError:
 		code := st.ErrorCode
 		if code == "" {
 			code = "job_failed"

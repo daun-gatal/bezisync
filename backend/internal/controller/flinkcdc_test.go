@@ -36,6 +36,8 @@ func TestFlinkDownSaysWhy(t *testing.T) {
 	}{
 		{flinkhelper.Status{Phase: flinkhelper.PhaseFailed, ErrorCode: "destination_renamed", Error: "renamed"}, "destination_renamed", "renamed"},
 		{flinkhelper.Status{Phase: flinkhelper.PhaseFailed}, "job_failed", "The Flink job failed."},
+		{flinkhelper.Status{Phase: flinkhelper.PhaseConfigError, ErrorCode: "image", Error: "This image lacks MySQL Connector/J."}, "image",
+			"This image lacks MySQL Connector/J."},
 		{flinkhelper.Status{Phase: flinkhelper.PhaseRestarting, Exceptions: []string{"a", "java.io.IOException: gone"}}, "job_restarting",
 			"The Flink job is restarting after a failure: java.io.IOException: gone"},
 		{flinkhelper.Status{Phase: flinkhelper.PhaseStarting, TaskManagers: 1, TaskManagersWanted: 2}, "health_down", "Waiting for TaskManagers: 1 of 2 connected."},

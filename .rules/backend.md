@@ -252,6 +252,13 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   cluster's components. Delete also drops the saved positions; PostgreSQL cleanup drops inactive
   `<slot>_<n>` copy slots. `ExpireSavedPositions` (retention tick) removes set-aside positions and
   savepoints beyond the newest ten after a week unless kept.
+- Flink CDC preflight (`services/flinkchecks.go`, section "engine"): `flink_primary_key` (a key per
+  table, or picked key columns), `flink_replica_identity` (PostgreSQL REPLICA IDENTITY FULL: Flink CDC
+  fails on an update without the old row), `flink_server_ids` (MySQL: no other pipeline on the source
+  uses the block), `flink_agent_version`, `flink_kubernetes_services` (direct runtimes run `Test`;
+  agents send `local_test.flink_cdc`), and `runtime_capacity` counts the whole cluster
+  (`FlinkCapacityCheck`). The helper's `config_error` phase (an image without a connector or driver)
+  is reported with the helper's own fix.
 - Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll
   never hands a Flink CDC workload to an agent without it (an older agent would start it as a
   Debezium container), and `AgentDriver.Apply` refuses it with the release to upgrade to

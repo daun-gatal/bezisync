@@ -246,3 +246,32 @@ func TestSavedPositionsExpire(t *testing.T) {
 		t.Fatalf("kept %d, set aside %d, savepoints %d", keptLeft, setAside, savepoints)
 	}
 }
+
+// A Flink CDC pipeline's preflight has its own section: keys and whole-row changes on the
+// PostgreSQL source, the cluster's size against the runtime.
+func TestFlinkPreflight(t *testing.T) {
+	e := newPipelineEnv(t)
+	_, url := flinkPipeline(t, e)
+	pre := e.admin.post(url+"/preflight", nil).expect(200)
+	var engineSection bool
+	for _, s := range pre.List("sections") {
+		engineSection = engineSection || at(t, s, "key") == "engine"
+	}
+	identity := checkOf(t, pre, "flink_replica_identity")
+	if !engineSection || identity == nil || at(t, identity, "status") != "fail" || at(t, identity, "blocking") != true ||
+		at(t, identity, "fix", "code") != `ALTER TABLE "shop"."orders" REPLICA IDENTITY FULL;` {
+		t.Fatal(string(pre.Raw))
+	}
+	if c := checkOf(t, pre, "flink_primary_key"); c == nil || at(t, c, "status") != "pass" {
+		t.Fatal(c)
+	}
+	exec(t, `ALTER TABLE shop.orders REPLICA IDENTITY FULL`)
+	pre = e.admin.post(url+"/preflight", nil).expect(200)
+	if c := checkOf(t, pre, "flink_replica_identity"); c == nil || at(t, c, "status") != "pass" {
+		t.Fatal(c)
+	}
+	// The capacity check counts the whole cluster.
+	if c := checkOf(t, pre, "runtime_capacity"); c == nil || !strings.Contains(at(t, c, "message").(string), "a JobManager and 1 TaskManager, 3072 MiB in all") {
+		t.Fatal(c)
+	}
+}
