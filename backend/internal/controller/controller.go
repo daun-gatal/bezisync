@@ -75,7 +75,7 @@ func EnsureStateSchema(ctx context.Context) error {
 }
 
 func compileCtx(p *models.Pipeline, spec domain.PipelineSpec) connectors.CompileContext {
-	return connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec}
+	return connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec, Engine: p.Engine}
 }
 
 // ParseHealth reads Quarkus SmallRye health: 200 + UP is up, 503 is down, else unknown.

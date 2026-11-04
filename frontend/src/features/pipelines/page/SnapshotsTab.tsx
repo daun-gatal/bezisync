@@ -9,6 +9,7 @@ import { DataTable } from '@/components/ui/table';
 import { Ident, Meta, plural, Short } from '@/components/ui/text';
 import { captureOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/connections';
 import { ago, formatBytes, formatCount, formatDateTime } from '@/lib/format';
+import { FlinkPositions } from './FlinkPositions';
 import { useOffsets, useResetOffsets, useSnapshot, type Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { fullSpec } from '../spec';
@@ -39,6 +40,19 @@ export function copyEstimate(rows: Row[]): { rows: number; bytes: number; unknow
 }
 
 export function SnapshotsTab({ pipeline: p }: { pipeline: Pipeline }) {
+  if (p.engine === 'flink-cdc') {
+    return (
+      <Split ratio="main">
+        <FlinkPositions pipeline={p} />
+        <Card title="Copy tables again">
+          <p className="m-0 text-base text-ink-2">
+            {p.caps.why?.recopy_table ?? 'Flink CDC can’t copy one table again while the others stream.'} Tables added in the Tables step are copied at the
+            next deploy; the others keep streaming.
+          </p>
+        </Card>
+      </Split>
+    );
+  }
   return (
     <Split ratio="main">
       <Recopy pipeline={p} />

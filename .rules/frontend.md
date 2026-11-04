@@ -160,6 +160,15 @@ src/
   `FlinkRunSettings` (schema changes, new columns, commit interval, Freshness for StarRocks/Doris,
   and in Expert the catalogue's Flink settings); sizes describe the cluster (`flinkSizeHelp`) and stay
   fixed once deployed.
+- Flink CDC on the pipeline page: the Snapshots tab is **Positions** (`page/FlinkPositions.tsx`: saved
+  positions newest first, Restore, and Start over as copy again / from now / since a time, the last
+  gated by `caps.start_from_time` with its `why`; all need a pause and the typed name), Overview adds
+  the cluster card (`flinkView`: job, TaskManagers, last save, first-copy chunks, components) and
+  `transformView(spec, { sinkType })` describes tables kept in sync (never Debezium's event shape),
+  Logs picks a component (`logComponents`, `?component=` on the API), the list has an Engine column,
+  and Debezium-only actions (Change Debezium version, offsets) are not offered. Iceberg on Flink CDC
+  shows only its options (`optionsSchemaFor`: no commit interval or buckets, no append) and records
+  no partitions.
 - Pipeline Overview (`features/pipelines/page/`): the flow strip, then a full-width chart, then
   Since start + Source protection beside Transforms + delivery. Side by side, the left column sets
   the row's height (at least 320 px): the right column is absolutely positioned inside its cell

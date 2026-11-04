@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -352,6 +353,8 @@ func schemaRead(ctx context.Context, q db.Querier, p *models.Pipeline) (*SchemaR
 	return out, nil
 }
 
+var logComponent = regexp.MustCompile(`^(jobmanager|tunnel|taskmanager-[1-9][0-9]?)$`)
+
 func pipelineRoutes(r chi.Router) {
 	base := "/projects/{project_id}/pipelines"
 	r.Get(base, httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
@@ -682,6 +685,11 @@ func pipelineRoutes(r chi.Router) {
 		if err := qs.Err(); err != nil {
 			return err
 		}
+		// A Flink CDC pipeline's component: jobmanager (default), taskmanager-<n> or tunnel.
+		component := r.URL.Query().Get("component")
+		if component != "" && !logComponent.MatchString(component) {
+			return problem.New(422, "unknown_component", "Logs come from jobmanager, taskmanager-<n> or tunnel.")
+		}
 		_, p, err := viewPipeline(r, auth.PipelineView, true)
 		if err != nil {
 			return err
@@ -696,6 +704,13 @@ func pipelineRoutes(r chi.Router) {
 			d, err := services.DriverFor(ctx, q, rt)
 			if err != nil {
 				return "", err
+			}
+			if component != "" {
+				c, ok := d.(runtime.ComponentLogs)
+				if !ok || services.EngineOf(p) != engine.FlinkCDC {
+					return "", &runtime.Error{Msg: "Only Flink CDC pipelines have components."}
+				}
+				return c.LogsOf(ctx, p.ShortID(), component, tail, false)
 			}
 			return d.Logs(ctx, p.ShortID(), tail, false)
 		}()

@@ -240,3 +240,18 @@ export function deriveSinkOptions(
   }
   return out;
 }
+
+/** Destination options a Flink CDC pipeline has: Iceberg keeps how rows are written (upserts by
+ *  key: no append) and the table format; commit timing and bucket partitioning are Debezium's. */
+const FLINK_OPTIONS = ['write_mode', 'format_version'];
+
+export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: EngineId): JsonSchema | null {
+  if (!schema) return null;
+  if (engine !== 'flink-cdc' || !schema.properties) return schema;
+  const properties: NonNullable<JsonSchema['properties']> = {};
+  for (const [name, prop] of Object.entries(schema.properties)) {
+    if (!FLINK_OPTIONS.includes(name)) continue;
+    properties[name] = name === 'write_mode' && prop.enum ? { ...prop, enum: prop.enum.filter((v) => v !== 'append') } : prop;
+  }
+  return Object.keys(properties).length ? { ...schema, properties } : null;
+}

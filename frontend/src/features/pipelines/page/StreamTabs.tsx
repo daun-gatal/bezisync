@@ -6,6 +6,7 @@ import { Select } from '@/components/ui/select';
 import { Meta, Short } from '@/components/ui/text';
 import { useEvents, useLogs, type Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
+import { statusOf, type FlinkComponent } from '@/lib/status';
 import { fullSpec } from '../spec';
 import { EventsMatch } from '../transforms/EventsMatch';
 
@@ -105,7 +106,10 @@ export function filterLogs(lines: string[], level: Level, query: string): string
 
 export function LogsTab({ pipeline: p }: { pipeline: Pipeline }) {
   const { project } = useProject();
-  const logs = useLogs(project.id, p.id, Boolean(p.deployed_version));
+  const flink = p.engine === 'flink-cdc';
+  const components = logComponents(statusOf(p).flink?.components);
+  const [component, setComponent] = useState('jobmanager');
+  const logs = useLogs(project.id, p.id, Boolean(p.deployed_version), flink ? component : undefined);
   const [query, setQuery] = useState('');
   const [level, setLevel] = useState<Level>('INFO');
   const lines = useMemo(() => filterLogs(logs.data?.lines ?? [], level, query), [logs.data, level, query]);
@@ -120,6 +124,7 @@ export function LogsTab({ pipeline: p }: { pipeline: Pipeline }) {
     <Card title="Logs" actions={<Meta className="hidden sm:inline">Secrets redacted · live</Meta>}>
       <Toolbar>
         <Search label="Search logs" placeholder="slot, error…" value={query} onChange={setQuery} />
+        {flink ? <Select label="Component" value={component} onChange={setComponent} options={components} /> : null}
         <Segmented label="Level" value={level} onChange={setLevel} options={LEVELS.map((l) => ({ value: l, label: l === 'DEBUG' ? 'All' : `${l}+` }))} />
       </Toolbar>
       <QueryState query={logs} doing="Couldn’t load the logs">
@@ -136,4 +141,13 @@ export function LogsTab({ pipeline: p }: { pipeline: Pipeline }) {
       </QueryState>
     </Card>
   );
+}
+
+/** The log sources of a Flink CDC cluster: its JobManager, each TaskManager and the tunnel. */
+export function logComponents(components: FlinkComponent[] | undefined): { value: string; label: string }[] {
+  const out = [{ value: 'jobmanager', label: 'JobManager' }];
+  const tms = (components ?? []).filter((c) => c.role === 'taskmanager').length;
+  for (let n = 1; n <= Math.max(tms, 1); n++) out.push({ value: `taskmanager-${n}`, label: `TaskManager ${n}` });
+  if ((components ?? []).some((c) => c.role === 'tunnel')) out.push({ value: 'tunnel', label: 'SSH tunnel' });
+  return out;
 }

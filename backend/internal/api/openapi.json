@@ -14000,6 +14000,17 @@
               "title": "Tail",
               "type": "integer"
             }
+          },
+          {
+            "description": "A Flink CDC pipeline's component: jobmanager (default), taskmanager-<n> or tunnel.",
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "schema": {
+              "pattern": "^(jobmanager|tunnel|taskmanager-[1-9][0-9]?)$",
+              "title": "Component",
+              "type": "string"
+            }
           }
         ],
         "responses": {

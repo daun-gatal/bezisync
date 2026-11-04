@@ -304,3 +304,18 @@ func TestFlinkPipelinesResolveTheirEngineImage(t *testing.T) {
 		t.Fatal(string(usage.Raw))
 	}
 }
+
+// A Flink CDC pipeline's logs are read per component.
+func TestFlinkComponentLogs(t *testing.T) {
+	e := newPipelineEnv(t)
+	_, url := flinkPipeline(t, e)
+	if l := e.admin.get(url + "/logs?component=taskmanager-2").expect(200).List("lines"); len(l) != 1 || l[0] != "logs of taskmanager-2" {
+		t.Fatal(l)
+	}
+	e.admin.get(url + "/logs?component=sidecar").expect(422)
+	e.admin.get(url + "/logs?component=taskmanager-0").expect(422)
+	deb := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
+	if r := e.admin.get("/api/v1/projects/" + e.pid + "/pipelines/" + deb.Str("id") + "/logs?component=jobmanager").expect(503); !strings.Contains(r.Str("detail"), "Only Flink CDC") {
+		t.Fatal(string(r.Raw))
+	}
+}

@@ -247,3 +247,45 @@ describe('chart readout', () => {
     expect(formatLatency(5_400_000)).toBe('1.5 h');
   });
 });
+
+import { flinkView } from '../page/overview';
+
+describe('flinkView', () => {
+  const ago = (iso: string) => `ago(${iso})`;
+  it('says what the cluster is doing and how far the first copy got', () => {
+    const v = flinkView(
+      { phase: 'running', streaming: false, taskmanagers: 1, taskmanagers_wanted: 2, chunks: { 'shop.orders': 12, 'shop.customers': 1 },
+        last_saved: { id: 9, kind: 'checkpoint', reason: 'periodic', taken_at: 't1', size: 1 }, checkpoints_failed: 2 },
+      ago,
+    )!;
+    expect(v.job).toBe('Running · copying existing rows');
+    expect(v.taskmanagers).toBe('1 of 2 connected');
+    expect(v.saved).toBe('ago(t1) · 2 failed saves');
+    expect(v.copy).toEqual([{ table: 'shop.customers', chunks: 1 }, { table: 'shop.orders', chunks: 12 }]);
+    expect(v.problem).toBeNull();
+  });
+  it('drops the copy once streaming, and reports a store failure', () => {
+    const v = flinkView({ phase: 'running', streaming: true, chunks: { a: 1 }, store_error: 'db down' }, ago)!;
+    expect(v.job).toBe('Running · streaming changes');
+    expect(v.copy).toBeNull();
+    expect(v.saved).toBeNull();
+    expect(v.problem).toBe('Saving positions failed: db down');
+    expect(flinkView(undefined, ago)).toBeNull();
+    expect(flinkView({ phase: 'config_error' }, ago)!.job).toBe('Can’t start: the image or settings');
+  });
+});
+
+describe('transformView on Flink CDC', () => {
+  it('describes tables kept in sync, never Debezium events', () => {
+    const spec = fullSpec({
+      source: { tables: { include: ['s.t'] }, columns: { 's.t': { mask: [], exclude: ['email'] } } },
+      transforms: [{ type: 'unwrap', delete_handling: 'rewrite', add_fields: ['op'] }],
+      keys: { 's.t': ['id'] },
+    } as never);
+    const { output, steps } = transformView(spec, { sinkType: 'starrocks' });
+    expect(output.map((r) => r.title)).toEqual(['Tables kept in sync', 'Deletes remove the row', 'One column left out', 'Chosen primary key']);
+    expect(steps).toEqual([]);
+    const iceberg = transformView(spec, { sinkType: 'iceberg' }).output;
+    expect(iceberg[1]).toMatchObject({ title: 'Deleted rows are kept', code: ['__op = -D'] });
+  });
+});

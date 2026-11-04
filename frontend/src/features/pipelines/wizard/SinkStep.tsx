@@ -13,7 +13,7 @@ import { SchemaForm, cleanValues, defaultsOf, type FormValues, type JsonSchema }
 import { DEFAULT_SINK_CAPS, sinkCapsOf, TYPE_LABEL, useCheckConnection, useConnections, useConnectorTypes, useDiscovery } from '@/lib/connections';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { deriveSinkOptions, fullSpec, sinkDestinationFor, sinkNamingError, specForEngine, type FullSpec } from '../spec';
+import { deriveSinkOptions, fullSpec, optionsSchemaFor, sinkDestinationFor, sinkNamingError, specForEngine, type FullSpec } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { ConnectionCards, StepHeader } from './shared';
 
@@ -57,7 +57,6 @@ export function SinkStep({
   const current = sinks.find((c) => c.id === sinkId);
   const report = check.data && check.variables?.id === current?.id ? check.data : current?.last_check;
   const caps = current ? sinkCapsOf(types.data, current.type) : DEFAULT_SINK_CAPS;
-  const optionsSchema = caps.options_schema as JsonSchema | null;
   const tables = spec.source.tables.include;
   const nameError = sinkNamingError(naming, caps, tables, pipeline.name);
   const deployed = Boolean(pipeline.deployed_version);
@@ -66,6 +65,7 @@ export function SinkStep({
   const [picked, setPicked] = useState<EngineId | null>(null);
   const engine: EngineId = deployed ? pipeline.engine : (picked ?? pickEngine(choices, pipeline.engine));
   const flink = engine === 'flink-cdc';
+  const optionsSchema = optionsSchemaFor(caps.options_schema as JsonSchema | null, engine);
   const masked = Object.values(spec.source.columns).reduce((n, r) => n + (r.mask?.length ?? 0), 0);
   const formats = FORMATS.filter((f) => caps.formats.includes(f.value));
   // A sink with one format (Iceberg reads Kafka Connect structs) uses it whatever the spec says.

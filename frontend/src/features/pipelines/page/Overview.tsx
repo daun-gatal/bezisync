@@ -5,15 +5,15 @@ import { Empty, Meter, Notice, Pill, Skeleton, TONE_TEXT } from '@/components/ui
 import { Segmented } from '@/components/ui/form';
 import { Card, KeyValue, QueryState, Split, Stack } from '@/components/ui/layout';
 import { List, ListRow } from '@/components/ui/table';
-import { Ident, Meta, Short } from '@/components/ui/text';
+import { Ident, Meta, plural, Short } from '@/components/ui/text';
 import { TimeSeries } from '@/components/TimeSeries';
 import { ago, formatCount, formatDuration } from '@/lib/format';
 import { useMetrics, useVersions, type Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { isStale, statusOf } from '@/lib/status';
+import { isStale, statusOf, type FlinkStatus } from '@/lib/status';
 import { fullSpec } from '../spec';
 import { Flow } from './Flow';
-import { formatLatency, latest, protectionView, transformView, type Fact, type Row, type RowIcon } from './overview';
+import { flinkView, formatLatency, latest, protectionView, transformView, type Fact, type Row, type RowIcon } from './overview';
 
 /** Overview: the flow strip is the summary; the cards below only add what it doesn't show. */
 export function Overview({ pipeline: p }: { pipeline: Pipeline }) {
@@ -36,6 +36,7 @@ export function Overview({ pipeline: p }: { pipeline: Pipeline }) {
           {r.fix || undefined}
         </Notice>
       ))}
+      {p.engine === 'flink-cdc' && s.flink && !gone ? <FlinkCluster status={s.flink} /> : null}
       {p.lifecycle === 'draft' ? (
         <Card>
           <Empty title="Not deployed yet">
@@ -265,7 +266,7 @@ function TransformsCard({ pipeline: p }: { pipeline: Pipeline }) {
         {(list) => {
           const deployed = list.find((v) => v.number === p.deployed_version);
           if (!deployed) return <Meta as="p">The deployed version is not available.</Meta>;
-          const { output, steps } = transformView(fullSpec(deployed.spec));
+          const { output, steps } = transformView(fullSpec(deployed.spec), p.engine === 'flink-cdc' ? { sinkType: p.sink?.type } : undefined);
           return (
             <>
               {drift.length ? (
@@ -317,6 +318,58 @@ function DeliveryCard({ pipeline: p }: { pipeline: Pipeline }) {
             : 'Waiting for the first canary to arrive.'}
       </p>
       {c?.error ? <Meta as="p">{c.error}</Meta> : null}
+    </Card>
+  );
+}
+
+/** A Flink CDC pipeline's cluster: the job, its TaskManagers, its last save and the first copy. */
+function FlinkCluster({ status }: { status: FlinkStatus }) {
+  const v = flinkView(status, ago);
+  if (!v) return null;
+  return (
+    <Card title="Flink CDC cluster">
+      {v.problem ? (
+        <Notice tone="warn" title="Positions aren’t being saved">
+          {v.problem}
+        </Notice>
+      ) : null}
+      <KeyValue
+        items={[
+          ['Job', v.job],
+          v.taskmanagers ? ['TaskManagers', v.taskmanagers] : null,
+          ['Last saved', v.saved ?? 'Not yet'],
+          v.restored ? ['Started from', v.restored] : null,
+        ]}
+      />
+      {v.copy?.length ? (
+        <div className="flex flex-col gap-1">
+          <strong className="text-sm font-semibold">First copy</strong>
+          {v.copy.map((c) => (
+            <Meta key={c.table}>
+              {c.table}: {plural(c.chunks, 'chunk')} copied so far
+            </Meta>
+          ))}
+        </div>
+      ) : null}
+      {status.components?.length ? (
+        <List label="Cluster components">
+          {status.components.map((c) => (
+            <ListRow key={c.name} tone={c.state === 'running' ? null : 'warn'}>
+              <span className="flex min-w-0 flex-[1_1_240px] flex-col gap-0.5">
+                <Short max={40} mono>
+                  {c.name}
+                </Short>
+                <Meta>
+                  {c.role}
+                  {c.node ? ` · ${c.node}` : ''}
+                  {c.restarts ? ` · ${plural(c.restarts, 'restart')}` : ''}
+                </Meta>
+              </span>
+              <Pill tone={c.state === 'running' ? 'ok' : 'warn'}>{c.state}</Pill>
+            </ListRow>
+          ))}
+        </List>
+      ) : null}
     </Card>
   );
 }

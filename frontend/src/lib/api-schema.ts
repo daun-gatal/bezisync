@@ -8655,6 +8655,8 @@ export interface operations {
         parameters: {
             query?: {
                 tail?: number;
+                /** @description A Flink CDC pipeline's component: jobmanager (default), taskmanager-<n> or tunnel. */
+                component?: string;
             };
             header?: never;
             path: {

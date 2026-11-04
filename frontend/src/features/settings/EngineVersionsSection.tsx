@@ -132,7 +132,9 @@ function CatalogPanel({ engine }: { engine: EngineId }) {
                       {e.notes ? ` · ${e.notes}` : ''}
                       {e.pipelines !== null && e.pipelines !== undefined ? ` · ${plural(e.pipelines, 'live pipeline')}` : ''}
                     </Meta>
-                    {e.projects?.length ? (
+                    {e.projects?.length && engine === 'flink-cdc' ? (
+                      <span className="text-xs text-muted">Runs in {e.projects.map((u) => `${u.name} (${u.pipelines})`).join(', ')}</span>
+                    ) : e.projects?.length ? (
                       <span className="flex flex-wrap items-center gap-x-3 text-xs text-muted">
                         Runs in
                         {e.projects.map((u) => (
@@ -160,7 +162,13 @@ function CatalogPanel({ engine }: { engine: EngineId }) {
                     ) : null}
                   </span>
                   <span className="flex flex-wrap items-center gap-2">
-                    {e.is_default ? <Pill tone="ok">Default</Pill> : null}
+                    {e.is_default ? (
+                      <Pill tone="ok">Default</Pill>
+                    ) : data.default_image === e.image ? (
+                      <Pill tone="ok" title="No image is marked default: pipelines that pin none run the oldest one offered.">
+                        In use as default
+                      </Pill>
+                    ) : null}
                     {e.deprecated ? <Pill tone="warn">Deprecated</Pill> : null}
                     {e.builtin ? <Pill tone="grey">Install default</Pill> : null}
                     {e.id && !e.is_default ? (
@@ -228,7 +236,7 @@ function CatalogPanel({ engine }: { engine: EngineId }) {
             {(id) => <Input id={id} required className="font-mono" spellCheck={false} value={image} onChange={(e) => setImage(e.target.value)} />}
           </Field>
           <Field label="Label" optional>
-            {(id) => <Input id={id} value={label} placeholder="3.8 (tested)" onChange={(e) => setLabel(e.target.value)} />}
+            {(id) => <Input id={id} value={label} placeholder={engine === 'debezium' ? '3.8 (tested)' : '3.7 + MySQL driver'} onChange={(e) => setLabel(e.target.value)} />}
           </Field>
           <div className="self-end pb-2">
             <Check checked={makeDefault} onChange={setMakeDefault} label="Make it the default" />

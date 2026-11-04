@@ -1,5 +1,5 @@
 import { captureOf, sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/connections';
-import type { JsonSchema } from '@/components/SchemaForm';
+import { cleanValues, type FormValues, type JsonSchema } from '@/components/SchemaForm';
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Check as CheckIcon, Loader2 } from 'lucide-react';
@@ -19,7 +19,7 @@ import { useDeploy, usePipelines, usePreflight, type Pipeline, type Preflight } 
 import { useProject } from '@/lib/session';
 import { flinkChoices, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
-import { deriveSinkOptions, fullSpec, parseAdvanced, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
+import { deriveSinkOptions, fullSpec, optionsSchemaFor, parseAdvanced, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
 import { FlinkRunSettings } from './FlinkSettings';
 import { OwnerPicker } from './OwnerPicker';
@@ -87,9 +87,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const discovery = useDiscovery(project.id, pipeline.source.id);
   // Options the destination derives from the tables (Iceberg's partition keys) follow the
   // tables and keys chosen in earlier steps.
+  const sinkSchema = optionsSchemaFor(sinkCaps.options_schema as JsonSchema | null, pipeline.engine);
   const sinkOptions = deriveSinkOptions(
-    spec.sink.options,
-    sinkCaps.options_schema as JsonSchema | null,
+    // A Flink CDC pipeline keeps only its engine's options (no recorded partitions).
+    pipeline.engine === 'flink-cdc' && sinkSchema ? cleanValues(sinkSchema, spec.sink.options as FormValues) : spec.sink.options,
+    sinkSchema,
     spec.source.tables.include,
     spec.keys ?? {},
     discovery.data?.tables,
@@ -296,7 +298,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                   return {
                     value: m.value,
                     label: m.title,
-                    description: m.help,
+                    // Flink CDC pipelines don't need Debezium's terms.
+                    description: flink ? m.help.replace(/\s*Debezium:.*$/, '') : m.help,
                     disabled: (!offered || !allows(policies?.allowed_snapshot_modes, m.value)) && m.value !== mode,
                     why: offered ? 'Not allowed in this project.' : `${sourceLabel} doesn’t offer this.`,
                   };
@@ -354,7 +357,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       </Card>
 
       <Card
-        title="Events"
+        title={flink ? "What reaches the destination" : "Events"}
         actions={
           <ButtonLink
             size="sm"
@@ -367,7 +370,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
           </ButtonLink>
         }
       >
-        <StepsSummary spec={spec} />
+        <StepsSummary spec={spec} flink={flink} />
         {deployed ? <OutputImpact pipeline={pipeline} spec={spec} /> : null}
       </Card>
 
@@ -375,7 +378,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
         <KeyValue
           items={[
             ['From', `${pipeline.source.name} · ${plural(spec.source.tables.include.length, 'table')}`],
-            ['To', `${pipeline.sink?.name ?? '—'} · ${spec.sink.format.type.toUpperCase()}`],
+            ['To', `${pipeline.sink?.name ?? '—'} · ${flink ? 'tables' : spec.sink.format.type.toUpperCase()}`],
             ['Personal data', personalLine(personalSummary(spec.source.columns, spec.source.tables.include))],
           ]}
         />

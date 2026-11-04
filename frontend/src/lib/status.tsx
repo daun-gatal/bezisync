@@ -11,6 +11,41 @@ export interface StatusReason {
   severity?: 'info' | 'warn' | 'error';
 }
 
+export interface FlinkSaved {
+  id: number;
+  kind: 'checkpoint' | 'savepoint';
+  reason: string;
+  taken_at: string;
+  size: number;
+}
+
+export interface FlinkComponent {
+  name: string;
+  role: 'jobmanager' | 'taskmanager' | 'tunnel' | string;
+  state: string;
+  restarts: number;
+  ready?: boolean;
+  node?: string;
+}
+
+export interface FlinkStatus {
+  phase?: string;
+  job_state?: string;
+  streaming?: boolean;
+  taskmanagers?: number;
+  taskmanagers_wanted?: number;
+  checkpoints_completed?: number;
+  checkpoints_failed?: number;
+  restarts?: number;
+  last_checkpoint_at?: string;
+  last_saved?: FlinkSaved;
+  restored_from?: FlinkSaved;
+  store_error?: string;
+  /** Copy chunks each table's readers reached (by spec table). */
+  chunks?: Record<string, number>;
+  components?: FlinkComponent[];
+}
+
 export interface PipelineStatus {
   lifecycle?: string;
   health?: string;
@@ -35,6 +70,8 @@ export interface PipelineStatus {
   } | null;
   forced?: boolean;
   events_per_second?: number | null;
+  /** Flink CDC pipelines: what the helper beside the JobManager reported. */
+  flink?: FlinkStatus;
   /** Delivery canary (pipelines that opt in). */
   canary?: {
     ok?: boolean;

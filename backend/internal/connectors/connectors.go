@@ -42,6 +42,8 @@ type CompileContext struct {
 	ShortID    string
 	Name       string
 	Spec       domain.PipelineSpec
+	// Engine is "flink-cdc" for a Flink CDC pipeline ("" or "debezium" otherwise).
+	Engine string
 }
 
 // Prefix is Debezium's topic.prefix / logical server name, stable for the pipeline's life.

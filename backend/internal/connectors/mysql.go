@@ -705,7 +705,7 @@ func (s *mysqlSource) Probe(ctx context.Context, conn Resolved, c CompileContext
 	if err != nil {
 		return nil, err
 	}
-	return mysqlImpact(logs, positionFile, limit), nil
+	return mysqlImpact(logs, positionFile, limit, c.Engine == "flink-cdc"), nil
 }
 
 // binlogFile is one row of SHOW BINARY LOGS, oldest first.
@@ -715,9 +715,13 @@ type binlogFile struct {
 }
 
 // mysqlImpact places the pipeline's stored binlog position among the server's binlog files.
-func mysqlImpact(logs []binlogFile, positionFile *string, limit int64) *SourceImpact {
+func mysqlImpact(logs []binlogFile, positionFile *string, limit int64, flink bool) *SourceImpact {
 	if len(logs) == 0 {
 		return &SourceImpact{Summary: "No binary logs reported."}
+	}
+	if positionFile == nil && flink {
+		// Its position is inside its encrypted saved state: BeziSync can't place it among the files.
+		return &SourceImpact{Summary: fmt.Sprintf("%d binlog files on the server; Flink CDC keeps its position in its saved state, so how much of them it still needs isn't measured.", len(logs))}
 	}
 	if positionFile == nil {
 		return &SourceImpact{Summary: fmt.Sprintf("%d binlog files on the server; position not stored yet.", len(logs))}

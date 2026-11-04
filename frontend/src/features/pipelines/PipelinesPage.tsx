@@ -13,6 +13,7 @@ import { AdoptDialog, ApplyYamlDialog } from './ImportDialogs';
 import { ChangeDebeziumDialog } from './ChangeDebeziumDialog';
 import { FleetHealth } from './FleetHealth';
 import { TYPE_LABEL } from '@/lib/connections';
+import { ENGINE_TITLE } from '@/lib/engines';
 import { imageByPipeline, shortImage, useDebeziumImages, type PipelineImage } from '@/lib/debezium';
 import { ago, formatBytes, formatDuration } from '@/lib/format';
 import { usePipelines, type Pipeline } from '@/lib/pipelines';
@@ -113,7 +114,14 @@ export function PipelinesPage() {
         return <span className={s?.risk ? 'font-mono text-sm font-semibold text-risk' : 'font-mono text-sm'}>{formatBytes(s?.retained_bytes)}</span>;
       },
     },
-    { id: 'debezium', header: 'Debezium', priority: 3, min: 120, cell: (p) => <ImageCell image={imageOf.get(p.id)} /> },
+    { id: 'engine', header: 'Engine', priority: 4, fit: true, cell: (p) => <span className="text-sm">{ENGINE_TITLE[p.engine]}</span> },
+    {
+      id: 'debezium',
+      header: 'Debezium',
+      priority: 3,
+      min: 120,
+      cell: (p) => (p.engine === 'debezium' ? <ImageCell image={imageOf.get(p.id)} /> : <span className="text-sm text-muted">—</span>),
+    },
     {
       id: 'rate',
       header: 'Changes/s',

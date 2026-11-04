@@ -136,15 +136,16 @@ export function useConfig(projectId: string, id: string, version?: number, enabl
   });
 }
 
-export function useLogs(projectId: string, id: string, enabled: boolean) {
+/** The connector's logs; a Flink CDC pipeline's of one component (jobmanager, taskmanager-<n>, tunnel). */
+export function useLogs(projectId: string, id: string, enabled: boolean, component?: string) {
   return useQuery({
-    queryKey: ['logs', projectId, id],
+    queryKey: ['logs', projectId, id, component ?? ''],
     enabled,
     refetchInterval: 5_000,
     queryFn: () =>
       unwrap(
         client.GET('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/logs', {
-          params: { path: { project_id: projectId, pipeline_id: id }, query: { tail: 1000 } },
+          params: { path: { project_id: projectId, pipeline_id: id }, query: { tail: 1000, ...(component ? { component } : {}) } },
         }),
       ),
   });
@@ -201,13 +202,51 @@ export function useOffsets(projectId: string, id: string, enabled: boolean) {
   });
 }
 
+export type ResetMode = 'resnapshot' | 'skip_to_now' | 'from_time';
+
 export function useResetOffsets(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, mode, confirm }: { id: string; mode: 'resnapshot' | 'skip_to_now'; confirm: string }) =>
-      unwrap(client.POST('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/offsets/reset', { ...path(projectId, id), body: { mode, confirm } })),
+    mutationFn: ({ id, mode, confirm, fromTime }: { id: string; mode: ResetMode; confirm: string; fromTime?: string }) =>
+      unwrap(
+        client.POST('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/offsets/reset', {
+          ...path(projectId, id),
+          body: { mode, confirm, ...(mode === 'from_time' && fromTime ? { from_time: fromTime } : {}) },
+        }),
+      ),
     onSuccess: (_d, v) => {
       void qc.invalidateQueries({ queryKey: ['offsets', projectId, v.id] });
+      void qc.invalidateQueries({ queryKey: ['positions', projectId, v.id] });
+      void qc.invalidateQueries({ queryKey: ['pipeline', projectId, v.id] });
+    },
+  });
+}
+
+export type SavedPosition = Schemas['SavedPositionRead'];
+
+/** A Flink CDC pipeline's saved positions, newest first. */
+export function useSavedPositions(projectId: string, id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['positions', projectId, id],
+    queryFn: () => unwrap(client.GET('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions', path(projectId, id))),
+    enabled,
+    refetchInterval: 30_000,
+  });
+}
+
+/** Copies a saved position so the paused pipeline resumes from it. */
+export function useRestorePosition(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, positionId, confirm }: { id: string; positionId: number; confirm: string }) =>
+      unwrap(
+        client.POST('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions/{position_id}/restore', {
+          params: { path: { project_id: projectId, pipeline_id: id, position_id: positionId } },
+          body: { confirm },
+        }),
+      ),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: ['positions', projectId, v.id] });
       void qc.invalidateQueries({ queryKey: ['pipeline', projectId, v.id] });
     },
   });

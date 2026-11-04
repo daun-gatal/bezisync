@@ -47,3 +47,36 @@ describe('re-copy estimate', () => {
     expect(copyEstimate([{ table: 'x', rows: null, bytes: null }]).minutes).toBeNull();
   });
 });
+
+import { positionLabel, startOverEffects } from '../page/FlinkPositions';
+import { logComponents } from '../page/StreamTabs';
+import { flinkLine } from '../page/Flow';
+
+describe('Flink CDC on the pipeline page', () => {
+  it('names saved positions', () => {
+    const at = { id: 1, flink_id: 1, size: 1, taken_at: 't', current: true };
+    expect(positionLabel({ ...at, kind: 'savepoint', reason: 'stop' })).toBe('Saved when it stopped');
+    expect(positionLabel({ ...at, kind: 'checkpoint', reason: 'periodic' })).toBe('Periodic save');
+    expect(positionLabel({ ...at, kind: 'checkpoint', reason: 'restored from #4' })).toBe('Restored copy: #4');
+  });
+  it('says what each way to start over does, per source', () => {
+    expect(startOverEffects('skip_to_now', 'postgresql').some((e) => e.includes('replication slot'))).toBe(true);
+    expect(startOverEffects('skip_to_now', 'mysql').some((e) => e.includes('replication slot'))).toBe(false);
+    expect(startOverEffects('resnapshot', 'mysql')[1]).toContain('copied again');
+  });
+  it('lists a cluster’s log sources', () => {
+    expect(logComponents(undefined).map((c) => c.value)).toEqual(['jobmanager', 'taskmanager-1']);
+    expect(
+      logComponents([
+        { name: 'a', role: 'jobmanager', state: 'running', restarts: 0 },
+        { name: 'b', role: 'taskmanager', state: 'running', restarts: 0 },
+        { name: 'c', role: 'taskmanager', state: 'running', restarts: 0 },
+        { name: 'd', role: 'tunnel', state: 'running', restarts: 0 },
+      ]).map((c) => c.value),
+    ).toEqual(['jobmanager', 'taskmanager-1', 'taskmanager-2', 'tunnel']);
+  });
+  it('shows the engine and its TaskManagers in the flow strip', () => {
+    expect(flinkLine({ taskmanagers: 1, taskmanagers_wanted: 2 })).toBe('Flink CDC · 1 of 2 TaskManagers');
+    expect(flinkLine(undefined)).toBe('Flink CDC');
+  });
+});
