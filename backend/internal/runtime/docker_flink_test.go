@@ -258,11 +258,11 @@ func TestDockerFlinkDelete(t *testing.T) {
 func TestDockerFlinkComponentLogs(t *testing.T) {
 	_, d := newFlinkDocker(t)
 	for _, bad := range []string{"taskmanager-0", "taskmanager-x", "taskmanager-65", "sidecar"} {
-		if _, err := d.LogsOf(context.Background(), flinkID, bad, 10); err == nil {
+		if _, err := d.LogsOf(context.Background(), flinkID, bad, 10, false); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
 	}
-	if out, err := d.LogsOf(context.Background(), flinkID, "taskmanager-1", 10); err != nil || out != "" {
+	if out, err := d.LogsOf(context.Background(), flinkID, "taskmanager-1", 10, false); err != nil || out != "" {
 		t.Fatal(out, err) // a component that doesn't exist has no logs
 	}
 }

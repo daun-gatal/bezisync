@@ -150,6 +150,9 @@ func (k *KubernetesDriver) Apply(ctx context.Context, w Workload) error {
 		}
 		return Errorf("Kubernetes rejected the workload: %s (%d)", reason(err), statusCode(err))
 	}
+	if w.IsFlink() {
+		return k.applyFlink(ctx, w, wrap)
+	}
 	env := map[string][]byte{}
 	for key, v := range JVMEnv(w) {
 		env[key] = []byte(v)
@@ -283,6 +286,11 @@ func toInt(v any) int {
 // Delete removes the Deployment, ConfigMap and Secrets.
 func (k *KubernetesDriver) Delete(ctx context.Context, shortID string) error {
 	name := "bz-" + shortID
+	if dep, err := k.cs.AppsV1().Deployments(k.namespace).Get(ctx, name, metav1.GetOptions{}); err == nil && dep.Labels[RoleLabel] == RoleJobManager {
+		return k.deleteFlink(ctx, shortID, dep)
+	} else if err != nil && !k8serrors.IsNotFound(err) {
+		return Errorf("Kubernetes refused to read deployment %s: %s", name, reason(err))
+	}
 	fg := metav1.DeletePropagationForeground
 	steps := []struct {
 		obj string
@@ -312,7 +320,7 @@ func (k *KubernetesDriver) pod(ctx context.Context, shortID string) (*corev1.Pod
 	}
 	var live []corev1.Pod
 	for _, p := range pods.Items {
-		if p.DeletionTimestamp == nil {
+		if p.DeletionTimestamp == nil && p.Labels[RoleLabel] != RoleTaskManager { // a Flink CDC pipeline's pod is its JobManager's
 			live = append(live, p)
 		}
 	}
@@ -336,6 +344,9 @@ func (k *KubernetesDriver) Observe(ctx context.Context, shortID string) (Observa
 	if h, ok := dep.Spec.Template.Annotations["app.bezisync.io/config-hash"]; ok {
 		hash = &h
 	}
+	if dep.Labels[RoleLabel] == RoleJobManager {
+		return k.observeFlink(ctx, shortID, dep, hash)
+	}
 	if dep.Spec.Replicas == nil || *dep.Spec.Replicas == 0 {
 		return Observation{Phase: PhaseStopped, ConfigHash: hash}, nil
 	}
@@ -346,6 +357,11 @@ func (k *KubernetesDriver) Observe(ctx context.Context, shortID string) (Observa
 	if pod == nil {
 		return Observation{Phase: PhasePending, ConfigHash: hash, Reason: "Waiting for the pod to be created."}, nil
 	}
+	return podObservation(pod, hash), nil
+}
+
+// podObservation reads a pod's first container.
+func podObservation(pod *corev1.Pod, hash *string) Observation {
 	var cs *corev1.ContainerStatus
 	if len(pod.Status.ContainerStatuses) > 0 {
 		cs = &pod.Status.ContainerStatuses[0]
@@ -360,7 +376,7 @@ func (k *KubernetesDriver) Observe(ctx context.Context, shortID string) (Observa
 	case cs != nil && cs.State.Running != nil:
 		started := cs.State.Running.StartedAt.UTC()
 		return Observation{Phase: PhaseRunning, Ready: ready, Restarts: restarts, StartedAt: &started, ConfigHash: hash,
-			Details: map[string]any{"pod": pod.Name, "node": pod.Spec.NodeName}}, nil
+			Details: map[string]any{"pod": pod.Name, "node": pod.Spec.NodeName}}
 	case cs != nil && cs.State.Waiting != nil:
 		r := cs.State.Waiting.Reason
 		if r == "" {
@@ -382,14 +398,14 @@ func (k *KubernetesDriver) Observe(ctx context.Context, shortID string) (Observa
 			exit = &e
 		}
 		return Observation{Phase: phase, Restarts: restarts, ExitCode: exit,
-			Reason: strings.Trim(r+": "+cs.State.Waiting.Message, ": "), ConfigHash: hash}, nil
+			Reason: strings.Trim(r+": "+cs.State.Waiting.Message, ": "), ConfigHash: hash}
 	case cs != nil && cs.State.Terminated != nil:
 		e := int(cs.State.Terminated.ExitCode)
 		r := cs.State.Terminated.Reason
 		if r == "" {
 			r = "Terminated"
 		}
-		return Observation{Phase: PhaseRestarting, Restarts: restarts, ExitCode: &e, Reason: r, ConfigHash: hash}, nil
+		return Observation{Phase: PhaseRestarting, Restarts: restarts, ExitCode: &e, Reason: r, ConfigHash: hash}
 	}
 	if pod.Status.Phase == corev1.PodPending {
 		var msgs []string
@@ -402,9 +418,9 @@ func (k *KubernetesDriver) Observe(ctx context.Context, shortID string) (Observa
 		if r == "" {
 			r = "Scheduling"
 		}
-		return Observation{Phase: PhasePending, Reason: r, ConfigHash: hash}, nil
+		return Observation{Phase: PhasePending, Reason: r, ConfigHash: hash}
 	}
-	return Observation{Phase: PhasePending, Reason: string(pod.Status.Phase), ConfigHash: hash}, nil
+	return Observation{Phase: PhasePending, Reason: string(pod.Status.Phase), ConfigHash: hash}
 }
 
 // Logs returns the newest pod's log tail.
@@ -477,6 +493,12 @@ func (k *KubernetesDriver) Test(ctx context.Context) TestResult {
 	if capacity == nil {
 		capacity = map[string]any{}
 	}
+	// Flink CDC pipelines also need a Service for their JobManager; without it only they can't run.
+	review := &authv1.SelfSubjectAccessReview{Spec: authv1.SelfSubjectAccessReviewSpec{
+		ResourceAttributes: &authv1.ResourceAttributes{Namespace: k.namespace, Resource: "services", Verb: "create"}}}
+	if out, err := k.cs.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{}); err == nil {
+		capacity["flink_cdc"] = out.Status.Allowed
+	}
 	return TestResult{OK: true, Message: fmt.Sprintf("Can run connectors in namespace %s.", k.namespace), Details: capacity}
 }
 
@@ -491,8 +513,10 @@ func (k *KubernetesDriver) ListWorkloads(ctx context.Context, owner string) ([]s
 		return nil, err
 	}
 	out := []string{}
+	seen := map[string]bool{}
 	for _, d := range deps.Items {
-		if id, ok := d.Labels[Label]; ok {
+		if id, ok := d.Labels[Label]; ok && !seen[id] { // a Flink CDC pipeline has two Deployments
+			seen[id] = true
 			out = append(out, id)
 		}
 	}

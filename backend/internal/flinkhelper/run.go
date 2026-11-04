@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -148,15 +149,25 @@ func InstallSelf(dir string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := os.ReadFile(self) //nolint:gosec // this binary
+	in, err := os.Open(self) //nolint:gosec // this binary
 	if err != nil {
 		return err
 	}
+	defer func() { _ = in.Close() }()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
+	// Streamed: the init container that runs this has a small memory limit.
 	tmp := filepath.Join(dir, ".bezisync.tmp")
-	if err := os.WriteFile(tmp, raw, 0o755); err != nil { //nolint:gosec // an executable for the engine's containers
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755) //nolint:gosec // an executable for the engine's containers
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(dir, "bezisync"))

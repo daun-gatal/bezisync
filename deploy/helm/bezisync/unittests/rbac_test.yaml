@@ -1,0 +1,10 @@
+suite: rbac
+templates: [templates/rbac.yaml]
+values: [../ci/default-values.yaml]
+tests:
+  - it: may create Services in the connector namespace (a Flink CDC pipeline's JobManager)
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - contains:
+          path: rules
+          content: { apiGroups: [""], resources: [configmaps, secrets, services], verbs: [get, list, create, update, patch, delete] }

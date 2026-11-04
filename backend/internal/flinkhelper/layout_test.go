@@ -75,8 +75,10 @@ func TestPrepareBuildsClasspathAndConf(t *testing.T) {
 	if err != nil || len(dyn) != 2 || dyn[0] != "-D" || dyn[1] != "jobmanager.rpc.address=bz-abc" {
 		t.Fatalf("dynamic properties %v, %v", dyn, err)
 	}
-	if _, err := os.Stat(filepath.Join(l.ConfDir(), "log4j-console.properties")); err != nil {
-		t.Fatal("Flink's logging configuration was not copied")
+	// Logging is the console only (the image's would also write rolling files).
+	logging, err := os.ReadFile(filepath.Join(l.ConfDir(), "log4j-console.properties"))
+	if err != nil || !strings.Contains(string(logging), "appender.console.type = CONSOLE") || strings.Contains(string(logging), "RollingFile") {
+		t.Fatalf("logging %q, %v", logging, err)
 	}
 	env := strings.Join(l.Env(), " ")
 	if !strings.Contains(env, "FLINK_LIB_DIR="+l.LibDir()) || !strings.Contains(env, "FLINK_CONF_DIR="+l.ConfDir()) {

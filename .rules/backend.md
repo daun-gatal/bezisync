@@ -217,6 +217,17 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   cluster first, then recreates it on a later Apply; stops run in the background, JobManager first
   within `StopGraceSeconds` (it saves the position), and Observe reports them as pending. `LogsOf`
   reads one component (`jobmanager`, `taskmanager-N`, `tunnel`).
+- Flink CDC on Kubernetes (`runtime/kubernetes_flink.go`): Deployments `bz-<id>` (JobManager, the
+  only one with the env Secret) and `bz-<id>-tm`, Service `bz-<id>-jm` (RPC 6123, blob 6124,
+  `publishNotReadyAddresses`), ConfigMap `bz-<id>` at `/opt/bezisync/config`, Secret `bz-<id>-files` at
+  `/opt/bezisync/secrets`. Each pod copies the helper in with an `install-helper` init container (a
+  streamed copy; 512Mi limit because the page cache counts), runs as uid 9999 with a read-only rootfs,
+  a memory emptyDir `/state` and, behind a bastion, its own tunnel sidecar reached as `bz-tunnel`
+  (hostAliases). Stopping or changing the cluster scales the JobManager to zero alone and touches the
+  TaskManagers only once its pod is gone (worked out from the cluster on every Apply, no state).
+  The runtime's Role needs `services` (both charts); `Test` reports `details.flink_cdc`.
+- The helper writes its own `log4j-console.properties` (console only): the image's would also write
+  rolling files, which a read-only rootfs refuses and tmpfs would hold in memory.
 - Control-plane side (`services/flinkcdc.go`): each Flink CDC pipeline's own secrets (state key,
   TLS keystore shared by its JobManager and TaskManagers, PKCS#12 via `go-pkcs12`) are generated once
   and sealed in `pipelines.engine_secrets_enc` (re-encrypted by `rotate-master-key`). Saved positions

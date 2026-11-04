@@ -100,8 +100,28 @@ func (l Layout) Prepare(s Settings) error {
 			return err
 		}
 	}
-	return nil
+	// Logs go to the console only: the root filesystem is read-only, and rolling files in tmpfs
+	// would hold up to a gigabyte of memory. The runtime keeps the container's output.
+	return os.WriteFile(filepath.Join(conf, "log4j-console.properties"), []byte(consoleLogging), 0o600) //nolint:gosec // the helper's own work dir
 }
+
+// consoleLogging is log4j-console.properties: Flink's console appender and levels, no files.
+const consoleLogging = `monitorInterval = 0
+rootLogger.level = INFO
+rootLogger.appenderRef.console.ref = ConsoleAppender
+logger.pekko.name = org.apache.pekko
+logger.pekko.level = INFO
+logger.hadoop.name = org.apache.hadoop
+logger.hadoop.level = WARN
+logger.zookeeper.name = org.apache.zookeeper
+logger.zookeeper.level = WARN
+logger.netty.name = org.jboss.netty.channel.DefaultChannelPipeline
+logger.netty.level = OFF
+appender.console.name = ConsoleAppender
+appender.console.type = CONSOLE
+appender.console.layout.type = PatternLayout
+appender.console.layout.pattern = %d{yyyy-MM-dd HH:mm:ss,SSS} %-5p %-60c %x - %m%n
+`
 
 // DynamicProperties are BeziSync's Flink settings (flink-conf.yaml: one "key: value" per line) as
 // "-D", "key=value" argument pairs of Flink's scripts and of the Flink CDC client (the scripts read

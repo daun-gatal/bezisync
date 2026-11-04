@@ -520,7 +520,7 @@ func (d *DockerDriver) deleteFlink(ctx context.Context, id string, have map[stri
 }
 
 // LogsOf returns the last lines of one component: "" or "jobmanager", "taskmanager-<n>", "tunnel".
-func (d *DockerDriver) LogsOf(ctx context.Context, shortID, component string, tail int) (string, error) {
+func (d *DockerDriver) LogsOf(ctx context.Context, shortID, component string, tail int, _ bool) (string, error) {
 	name, err := componentName(shortID, component)
 	if err != nil {
 		return "", err

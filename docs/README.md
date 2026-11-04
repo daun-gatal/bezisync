@@ -443,7 +443,7 @@ and needs no cloud IAM sign-in or kubeconfig in BeziSync.
   `gke-gcloud-auth-plugin` are not available in the image).
 
 The identity needs the Role from the agent chart in the connector namespace: Deployments,
-ConfigMaps, Secrets, pods, logs and `pods/proxy`.
+ConfigMaps, Secrets, Services (Flink CDC pipelines only), pods, logs and `pods/proxy`.
 
 Around the cluster:
 
