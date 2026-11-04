@@ -114,4 +114,3 @@ func icebergListedPartitions(opts map[string]any) []string {
 	}
 	return out
 }
-
