@@ -34,7 +34,7 @@ func TablesOf(d connectors.Discovery, captured []string) map[string]domain.Table
 		}
 		cols := make([]domain.PreviewColumn, len(t.Columns))
 		for i, c := range t.Columns {
-			cols[i] = domain.PreviewColumn{Name: c.Name, Type: c.Type, Nullable: c.Nullable, PII: c.PII}
+			cols[i] = domain.PreviewColumn{Name: c.Name, Type: c.Type, Nullable: c.Nullable, PII: c.PII, HasDefault: c.HasDefault}
 		}
 		out[name] = domain.TableColumns{Columns: cols, PrimaryKey: t.PrimaryKey, ReplicaIdentity: t.ReplicaIdentity, KeyKnown: true}
 	}

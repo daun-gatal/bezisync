@@ -31,6 +31,8 @@ type FlinkInput struct {
 	// Columns are each spec table's columns as they were at deploy (nil when unknown). A table
 	// that holds new columns back, leaves columns out or renames them is written column by column.
 	Columns map[string][]string
+	// Defaults are each table's columns that have a default in the source (nil when unknown).
+	Defaults map[string][]string
 	// Startup is artifacts.flink_startup (Start over), RestoreAfter artifacts.flink_restore_after.
 	Startup      map[string]any
 	RestoreAfter int64
@@ -187,7 +189,7 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 		owner[dest], destinations[t] = t, dest
 		routes = append(routes, yamlMap{{"source-table", fsrc.FlinkTableID(source, t)}, {"sink-table", dest}})
 	}
-	transforms, err := flinkTransforms(c, fsrc, source, in.Columns, fc.NewColumns, snkBlock)
+	transforms, err := flinkTransforms(c, fsrc, source, in.Columns, in.Defaults, fc.NewColumns, snkBlock)
 	if err != nil {
 		return nil, err
 	}

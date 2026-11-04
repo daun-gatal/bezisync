@@ -314,14 +314,15 @@ func (s *sqlserverSource) Discover(ctx context.Context, conn Resolved) (Discover
 		return Discovery{}, err
 	}
 	cols := map[[2]string][]Column{}
-	if err := eachRow(ctx, db, "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS "+
+	if err := eachRow(ctx, db, "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CASE WHEN COLUMN_DEFAULT IS NULL THEN 0 ELSE 1 END FROM INFORMATION_SCHEMA.COLUMNS "+
 		"ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION", nil, func(rows *sql.Rows) error {
 		var schema, table, column, dtype, nullable string
-		if err := rows.Scan(&schema, &table, &column, &dtype, &nullable); err != nil {
+		var hasDefault int
+		if err := rows.Scan(&schema, &table, &column, &dtype, &nullable, &hasDefault); err != nil {
 			return err
 		}
 		k := [2]string{schema, table}
-		cols[k] = append(cols[k], Column{Name: column, Type: dtype, Nullable: nullable == "YES", PII: LooksLikePII(column)})
+		cols[k] = append(cols[k], Column{Name: column, Type: dtype, Nullable: nullable == "YES", PII: LooksLikePII(column), HasDefault: hasDefault == 1})
 		return nil
 	}); err != nil {
 		return Discovery{}, err

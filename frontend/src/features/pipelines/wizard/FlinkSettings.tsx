@@ -33,6 +33,9 @@ export function FlinkRunSettings({
 }) {
   const set = <K extends keyof FlinkChoices>(k: K, v: FlinkChoices[K]) => onChange({ ...value, [k]: v });
   const iceberg = sinkType === 'iceberg';
+  // StarRocks and Doris refuse source column defaults: BeziSync writes columns without them, which
+  // needs every column known at deploy (the server refuses "send" for them too).
+  const noDefaults = BATCH_LOAD_SINKS.includes(sinkType ?? '');
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <Field label="When a source table changes shape" group>
@@ -58,7 +61,14 @@ export function FlinkRunSettings({
             onChange={(v) => set('new_columns', v)}
             options={[
               { value: 'hold', label: 'Hold back', description: 'A new source column is sent from the next deploy, after someone reviews it.' },
-              { value: 'send', label: 'Send', description: 'New columns reach the destination as they appear.' },
+              noDefaults
+                ? {
+                    value: 'send',
+                    label: 'Send',
+                    description: 'Not for this destination: it refuses the column defaults Flink CDC copies, so new columns wait for a deploy that writes them without.',
+                    disabled: true,
+                  }
+                : { value: 'send', label: 'Send', description: 'New columns reach the destination as they appear.' },
             ]}
           />
         )}

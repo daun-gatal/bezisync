@@ -225,7 +225,7 @@ func TestStarRocksNeedsFlinkCDC(t *testing.T) {
 	cfg := e.admin.get("/api/v1/projects/" + e.pid + "/pipelines/" + p.Str("id") + "/config").expect(200)
 	yaml := cfg.Str("properties")
 	for _, want := range []string{`type: "starrocks"`, `load-url: "starrocks.internal:8030"`, "password: ${BZ_SINK_PASSWORD}", `sink-table: "lake.cdc_shop_orders"`,
-		"projection: \"`id`, `total`\"", `replication_num: "1"`} {
+		"projection: \"CASE WHEN TRUE THEN `id` END AS `id`, `total`\"" /* id is serial: its default is left out */, `replication_num: "1"`} {
 		if !strings.Contains(yaml, want) {
 			t.Errorf("config lacks %s:\n%s", want, yaml)
 		}

@@ -179,6 +179,9 @@ type Column struct {
 	Type     string `json:"type"`
 	Nullable bool   `json:"nullable"`
 	PII      bool   `json:"pii"`
+	// HasDefault reports a column default in the source (PostgreSQL, MySQL/MariaDB, SQL Server):
+	// Flink CDC copies it as the source writes it, which StarRocks and Doris refuse. Not sent.
+	HasDefault bool `json:"-"`
 }
 
 // TableInfo is one discovered table.

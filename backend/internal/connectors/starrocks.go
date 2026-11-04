@@ -51,7 +51,9 @@ func (s *starrocksSink) FlinkSink(conn Resolved, c CompileContext) (*FlinkBlock,
 		{"sink.buffer-flush.interval-ms", strconv.Itoa(fc.FreshnessSeconds * 1000)},
 		{"table.create.properties.replication_num", strconv.Itoa(cfg.Replicas)},
 	}
-	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SINK_PASSWORD": cfg.Password}, Connector: "starrocks", Drivers: []string{"mysql"}}, nil
+	// No driver to add: Flink CDC's StarRocks connector bundles MySQL Connector/J 5.1.49, which it
+	// falls back to when the image carries no newer driver.
+	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SINK_PASSWORD": cfg.Password}, Connector: "starrocks", NoDefaults: true}, nil
 }
 
 func (s *starrocksSink) FlinkDestination(conn Resolved, _ CompileContext, routed string) string {

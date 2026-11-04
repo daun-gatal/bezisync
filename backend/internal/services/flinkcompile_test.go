@@ -37,4 +37,11 @@ func TestStoredColumnsReadTheArtifact(t *testing.T) {
 	if len(storedColumns(&models.Pipeline{})) != 0 {
 		t.Fatal("no artifact, no columns")
 	}
+	p.Artifacts[ArtifactDefaults] = map[string]any{"s.t": []any{"id"}}
+	if d := storedColumns(p, ArtifactDefaults); len(d) != 1 || len(d["s.t"]) != 1 || d["s.t"][0] != "id" {
+		t.Fatal(d)
+	}
+	if n := namesArtifact(map[string][]string{"s.t": {"id"}}); len(n["s.t"].([]any)) != 1 {
+		t.Fatal(n)
+	}
 }

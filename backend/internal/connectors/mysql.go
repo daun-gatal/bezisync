@@ -505,15 +505,16 @@ func (s *mysqlSource) Discover(ctx context.Context, conn Resolved) (Discovery, e
 		return Discovery{}, err
 	}
 	cols := map[[2]string][]Column{}
-	if err := eachRow(ctx, c, fmt.Sprintf("SELECT table_schema, table_name, column_name, data_type, is_nullable='YES' FROM information_schema.columns "+
+	if err := eachRow(ctx, c, fmt.Sprintf("SELECT table_schema, table_name, column_name, data_type, is_nullable='YES', column_default IS NOT NULL FROM information_schema.columns "+
 		"WHERE table_schema NOT IN (%s) ORDER BY table_schema, table_name, ordinal_position LIMIT 200000", ph), mySystemDBs, func(rows *sql.Rows) error {
 		var schema, table, column, dtype string
-		var nullable sql.NullInt64
-		if err := rows.Scan(&schema, &table, &column, &dtype, &nullable); err != nil {
+		var nullable, hasDefault sql.NullInt64
+		if err := rows.Scan(&schema, &table, &column, &dtype, &nullable, &hasDefault); err != nil {
 			return err
 		}
 		k := [2]string{schema, table}
-		cols[k] = append(cols[k], Column{Name: column, Type: dtype, Nullable: nullable.Valid && nullable.Int64 != 0, PII: LooksLikePII(column)})
+		cols[k] = append(cols[k], Column{Name: column, Type: dtype, Nullable: nullable.Valid && nullable.Int64 != 0, PII: LooksLikePII(column),
+			HasDefault: hasDefault.Valid && hasDefault.Int64 != 0})
 		return nil
 	}); err != nil {
 		return Discovery{}, err

@@ -19,9 +19,13 @@ import (
 // copied by the first copy is an insert too: Flink CDC doesn't tell them apart.
 var flinkEventTypes = map[string][]string{"insert": {"+I"}, "snapshot": {"+I"}, "update": {"-U", "+U"}, "delete": {"-D"}}
 
-func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, source connectors.Resolved, columns map[string][]string,
+func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, source connectors.Resolved, columns, defaults map[string][]string,
 	newColumns string, sink *connectors.FlinkBlock) ([]yamlMap, error) {
 	spec := c.Spec
+	if sink.NoDefaults && newColumns != "hold" {
+		return nil, problem.New(422, "engine_settings", "This destination refuses the column defaults Flink CDC copies from the source, "+
+			"so BeziSync writes columns without them, and new columns wait for the next deploy: choose to hold new columns back.")
+	}
 	if masked := maskedColumns(spec); len(masked) > 0 {
 		return nil, problem.New(422, "mask_unsupported",
 			fmt.Sprintf("Flink CDC has no hash function to mask %s. Remove the column or run this pipeline on Debezium.", strings.Join(masked, ", ")))
@@ -87,9 +91,17 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				if slices.Contains(rules.Exclude, col) {
 					continue
 				}
+				name := col
 				if to, ok := renames[col]; ok {
-					projection = append(projection, sqlIdent(col)+" AS "+sqlIdent(to))
-				} else {
+					name = to
+				}
+				switch {
+				case sink.NoDefaults && slices.Contains(defaults[table], col):
+					// An expression carries no default (a plain or renamed column keeps the source's).
+					projection = append(projection, "CASE WHEN TRUE THEN "+sqlIdent(col)+" END AS "+sqlIdent(name))
+				case name != col:
+					projection = append(projection, sqlIdent(col)+" AS "+sqlIdent(name))
+				default:
 					projection = append(projection, sqlIdent(col))
 				}
 			}

@@ -257,9 +257,15 @@ Changes land in one primary-key table per source table in a StarRocks database (
 created if missing), written by Flink CDC with Stream Load; schema changes are applied to the
 tables. Only Flink CDC writes StarRocks. The connection takes the FE host, its query port (9030,
 MySQL protocol) and HTTP port (8030, Stream Load), a user and password, and the replicas of each
-table (1 on a single-node cluster). The Flink CDC image needs MySQL Connector/J for StarRocks (see
-[Flink CDC engine](#flink-cdc-engine-optional)).
+table (1 on a single-node cluster). Flink CDC's StarRocks connector carries its own MySQL JDBC driver
+(Connector/J 5.1.49), so StarRocks needs no driver added to the image.
 
+- **Column defaults** are not copied: Flink CDC passes them on as the source writes them
+  (`nextval(...)`, `now()`, `'NEW'::character varying`), which StarRocks refuses. BeziSync writes
+  every source column that has a default without it; the values the source filled in still arrive.
+  Such a column arrives as `STRING` if it is text, and a timestamp one with millisecond precision.
+  Because of that, new source columns are held back until the next deploy ("Send" is not offered).
+- **Timestamps** arrive to the second: Flink CDC's StarRocks connector writes no fractions.
 - **Preflight** signs in over the MySQL protocol, creates and drops a test table in the database,
   and shows the `GRANT` statements the user needs when it can't. Every table needs a key
   (`flink_primary_key`). The **Events** tab and the delivery canary read rows back.
@@ -270,7 +276,8 @@ table (1 on a single-node cluster). The Flink CDC image needs MySQL Connector/J 
 ### Apache Doris
 
 The same as StarRocks for Doris: one unique-key table per source table, written with Stream Load
-(no TLS), read back and dropped over the MySQL protocol. Doris needs no MySQL Connector/J. When the
+(no TLS), read back and dropped over the MySQL protocol, and column defaults left out the same way
+(new columns are held back until the next deploy). Doris needs no MySQL Connector/J. When the
 BE addresses the FE hands out can't be reached from the runtime (Doris in Docker or behind NAT),
 list the BEs under **BE nodes** (`host:HTTP port`) and Flink CDC loads into them directly.
 
@@ -548,23 +555,25 @@ applies schema changes to the destination tables. Each pipeline runs its own sma
 JobManager and TaskManagers), so it needs more memory than a Debezium pipeline.
 
 Flink CDC is **off until an Admin registers a Flink CDC image** under **Settings → Engine versions
-→ Flink CDC** (or `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`). The image is built in
-[daun-gatal/image-repo](https://github.com/daun-gatal/image-repo/tree/main/flink-cdc) (Flink 2.2.1,
-Flink CDC 3.7.0 and the connectors, every download pinned by SHA-256) and published as
-`ghcr.io/daun-gatal/image-repo/flink-cdc:3.7.0-2.2.1`; mirror it to a registry your runtimes can
-pull from where needed. Until an image is registered the wizard shows StarRocks, Doris and Fluss as
-unavailable with the reason, and Iceberg pipelines run on Debezium.
-
-MySQL/MariaDB sources and the StarRocks destination need MySQL Connector/J, which is GPL-licensed
-and, as in Flink CDC itself, not in the published image. Build your own with it (its licence is
-then yours to accept), or copy the JAR into `/opt/flink-cdc/drivers` in an image of your own:
+→ Flink CDC** (or `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`). BeziSync publishes no Flink CDC image: build
+one from [daun-gatal/image-repo](https://github.com/daun-gatal/image-repo/tree/main/flink-cdc)
+(Flink 2.2.1, Flink CDC 3.7.0 and the connectors, every download pinned by SHA-256) and push it to a
+registry your runtimes can pull from. Until an image is registered the wizard shows StarRocks, Doris
+and Fluss as unavailable with the reason, and Iceberg pipelines run on Debezium.
 
 ```bash
 git clone https://github.com/daun-gatal/image-repo && cd image-repo
-docker buildx build --build-arg MYSQL_DRIVER=8.4.0 -t registry.example.com/flink-cdc:3.7.0-2.2.1-mysql flink-cdc
+docker buildx build -t registry.example.com/flink-cdc:3.7.0-2.2.1 flink-cdc
 ```
 
-PostgreSQL, SQL Server, Iceberg, Doris and Fluss work with the published image.
+MySQL/MariaDB sources need MySQL Connector/J, which Flink CDC leaves out of its MySQL connector for
+licence reasons (it is GPL-licensed). Add it when you build (its licence is then yours to accept):
+`--build-arg MYSQL_DRIVER=8.4.0`, or copy the JAR into `/opt/flink-cdc/drivers` in an image of your
+own. Every other source and destination works without it; Flink CDC's StarRocks connector carries
+its own copy of the driver (Connector/J 5.1.49).
+
+A Docker runtime pulls images anonymously: for a private registry, pull the image on the Docker host
+first. Kubernetes runtimes use the runtime's image pull secrets.
 
 The image holds Flink and Flink CDC only; BeziSync copies its own helper into each pipeline at
 start, so an image keeps working across BeziSync upgrades. Scan the image you run with your own

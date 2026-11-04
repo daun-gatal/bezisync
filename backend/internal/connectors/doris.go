@@ -54,7 +54,7 @@ func (s *dorisSink) FlinkSink(conn Resolved, c CompileContext) (*FlinkBlock, err
 		{"sink.buffer-flush.interval", strconv.Itoa(fc.FreshnessSeconds) + "s"},
 		{"table.create.properties.replication_num", strconv.Itoa(cfg.Replicas)},
 	}...)
-	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SINK_PASSWORD": cfg.Password}, Connector: "doris"}, nil
+	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SINK_PASSWORD": cfg.Password}, Connector: "doris", NoDefaults: true}, nil
 }
 
 func (s *dorisSink) FlinkDestination(conn Resolved, _ CompileContext, routed string) string {

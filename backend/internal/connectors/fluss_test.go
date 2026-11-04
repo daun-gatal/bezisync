@@ -44,7 +44,7 @@ func TestOLAPFlinkSinks(t *testing.T) {
 	conn.Type = "starrocks"
 	sr, err := (&starrocksSink{}).FlinkSink(conn, c)
 	if err != nil || sr.Options.Get("load-url") != "fe:8030" || sr.Options.Get("jdbc-url") != "jdbc:mysql://fe:9030" || sr.Options.Get("sink.buffer-flush.interval-ms") != "5000" ||
-		sr.Options.Get("sink.label-prefix") != "bz_0123456789ab" || sr.Drivers[0] != "mysql" {
+		sr.Options.Get("sink.label-prefix") != "bz_0123456789ab" || len(sr.Drivers) != 0 {
 		t.Fatalf("%+v %v", sr, err)
 	}
 	conn.Type = "doris"

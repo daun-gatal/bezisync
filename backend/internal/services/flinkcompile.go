@@ -17,6 +17,10 @@ import (
 // them writes exactly these; the next deploy reads them again.
 const ArtifactColumns = "flink_columns"
 
+// ArtifactDefaults: of those columns, the ones with a default in the source (table → names),
+// read with them. Destinations that refuse source defaults get these written without one.
+const ArtifactDefaults = "flink_defaults"
+
 // NeedsFlinkColumns reports a spec whose tables are written column by column on Flink CDC.
 func NeedsFlinkColumns(spec domain.PipelineSpec) bool {
 	if spec.FlinkCDC.Effective().NewColumns == "hold" {
@@ -45,10 +49,14 @@ func ResolveFlinkImage(ctx context.Context, q db.Querier, spec domain.PipelineSp
 	return img, nil
 }
 
-// storedColumns reads artifacts[ArtifactColumns].
-func storedColumns(p *models.Pipeline) map[string][]string {
+// storedColumns reads artifacts[ArtifactColumns] (or another table → names artifact).
+func storedColumns(p *models.Pipeline, key ...string) map[string][]string {
+	k := ArtifactColumns
+	if len(key) > 0 {
+		k = key[0]
+	}
 	out := map[string][]string{}
-	m, _ := p.Artifacts[ArtifactColumns].(map[string]any)
+	m, _ := p.Artifacts[k].(map[string]any)
 	for table, v := range m {
 		list, _ := v.([]any)
 		for _, c := range list {
@@ -66,44 +74,53 @@ func RefreshFlinkColumns(ctx context.Context, q db.Querier, p *models.Pipeline, 
 	if !NeedsFlinkColumns(spec) {
 		return nil
 	}
-	cols, err := liveColumns(ctx, q, p, spec.Source.Tables.Include)
+	cols, defaults, err := liveColumns(ctx, q, p, spec.Source.Tables.Include)
 	if err != nil {
 		return err
 	}
+	artifacts := cloneArtifacts(p)
+	artifacts[ArtifactColumns] = namesArtifact(cols)
+	artifacts[ArtifactDefaults] = namesArtifact(defaults)
+	p.Artifacts = artifacts
+	return nil
+}
+
+// namesArtifact stores table → names as JSON-ready values.
+func namesArtifact(names map[string][]string) map[string]any {
 	stored := map[string]any{}
-	for t, list := range cols {
+	for t, list := range names {
 		l := make([]any, len(list))
 		for i, c := range list {
 			l[i] = c
 		}
 		stored[t] = l
 	}
-	artifacts := cloneArtifacts(p)
-	artifacts[ArtifactColumns] = stored
-	p.Artifacts = artifacts
-	return nil
+	return stored
 }
 
-// liveColumns reads tables' columns from the source.
-func liveColumns(ctx context.Context, q db.Querier, p *models.Pipeline, tables []string) (map[string][]string, error) {
+// liveColumns reads tables' columns from the source, and which of them have a default.
+func liveColumns(ctx context.Context, q db.Querier, p *models.Pipeline, tables []string) (map[string][]string, map[string][]string, error) {
 	conn, err := GetConnection(ctx, q, p.SourceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if conn == nil {
-		return nil, problem.NotFound("Source")
+		return nil, nil, problem.NotFound("Source")
 	}
 	found, err := Discover(ctx, q, conn)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := map[string][]string{}
+	out, defaults := map[string][]string{}, map[string][]string{}
 	for name, t := range TablesOf(found, tables) {
 		for _, c := range t.Columns {
 			out[name] = append(out[name], c.Name)
+			if c.HasDefault {
+				defaults[name] = append(defaults[name], c.Name)
+			}
 		}
 	}
-	return out, nil
+	return out, defaults, nil
 }
 
 // flinkInput gathers what a Flink CDC compile needs besides the spec and the connections:
@@ -122,7 +139,7 @@ func flinkInput(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 		in.Startup = startup
 	}
 	if NeedsFlinkColumns(spec) {
-		in.Columns = storedColumns(p)
+		in.Columns, in.Defaults = storedColumns(p), storedColumns(p, ArtifactDefaults)
 		var missing []string
 		for _, t := range spec.Source.Tables.Include {
 			if len(in.Columns[t]) == 0 {
@@ -130,12 +147,12 @@ func flinkInput(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 			}
 		}
 		if len(missing) > 0 {
-			live, err := liveColumns(ctx, q, p, missing)
+			live, defaults, err := liveColumns(ctx, q, p, missing)
 			if err != nil {
 				return nil, err
 			}
 			for t, cols := range live {
-				in.Columns[t] = cols
+				in.Columns[t], in.Defaults[t] = cols, defaults[t]
 			}
 		}
 	}

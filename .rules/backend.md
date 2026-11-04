@@ -189,11 +189,17 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
 - Flink CDC is optional: `services.EngineAvailable` is false until a Flink CDC image is registered
   (install default, empty by default, or a catalog image that is not deprecated); `ChooseEngine`
   then never picks it (`engine_unavailable` with how to turn it on) and `GET /engines` reports it.
-  BeziSync's releases build no Flink CDC image: its Dockerfile lives in
+  BeziSync publishes no Flink CDC image: its Dockerfile lives in
   [daun-gatal/image-repo](https://github.com/daun-gatal/image-repo) (`flink-cdc/`, every download
-  pinned by SHA-256, MySQL Connector/J only on request), whose CI publishes
-  `ghcr.io/daun-gatal/image-repo/flink-cdc:<version>`. `flinkhelper.DefaultLayout` is the layout that
-  image provides; change both together. BeziSync's helper is injected into each pipeline at start,
+  pinned by SHA-256, MySQL Connector/J only on request), and Admins build and register their own.
+  `flinkhelper.DefaultLayout` is the layout that image provides; change both together. A
+  `FlinkBlock`'s `Drivers` are JDBC drivers the image must add: the MySQL source needs `mysql`; the
+  StarRocks connector bundles its own (Connector/J 5.1.49), so it lists none. `NoDefaults`
+  (StarRocks, Doris) marks destinations that refuse the source column defaults Flink CDC copies
+  verbatim: discovery records `HasDefault` (never sent), deploy stores those columns in
+  `artifacts.flink_defaults`, and the compiler writes each as `CASE WHEN TRUE THEN col END` (an
+  expression carries no default; a plain or renamed column keeps it), so these destinations
+  require held-back new columns. BeziSync's helper is injected into each pipeline at start,
   never baked into that image.
 - The helper (`internal/flinkhelper`, `bezisync engine flink-cdc ROLE`) runs in every container of a
   Flink CDC pipeline; `bezisync install-self DIR` copies the binary in (the image holds only Flink).

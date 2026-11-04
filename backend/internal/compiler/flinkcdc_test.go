@@ -37,6 +37,7 @@ func (*flinkTestSink) FlinkSink(conn connectors.Resolved, _ connectors.CompileCo
 	if conn.Config["soft"] == true { // a destination that keeps deleted rows, marked
 		b.Projection, b.Converter, b.Extra = []string{"__data_event_type__ AS `__op`"}, "SOFT_DELETE", []string{"values-extra"}
 	}
+	b.NoDefaults = conn.Config["no_defaults"] == true // like StarRocks and Doris
 	return b, nil
 }
 func (*flinkTestSink) FlinkDestination(_ connectors.Resolved, _ connectors.CompileContext, routed string) string {
@@ -300,6 +301,37 @@ func TestCompileFlinkSinkTransform(t *testing.T) {
 	if !strings.Contains(got.Pipeline, "projection: \"*, __data_event_type__ AS `__op`\"") || !strings.Contains(got.Pipeline, `converter-after-transform: "SOFT_DELETE"`) ||
 		!strings.Contains(got.Settings, `"values-extra"`) {
 		t.Fatal(got.Pipeline, got.Settings)
+	}
+}
+
+// A destination that refuses source defaults gets every column with one as an expression (which
+// carries none), renamed or not; the other columns stay plain. New columns must be held back.
+func TestCompileFlinkDropsDefaultsForDestinationsThatRefuseThem(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"sink":       map[string]any{"naming": "{schema}_{table}"},
+		"transforms": []any{map[string]any{"type": "unwrap"}, map[string]any{"type": "rename", "renames": []any{map[string]any{"from": "created_at", "to": "placed_at"}}}}})
+	strict := testSink
+	strict.Config = map[string]any{"no_defaults": true}
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "status", "created_at", "total"}}
+	in.Defaults = map[string][]string{"shop.orders": {"id", "created_at"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, strict, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "projection: \"CASE WHEN TRUE THEN `id` END AS `id`, `status`, CASE WHEN TRUE THEN `created_at` END AS `placed_at`, `total`\""
+	if !strings.Contains(got.Pipeline, want) {
+		t.Fatal(got.Pipeline)
+	}
+	// Other destinations keep the columns as they are.
+	got, err = compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil || !strings.Contains(got.Pipeline, "projection: \"`id`, `status`, `created_at` AS `placed_at`, `total`\"") {
+		t.Fatal(err, got.Pipeline)
+	}
+	spec.FlinkCDC.NewColumns = "send"
+	if _, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, strict, "acme/flink-cdc:3.7.0", in); err == nil || !strings.Contains(err.Error(), "hold new columns back") {
+		t.Fatalf("sent new columns to a destination that refuses defaults: %v", err)
 	}
 }
 

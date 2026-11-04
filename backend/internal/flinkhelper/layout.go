@@ -27,7 +27,7 @@ func (l Layout) ConfDir() string { return filepath.Join(l.WorkDir, "conf") }
 
 // driverHelp says how to add a JDBC driver the image lacks.
 var driverHelp = map[string]string{
-	"mysql": "MySQL Connector/J is missing from the Flink CDC image: MySQL/MariaDB sources and StarRocks need it. " +
+	"mysql": "MySQL Connector/J is missing from the Flink CDC image: MySQL/MariaDB sources need it. " +
 		"Rebuild the image with --build-arg MYSQL_DRIVER=8.4.0, or copy the driver into /opt/flink-cdc/drivers (see the guide: Flink CDC engine).",
 }
 

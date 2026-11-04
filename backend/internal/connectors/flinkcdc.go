@@ -53,6 +53,10 @@ type FlinkBlock struct {
 	// and Converter how its transform turns changes into rows ("SOFT_DELETE": keep deleted rows).
 	Projection []string
 	Converter  string
+	// NoDefaults: the destination refuses the column defaults Flink CDC copies from the source as
+	// the source writes them (StarRocks, Doris). Every column that has one is written as an
+	// expression, which carries none, so new columns must be held back until a deploy.
+	NoDefaults bool
 }
 
 // FlinkEndpoint is where the pipeline reaches the source: the connection's host, or the SSH

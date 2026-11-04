@@ -53,6 +53,13 @@ describe('FlinkRunSettings', () => {
     expect(last.flink_conf).toEqual({});
   });
 
+  it('holds new columns back for destinations that refuse source defaults', () => {
+    render(<Harness sinkType="starrocks" expert={false} onValue={() => undefined} />);
+    const group = screen.getByRole('radiogroup', { name: 'New columns' });
+    expect(within(group).getByRole('radio', { name: /Send/ })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(group).getByRole('radio', { name: /Hold back/ })).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('chooses how schema changes and new columns are handled', async () => {
     let last = flinkChoices(undefined);
     render(<Harness sinkType="fluss" expert={false} onValue={(v) => (last = v)} />);

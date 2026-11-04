@@ -47,10 +47,9 @@ export function EngineVersionsSection() {
       {engine === 'flink-cdc' && flink && !flink.available ? (
         <Card title="Flink CDC is off">
           <p className="m-0 max-w-3xl text-base text-muted">
-            Add a Flink CDC image below: <code className="font-mono text-sm">ghcr.io/daun-gatal/image-repo/flink-cdc:3.7.0-2.2.1</code>, or a mirror of it. MySQL,
-            MariaDB and StarRocks also need MySQL Connector/J, which it leaves out: build your own from{' '}
-            <code className="font-mono text-sm">github.com/daun-gatal/image-repo</code> with{' '}
-            <code className="font-mono text-sm">--build-arg MYSQL_DRIVER=8.4.0</code>. Pipelines can then choose Flink CDC where it fits: StarRocks, Doris, Fluss, and Iceberg from MySQL, MariaDB,
+            BeziSync doesn’t publish a Flink CDC image: build one from <code className="font-mono text-sm">github.com/daun-gatal/image-repo</code>{' '}
+            (<code className="font-mono text-sm">flink-cdc/</code>; add <code className="font-mono text-sm">--build-arg MYSQL_DRIVER=8.4.0</code> for MySQL or
+            MariaDB sources), push it to a registry your runtimes pull from, and add it below. Pipelines can then choose Flink CDC where it fits: StarRocks, Doris, Fluss, and Iceberg from MySQL, MariaDB,
             PostgreSQL or SQL Server.
           </p>
         </Card>

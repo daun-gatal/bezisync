@@ -518,7 +518,8 @@ func (s *postgresSource) Discover(ctx context.Context, conn Resolved) (Discovery
 	trows = first(trows, pgMaxTables)
 	cols := map[[2]string][]Column{}
 	crows, err := pg.Query(ctx, fmt.Sprintf(`
-                SELECT table_schema::text, table_name::text, column_name::text, data_type::text, is_nullable = 'YES'
+                SELECT table_schema::text, table_name::text, column_name::text, data_type::text, is_nullable = 'YES',
+                       column_default IS NOT NULL
                   FROM information_schema.columns
                  WHERE table_schema NOT IN ('pg_catalog', 'information_schema', '%s')
                  ORDER BY table_schema, table_name, ordinal_position LIMIT 200000
@@ -528,13 +529,13 @@ func (s *postgresSource) Discover(ctx context.Context, conn Resolved) (Discovery
 	}
 	for crows.Next() {
 		var schema, table, column, dataType string
-		var nullable bool
-		if err := crows.Scan(&schema, &table, &column, &dataType, &nullable); err != nil {
+		var nullable, hasDefault bool
+		if err := crows.Scan(&schema, &table, &column, &dataType, &nullable, &hasDefault); err != nil {
 			crows.Close()
 			return Discovery{}, err
 		}
 		k := [2]string{schema, table}
-		cols[k] = append(cols[k], Column{Name: column, Type: dataType, Nullable: nullable, PII: LooksLikePII(column)})
+		cols[k] = append(cols[k], Column{Name: column, Type: dataType, Nullable: nullable, PII: LooksLikePII(column), HasDefault: hasDefault})
 	}
 	crows.Close()
 	if err := crows.Err(); err != nil {
