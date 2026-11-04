@@ -262,8 +262,10 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
 - Flink-only destinations (`engine.FlinkOnlySink`: StarRocks, Doris, Fluss) carry `engines:
   ["flink-cdc"]` in their descriptor; `connector-types` adds `available`/`unavailable_reason` and
   creating such a connection is refused (`engine_unavailable`) until Flink CDC is available. Their
-  `CompileSink` refuses Debezium. StarRocks (`connectors/starrocks.go`): checked and read over the FE's
-  MySQL protocol, written by Stream Load over HTTP (no TLS upstream: the form says so). A Flink CDC
+  `CompileSink` refuses Debezium. StarRocks and Doris (`connectors/olap.go` shares the check,
+  Rows view and cleanup; `starrocks.go`, `doris.go` hold what differs): checked and read over the
+  FE's MySQL protocol, written by Stream Load over HTTP (no TLS upstream: the forms say so). Doris
+  can load straight into listed BE nodes (`be_nodes`) when the FE's redirects are unreachable. A Flink CDC
   pipeline resolves its image with `ResolvePipelineImage` (deploy) and is left out of the Debezium
   versions usage and upgrades; the sink spec's event format is checked for Debezium only.
 - Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll

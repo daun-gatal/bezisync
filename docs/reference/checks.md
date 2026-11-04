@@ -1585,6 +1585,71 @@ GRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';
 
 - Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
 
+## Apache Doris
+
+<a id="doris-config"></a>
+### `doris_config`
+
+**Settings**
+
+<a id="doris-create-table"></a>
+### `doris_create_table`
+
+**Create tables**
+
+Fix:
+
+```
+GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{database}.* TO '{user}'@'%';
+```
+
+<a id="doris-http-blocked"></a>
+### `doris_http_blocked`
+
+**Reach the Doris FE (HTTP, Stream Load)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="doris-http-reachable"></a>
+### `doris_http_reachable`
+
+**Reach the Doris FE (HTTP, Stream Load)**
+
+- Why: The host answered on the port.
+
+<a id="doris-http-unreachable"></a>
+### `doris_http_unreachable`
+
+**Reach the Doris FE (HTTP, Stream Load)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
+<a id="doris-login"></a>
+### `doris_login`
+
+**Sign in**
+
+<a id="doris-network-blocked"></a>
+### `doris_network_blocked`
+
+**Reach the Doris FE (MySQL protocol)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="doris-network-reachable"></a>
+### `doris_network_reachable`
+
+**Reach the Doris FE (MySQL protocol)**
+
+- Why: The host answered on the port.
+
+<a id="doris-network-unreachable"></a>
+### `doris_network_unreachable`
+
+**Reach the Doris FE (MySQL protocol)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
 ## Database (JDBC)
 
 <a id="jdbc-config"></a>

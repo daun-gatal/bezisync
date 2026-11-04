@@ -17,6 +17,7 @@
   "NATS JetStream",
   "Apache Iceberg",
   "StarRocks",
+  "Apache Doris",
   "Database (JDBC)",
   "Amazon SQS",
   "Amazon SNS",
@@ -2915,6 +2916,101 @@
    "whys": [],
    "fixes": [
     "GRANT CREATE DATABASE ON CATALOG default_catalog TO USER '{user}';\nGRANT ALL ON DATABASE {database} TO USER '{user}';\nGRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';"
+   ]
+  },
+  {
+   "code": "doris_config",
+   "section": "Apache Doris",
+   "titles": [
+    "Settings"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "doris_network_reachable",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (MySQL protocol)"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_network_unreachable",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (MySQL protocol)"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_network_blocked",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (MySQL protocol)"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_http_reachable",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_http_unreachable",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_http_blocked",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_login",
+   "section": "Apache Doris",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "doris_create_table",
+   "section": "Apache Doris",
+   "titles": [
+    "Create tables"
+   ],
+   "whys": [],
+   "fixes": [
+    "GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{database}.* TO '{user}'@'%';"
    ]
   }
  ]

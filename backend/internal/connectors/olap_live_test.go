@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,15 +16,24 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 )
 
-// Against a real StarRocks: BEZISYNC_TEST_STARROCKS_HOST, _QUERY_PORT and _HTTP_PORT (root, no
-// password, a single node).
+// Against real StarRocks and Doris: BEZISYNC_TEST_<STARROCKS|DORIS>_HOST, _QUERY_PORT and
+// _HTTP_PORT (root, no password, single nodes).
 func TestStarRocksLive(t *testing.T) {
-	host := os.Getenv("BEZISYNC_TEST_STARROCKS_HOST")
+	olapLive(t, "starrocks", "CREATE TABLE IF NOT EXISTS bz_live_check.orders (id INT NOT NULL, note VARCHAR(20)) PRIMARY KEY (id) DISTRIBUTED BY HASH (id) PROPERTIES (\"replication_num\" = \"1\")")
+}
+
+func TestDorisLive(t *testing.T) {
+	olapLive(t, "doris", "CREATE TABLE IF NOT EXISTS bz_live_check.orders (id INT NOT NULL, note VARCHAR(20)) UNIQUE KEY (id) DISTRIBUTED BY HASH (id) BUCKETS 1 PROPERTIES (\"replication_num\" = \"1\")")
+}
+
+func olapLive(t *testing.T, typ, create string) {
+	env := "BEZISYNC_TEST_" + strings.ToUpper(typ)
+	host := os.Getenv(env + "_HOST")
 	if host == "" {
-		t.Skip("BEZISYNC_TEST_STARROCKS_HOST not set")
+		t.Skip(env + "_HOST not set")
 	}
-	qp, _ := strconv.Atoi(os.Getenv("BEZISYNC_TEST_STARROCKS_QUERY_PORT"))
-	hp, _ := strconv.Atoi(os.Getenv("BEZISYNC_TEST_STARROCKS_HTTP_PORT"))
+	qp, _ := strconv.Atoi(os.Getenv(env + "_QUERY_PORT"))
+	hp, _ := strconv.Atoi(os.Getenv(env + "_HTTP_PORT"))
 	s, err := config.Load(func(k string) (string, bool) {
 		if k == "BEZISYNC_SSRF_ALLOW_CIDRS" {
 			return `["127.0.0.0/8", "172.16.0.0/12", "10.0.0.0/8"]`, true
@@ -36,9 +46,9 @@ func TestStarRocksLive(t *testing.T) {
 	config.Set(s)
 	t.Cleanup(config.Reset)
 	ctx := context.Background()
-	conn := connectors.Resolved{Type: "starrocks", Config: map[string]any{"host": host, "query_port": qp, "http_port": hp, "database": "bz_live_check",
+	conn := connectors.Resolved{Type: typ, Config: map[string]any{"host": host, "query_port": qp, "http_port": hp, "database": "bz_live_check",
 		"user": "root", "replicas": 1}, Secrets: map[string]any{}}
-	snk, _ := connectors.GetSink("starrocks")
+	snk, _ := connectors.GetSink(typ)
 	report, err := snk.Check(ctx, conn, nil)
 	if err != nil || !report.OK {
 		t.Fatalf("%+v %v", report, err)
@@ -48,8 +58,7 @@ func TestStarRocksLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	for _, q := range []string{"CREATE TABLE IF NOT EXISTS bz_live_check.orders (id INT NOT NULL, note VARCHAR(20)) PRIMARY KEY (id) DISTRIBUTED BY HASH (id) PROPERTIES (\"replication_num\" = \"1\")",
-		"INSERT INTO bz_live_check.orders VALUES (1, 'it''s here')"} {
+	for _, q := range []string{create, "INSERT INTO bz_live_check.orders VALUES (1, 'it''s here')"} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +78,7 @@ func TestStarRocksLive(t *testing.T) {
 		}
 	}
 	_, _ = db.ExecContext(ctx, "DROP DATABASE IF EXISTS bz_live_check FORCE")
-	// A user without rights is told what to grant.
+	// A user without rights is told so.
 	bad := conn
 	bad.Config = map[string]any{"host": host, "query_port": qp, "http_port": hp, "database": "bz_live_check", "user": "nobody", "replicas": 1}
 	if report, _ := snk.Check(ctx, bad, nil); report.OK {
