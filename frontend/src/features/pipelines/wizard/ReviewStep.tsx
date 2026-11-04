@@ -415,7 +415,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             ))}
             {report.properties ? (
               <details className="min-w-0">
-                <summary className="cursor-pointer text-sm font-semibold">Generated configuration (application.properties)</summary>
+                <summary className="cursor-pointer text-sm font-semibold">Generated configuration ({flink ? 'pipeline.yaml' : 'application.properties'})</summary>
                 <Meta as="p" className="my-2">
                   Secrets appear only as ${'{'}…{'}'} references and are injected at runtime.
                 </Meta>

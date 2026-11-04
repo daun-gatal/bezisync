@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, fieldsBefore, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, type Caps, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, fieldsBefore, flinkColumns, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -137,5 +137,33 @@ describe('step capabilities per engine', () => {
   });
   it('marks the steps only Debezium runs', () => {
     expect([...DEBEZIUM_ONLY_STEPS].sort()).toEqual(['custom', 'flatten', 'outbox']);
+  });
+});
+
+describe('Flink CDC steps', () => {
+  it('turns the first copy and inserts on and off together', () => {
+    expect(toggleFlinkOperation([], 'new', true)).toEqual(['insert', 'snapshot']);
+    expect(toggleFlinkOperation(['insert', 'update', 'snapshot'], 'new', false)).toEqual(['update']);
+    expect(toggleFlinkOperation(['update'], 'delete', true)).toEqual(['update', 'delete']);
+    // A Debezium-era filter with only inserts: turning "new rows" on adds the first copy.
+    expect(toggleFlinkOperation(['insert'], 'new', true)).toEqual(['insert', 'snapshot']);
+  });
+  it('lists the columns a destination table gets: left out, renamed, added, keyed', () => {
+    const spec = fullSpec({ source: { tables: { include: ['public.orders'] }, columns: { 'public.orders': { mask: [], exclude: ['status'] } } } } as never);
+    const steps: TransformStep[] = [
+      rename,
+      { type: 'rename', id: 'other', tables: ['public.items'], renames: [{ from: 'id', to: 'item_id' }] },
+      add,
+      { type: 'add_field', id: 'add2', name: 'pipe', value: { kind: 'pipeline' } },
+    ];
+    expect(flinkColumns(orders, spec, steps, 'orders-lake')).toEqual([
+      { name: 'id', from: { kind: 'column', column: 'id', renamed: false }, key: true },
+      { name: 'customer_id', from: { kind: 'column', column: 'cust_id', renamed: true }, key: false },
+      { name: 'source_system', from: { kind: 'added', value: 'orders-eu' }, key: false },
+      { name: 'pipe', from: { kind: 'added', value: 'orders-lake' }, key: false },
+    ]);
+    // Key columns chosen for a table replace its primary key.
+    const keyed = fullSpec({ source: { tables: { include: ['public.orders'] } }, keys: { 'public.orders': ['cust_id'] } } as never);
+    expect(flinkColumns(orders, keyed, [], 'p').filter((c) => c.key).map((c) => c.name)).toEqual(['cust_id']);
   });
 });

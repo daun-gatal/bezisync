@@ -10,6 +10,7 @@ import type { FilterOp, FilterRule, RuleValue, TransformStep, ValueFormats } fro
 import {
   columnKind,
   fieldsBefore,
+  FLINK_OPERATIONS,
   isNumericKind,
   KNOWN_CLASSES,
   METADATA,
@@ -22,6 +23,7 @@ import {
   parseRuleValue,
   SCRIPTED_CLASSES,
   textError,
+  toggleFlinkOperation,
   type Caps,
   type TableInfo,
 } from './model';
@@ -37,6 +39,8 @@ export interface EditorContext {
   steps: TransformStep[];
   index: number;
   expert: boolean;
+  /** The pipeline runs on Flink CDC (rows written into tables, Flink CDC's operations). */
+  flink: boolean;
 }
 
 /** Labelled row: the label column keeps editors aligned. */
@@ -399,19 +403,28 @@ export function FilterEditor({ step, ctx, onChange }: { step: TransformStep; ctx
     <div className="flex flex-col gap-3">
       <TablesScope step={step} ctx={ctx} onChange={onChange} />
       <Row label="Operations">
-        {OPERATIONS.map((o) => (
-          <Check
-            key={o.value}
-            label={o.label}
-            checked={ops.includes(o.value)}
-            onChange={(on) =>
-              onChange({
-                ...step,
-                operations: on ? OPERATIONS.map((x) => x.value).filter((x) => x === o.value || ops.includes(x)) : ops.filter((x) => x !== o.value),
-              })
-            }
-          />
-        ))}
+        {ctx.flink
+          ? FLINK_OPERATIONS.map((o) => (
+              <Check
+                key={o.value}
+                label={o.label}
+                checked={o.ops.every((x) => ops.includes(x))}
+                onChange={(on) => onChange({ ...step, operations: toggleFlinkOperation(ops, o.value, on) })}
+              />
+            ))
+          : OPERATIONS.map((o) => (
+              <Check
+                key={o.value}
+                label={o.label}
+                checked={ops.includes(o.value)}
+                onChange={(on) =>
+                  onChange({
+                    ...step,
+                    operations: on ? OPERATIONS.map((x) => x.value).filter((x) => x === o.value || ops.includes(x)) : ops.filter((x) => x !== o.value),
+                  })
+                }
+              />
+            ))}
       </Row>
       {ctx.caps.row_filters ? (
         <Row label="Where">
@@ -454,12 +467,15 @@ export function FilterEditor({ step, ctx, onChange }: { step: TransformStep; ctx
         <p className="m-0 text-xs text-muted">This source sends documents as JSON text, so filters can only check the operation.</p>
       )}
       <Notice tone="info">
-        Deletes are judged on the row before the delete. Dropped events are gone for this pipeline: changing the filter later does not bring them back
-        (re-snapshot the table for that).
+        {ctx.flink
+          ? 'Deletes are judged on the row before the delete. Rows a filter drops never reach the table: changing the filter later does not bring them back (Start over for that).'
+          : 'Deletes are judged on the row before the delete. Dropped events are gone for this pipeline: changing the filter later does not bring them back (re-snapshot the table for that).'}
       </Notice>
       {ctx.expert ? (
         <p className="m-0 text-xs text-muted">
-          Debezium: io.debezium.transforms.Filter with a condition BeziSync generates (shown in the configuration on Review).
+          {ctx.flink
+            ? 'Flink CDC: a transform filter BeziSync generates (shown in the configuration on Review).'
+            : 'Debezium: io.debezium.transforms.Filter with a condition BeziSync generates (shown in the configuration on Review).'}
         </p>
       ) : null}
     </div>

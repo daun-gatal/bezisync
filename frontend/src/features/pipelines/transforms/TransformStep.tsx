@@ -12,6 +12,7 @@ import { useProject } from '@/lib/session';
 import { fullSpec, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext } from './editors';
+import { FlinkPreviewPanel } from './FlinkPreviewPanel';
 import { PreviewPanel } from './PreviewPanel';
 import {
   addStep,
@@ -20,6 +21,7 @@ import {
   DEBEZIUM_CLASS,
   DEBEZIUM_ONLY_STEPS,
   defaultStep,
+  FLINK_TITLE,
   moveStep,
   NO_CAPS,
   stepCaps,
@@ -104,7 +106,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   }));
   const shapeAt = steps.findIndex((t) => t.type === 'unwrap');
   const keyOf = (t: Step, i: number) => t.id ?? `step-${i}`;
-  const ctxFor = (index: number): EditorContext => ({ sourceType, sink: sinkCaps, tables, caps, spec: draft, steps, index, expert });
+  const ctxFor = (index: number): EditorContext => ({ sourceType, sink: sinkCaps, tables, caps, spec: draft, steps, index, expert, flink });
   const update = (i: number, next: Step) => setSteps(steps.map((t, j) => (j === i ? next : t)));
   const remove = (i: number) => {
     setSteps(steps.filter((_, j) => j !== i));
@@ -127,6 +129,9 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
     }
   }, [unkeyed.length, open]);
 
+  // On Flink CDC the steps work on the rows and columns written into each table.
+  const titleOf = (type: TransformType) => (flink ? (FLINK_TITLE[type] ?? TYPE_TITLE[type]) : TYPE_TITLE[type]);
+
   function locked(type: TransformType): string | null {
     if (flink && DEBEZIUM_ONLY_STEPS.includes(type)) return 'Runs only on Debezium: this pipeline runs on Flink CDC.';
     if (type === 'custom') {
@@ -135,13 +140,17 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
       return null;
     }
     if (policies?.allowed_transforms && !policies.allowed_transforms.includes(type)) return 'Not allowed in this project.';
-    if (stageOf({ type }) === 2 && shapeAt < 0) return 'Needs the “Row after change” event shape.';
+    // On Flink CDC rows are always written whole: the shape step is added for these steps (add).
+    if (!flink && stageOf({ type }) === 2 && shapeAt < 0) return 'Needs the “Row after change” event shape.';
     return null;
   }
 
   function add(type: TransformType) {
-    const step = defaultStep(type, steps);
-    setSteps(addStep(steps, step));
+    // Field steps need the row-after-change shape in the spec (validated); Flink CDC always writes
+    // rows, so on Flink CDC it is added silently.
+    const base = flink && stageOf({ type }) === 2 && shapeAt < 0 ? withShape(steps, defaultStep('unwrap', steps)) : steps;
+    const step = defaultStep(type, base);
+    setSteps(addStep(base, step));
     setAdding(false);
     setOpen(step.id!);
   }
@@ -171,10 +180,10 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
     return (
       <StepRow
         key={k}
-        n={i + 1}
-        title={t.type === 'unwrap' ? 'Row after change' : TYPE_TITLE[t.type]}
+        n={flink ? steps.slice(0, i + 1).filter((x) => x.type !== 'unwrap').length : i + 1}
+        title={t.type === 'unwrap' ? 'Row after change' : titleOf(t.type)}
         summary={t.type === 'unwrap' ? summarize(t).split(' · ').slice(1).join(' · ') : summarize(t)}
-        technical={expert ? (t.type === 'custom' ? t.class : DEBEZIUM_CLASS[t.type]) : undefined}
+        technical={expert && !flink ? (t.type === 'custom' ? t.class : DEBEZIUM_CLASS[t.type]) : undefined}
         open={isOpen}
         error={err}
         inlineErrors={t.type === 'rename' || t.type === 'add_field'}
@@ -211,8 +220,12 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="m-0 text-lg font-semibold">How should events look?</h2>
-        <p className="m-0 mt-1 text-sm text-muted">Optional. Most pipelines only need the event shape. You can change all of this later.</p>
+        <h2 className="m-0 text-lg font-semibold">{flink ? 'Which rows and columns reach each table?' : 'How should events look?'}</h2>
+        <p className="m-0 mt-1 text-sm text-muted">
+          {flink
+            ? 'Optional. Flink CDC keeps each table in sync as rows: filter rows, rename columns or add columns. You can change all of this later.'
+            : 'Optional. Most pipelines only need the event shape. You can change all of this later.'}
+        </p>
       </div>
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <Card
@@ -225,7 +238,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
         >
           <span className="text-xs text-muted">Applied top to bottom.</span>
           {discovery.isPending ? <Skeleton lines={2} /> : null}
-          <SystemLine>BeziSync drops its own heartbeat and signal records</SystemLine>
+          {flink ? null : <SystemLine>BeziSync drops its own heartbeat and signal records</SystemLine>}
           {nudgeDecimals ? (
             <Notice tone="warn" title="Decimals arrive as base64 text">
               <span className="block">
@@ -261,9 +274,9 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               </StepRow>
             </>
           ) : null}
-          {stage('Keep events', (t) => stageOf(t) === 0)}
-          <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">Event shape</div>
-          {shapeAt >= 0 ? (
+          {stage(flink ? 'Keep rows' : 'Keep events', (t) => stageOf(t) === 0)}
+          {flink ? null : <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">Event shape</div>}
+          {flink ? null : shapeAt >= 0 ? (
             row(steps[shapeAt]!, shapeAt)
           ) : shapeRequired ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-subtle px-3 py-2.5 text-sm">
@@ -285,20 +298,29 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               </Button>
             </div>
           )}
-          {stage('Field changes · order matters', (t) => stageOf(t) === 2)}
+          {stage(flink ? 'Columns · order matters' : 'Field changes · order matters', (t) => stageOf(t) === 2)}
           {stage('Other steps', (t) => stageOf(t) === -1 && t.type !== 'unwrap')}
           {caps.key_columns ? (
             <>
-              <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">Message key</div>
+              <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">{flink ? 'Primary key' : 'Message key'}</div>
               {unkeyed.length ? (
                 <Notice tone="warn" className="wrap-anywhere">
-                  {unkeyed.map((t) => t.name).join(', ')} {unkeyed.length === 1 ? 'has' : 'have'} no primary key, so{' '}
-                  {unkeyed.length === 1 ? 'its events have' : 'their events have'} no key: no ordering per row and no compaction. Choose key columns below.
+                  {flink ? (
+                    <>
+                      {unkeyed.map((t) => t.name).join(', ')} {unkeyed.length === 1 ? 'has' : 'have'} no primary key. Flink CDC writes each row by its key:
+                      choose key columns below.
+                    </>
+                  ) : (
+                    <>
+                      {unkeyed.map((t) => t.name).join(', ')} {unkeyed.length === 1 ? 'has' : 'have'} no primary key, so{' '}
+                      {unkeyed.length === 1 ? 'its events have' : 'their events have'} no key: no ordering per row and no compaction. Choose key columns below.
+                    </>
+                  )}
                 </Notice>
               ) : null}
               <StepRow
                 n={null}
-                title="Message key"
+                title={flink ? 'Primary key' : 'Message key'}
                 summary={
                   Object.keys(keys).length
                     ? Object.entries(keys)
@@ -306,7 +328,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
                         .join(' · ')
                     : 'Primary keys'
                 }
-                technical={expert ? 'message.key.columns' : undefined}
+                technical={expert && !flink ? 'message.key.columns' : undefined}
                 open={open === 'keys'}
                 onToggle={() => setOpen(open === 'keys' ? null : 'keys')}
               >
@@ -316,7 +338,11 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
           ) : null}
           <SystemLine>BeziSync names each destination ({spec.sink.naming})</SystemLine>
         </Card>
-        <PreviewPanel projectId={project.id} pipelineId={pipeline.id} spec={draft} steps={steps} tables={tables} blocked={blocked} />
+        {flink ? (
+          <FlinkPreviewPanel spec={draft} steps={steps} tables={tables} pipelineName={pipeline.name} sinkType={pipeline.sink?.type} sinkCaps={sinkCaps} />
+        ) : (
+          <PreviewPanel projectId={project.id} pipelineId={pipeline.id} spec={draft} steps={steps} tables={tables} blocked={blocked} />
+        )}
       </div>
       <InlineError error={saveError} doing="Couldn’t save the transforms" />
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -358,7 +384,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
                       )}
                     >
                       <span className="flex items-center gap-1.5 text-base font-semibold">
-                        {TYPE_TITLE[c.type]}
+                        {titleOf(c.type)}
                         {why ? <Lock className="size-3.5 text-muted" aria-hidden /> : null}
                       </span>
                       <span className="text-xs text-muted">{why ?? c.help}</span>
