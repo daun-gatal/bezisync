@@ -265,7 +265,10 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `CompileSink` refuses Debezium. StarRocks and Doris (`connectors/olap.go` shares the check,
   Rows view and cleanup; `starrocks.go`, `doris.go` hold what differs): checked and read over the
   FE's MySQL protocol, written by Stream Load over HTTP (no TLS upstream: the forms say so). Doris
-  can load straight into listed BE nodes (`be_nodes`) when the FE's redirects are unreachable. A Flink CDC
+  can load straight into listed BE nodes (`be_nodes`) when the FE's redirects are unreachable. Fluss
+  (`connectors/fluss.go`): BeziSync has no Fluss client, so its check is reachability, it is not
+  readable, and delete reports its tables as `retained` with the statement to drop them; SASL/PLAIN
+  sign-in only (no TLS documented upstream). A Flink CDC
   pipeline resolves its image with `ResolvePipelineImage` (deploy) and is left out of the Debezium
   versions usage and upgrades; the sink spec's event format is checked for Debezium only.
 - Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll

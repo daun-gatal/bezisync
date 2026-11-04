@@ -18,6 +18,7 @@
   "Apache Iceberg",
   "StarRocks",
   "Apache Doris",
+  "Apache Fluss",
   "Database (JDBC)",
   "Amazon SQS",
   "Amazon SNS",
@@ -3012,6 +3013,48 @@
    "fixes": [
     "GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{database}.* TO '{user}'@'%';"
    ]
+  },
+  {
+   "code": "fluss_config",
+   "section": "Apache Fluss",
+   "titles": [
+    "Settings"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "fluss_network_reachable",
+   "section": "Apache Fluss",
+   "titles": [
+    "Reach the Fluss coordinator"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "fluss_network_unreachable",
+   "section": "Apache Fluss",
+   "titles": [
+    "Reach the Fluss coordinator"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "fluss_network_blocked",
+   "section": "Apache Fluss",
+   "titles": [
+    "Reach the Fluss coordinator"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
   }
  ]
 }

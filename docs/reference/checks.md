@@ -1650,6 +1650,34 @@ GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{da
 
 - Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
 
+## Apache Fluss
+
+<a id="fluss-config"></a>
+### `fluss_config`
+
+**Settings**
+
+<a id="fluss-network-blocked"></a>
+### `fluss_network_blocked`
+
+**Reach the Fluss coordinator**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="fluss-network-reachable"></a>
+### `fluss_network_reachable`
+
+**Reach the Fluss coordinator**
+
+- Why: The host answered on the port.
+
+<a id="fluss-network-unreachable"></a>
+### `fluss_network_unreachable`
+
+**Reach the Fluss coordinator**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
 ## Database (JDBC)
 
 <a id="jdbc-config"></a>

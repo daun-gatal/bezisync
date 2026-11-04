@@ -3251,6 +3251,139 @@
   },
   {
    "descriptor": {
+    "supports_masking": false,
+    "kind": "sink",
+    "type": "fluss",
+    "title": "Apache Fluss",
+    "description": "Streaming storage with sub-second reads: one table per source table in a Fluss database (primary-key tables, or log tables without a key), created by Flink CDC. Fluss can tier into Iceberg or Paimon. Runs on Flink CDC.",
+    "engines": [
+     "flink-cdc"
+    ],
+    "presets": [],
+    "config_schema": {
+     "properties": {
+      "bootstrap_servers": {
+       "maxLength": 500,
+       "minLength": 1,
+       "pattern": "^[A-Za-z0-9.-]+:[0-9]{1,5}(,[A-Za-z0-9.-]+:[0-9]{1,5})*$",
+       "title": "Bootstrap servers",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "fluss-coordinator:9123",
+        "help": "Coordinator host:port, comma-separated. Fluss has no TLS documented for Flink CDC: keep it in a network you trust."
+       }
+      },
+      "database": {
+       "default": "cdc",
+       "maxLength": 64,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "help": "Tables are created here."
+       }
+      },
+      "auth": {
+       "default": "none",
+       "enum": [
+        "none",
+        "sasl_plain"
+       ],
+       "title": "Sign in",
+       "type": "string",
+       "ui": {
+        "group": "Sign in",
+        "labels": {
+         "none": "None",
+         "sasl_plain": "SASL (PLAIN)"
+        }
+       }
+      },
+      "username": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "User",
+       "ui": {
+        "group": "Sign in",
+        "when": {
+         "auth": [
+          "sasl_plain"
+         ]
+        }
+       }
+      }
+     },
+     "required": [
+      "bootstrap_servers"
+     ],
+     "title": "FlussConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Sign in",
+        "when": {
+         "auth": [
+          "sasl_plain"
+         ]
+        }
+       }
+      }
+     },
+     "title": "FlussSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "{schema}_{table}",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "max_length": 64,
+      "message": "Use letters, digits and '_' (dots become '_'; names are lower-cased).",
+      "flatten_dots": true,
+      "single": false
+     },
+     "formats": [],
+     "unwrap": {
+      "required": false,
+      "add_fields": [],
+      "delete_handling": []
+     },
+     "outbox": false,
+     "options_schema": {
+      "properties": {},
+      "title": "FlussOptions",
+      "type": "object"
+     }
+    }
+   },
+   "debezium_name": "",
+   "readable": false
+  },
+  {
+   "descriptor": {
     "supports_masking": true,
     "kind": "sink",
     "type": "jdbc",
