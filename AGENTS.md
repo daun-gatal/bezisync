@@ -18,8 +18,8 @@ working in that area.
 
 ## 1. What BeziSync is
 
-A **self-service control plane for Debezium Server**. Admins connect runtimes and set
-guardrails once; any engineer — Debezium expert or not — creates and operates change-data-capture
+A **self-service control plane for Debezium Server** (and, optionally, **Flink CDC** for
+lakehouse and analytics destinations). Admins connect runtimes and set guardrails once; any engineer — Debezium expert or not — creates and operates change-data-capture
 pipelines safely. Its value is removing Debezium's real pain:
 
 - **Preflight checks with exact fixes** before anything deploys (per connector, per cloud provider).
@@ -34,9 +34,9 @@ pipelines safely. Its value is removing Debezium's real pain:
 
 ```
 Browser / CLI ──▶ api (Go)       ─┐
-                                  ├─ PostgreSQL: metadata, jobs, metrics, audit, Debezium offsets (JDBC store)
+                                  ├─ PostgreSQL: metadata, jobs, metrics, audit, Debezium offsets (JDBC store), Flink positions
             controller (reconcile ┘
-            loops + job queue) ──▶ runtime driver ──▶ Docker / Kubernetes ──▶ Debezium Server (1 per pipeline)
+            loops + job queue) ──▶ runtime driver ──▶ Docker / Kubernetes ──▶ Debezium Server or Flink CDC (1 per pipeline)
                                          ▲ remote runtimes: outbound-only agent
 ```
 
@@ -45,6 +45,11 @@ Browser / CLI ──▶ api (Go)       ─┐
   queue: Postgres is the queue. The API also serves MCP (`/api/v1/mcp`) for AI agents, whose
   tools call the REST API in process as the caller.
 - Debezium **3.7.0.Final** is the default image; offsets/schema history use its JDBC store.
+- Flink CDC (**3.7.0** on Flink **2.2.1**) is an optional second engine, on once an Admin registers
+  an image (built in [daun-gatal/image-repo](https://github.com/daun-gatal/image-repo), `flink-cdc/`).
+  Each pipeline runs its own JobManager + TaskManagers; BeziSync's helper (`bezisync engine
+  flink-cdc …`, copied in from the BeziSync image) runs the job and stores encrypted saved positions
+  in the state database.
 - Frontend (`frontend/`) is a React SPA served by nginx, talking only to `/api/v1`.
 - `bezisync remote …` is the CLI for users and CI (API tokens); `deploy/` holds the Helm charts
   (control plane, agent), the compose demo stack, the e2e fixtures and an optional AppArmor profile

@@ -88,7 +88,7 @@ var flinkStartupModes = map[string]string{"initial": "initial", "when_needed": "
 func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved, image string, in FlinkInput) (*FlinkCompiled, error) {
 	spec := c.Spec
 	if image == "" {
-		return nil, problem.New(422, "engine_unavailable", "No Flink CDC image is registered: an Admin adds one in Settings → Engines.")
+		return nil, problem.New(422, "engine_unavailable", "No Flink CDC image is registered: an Admin adds one in Settings → Engine versions.")
 	}
 	src, err := connectors.GetSource(source.Type)
 	if err != nil {

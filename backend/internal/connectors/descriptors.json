@@ -3255,7 +3255,7 @@
     "kind": "sink",
     "type": "fluss",
     "title": "Apache Fluss",
-    "description": "Streaming storage with sub-second reads: one table per source table in a Fluss database (primary-key tables, or log tables without a key), created by Flink CDC. Fluss can tier into Iceberg or Paimon. Runs on Flink CDC.",
+    "description": "Streaming storage with sub-second reads: one primary-key table per source table in a Fluss database, created by Flink CDC. Fluss can tier into Iceberg or Paimon. Runs on Flink CDC.",
     "engines": [
      "flink-cdc"
     ],

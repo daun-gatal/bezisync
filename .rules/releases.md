@@ -106,9 +106,10 @@ version, `--notes X.Y.Z` a release's notes.
 | Charts `oci://ghcr.io/daun-gatal/charts/{bezisync,bezisync-agent}` | `<chart version>`; `<chart version>-pre` while testing |
 | CLI archives on the GitHub Release (binary, `LICENSE`, `NOTICE`, `LICENSES.txt`) | `bezisync_X.Y.Z_<os>_<arch>.tar.gz` / `.zip`, `checksums.txt` |
 
-Not published: the Flink CDC engine image. `deploy/images/flink-cdc/Dockerfile` is a reference
-Admins build and register themselves (its downloads are pinned and reviewed in
-`tools/licenses/flinkcdc.go`); it takes no changelog fragment and no CI image build.
+Not published by these workflows: the Flink CDC engine image. Its Dockerfile and CI live in
+[daun-gatal/image-repo](https://github.com/daun-gatal/image-repo) (`flink-cdc/`), which publishes
+`ghcr.io/daun-gatal/image-repo/flink-cdc:<Flink CDC version>-<Flink version>`; Admins register it
+(or their own build) in Settings.
 
 Build provenance is attested with GitHub artifact attestations (stored by GitHub, so no
 signature tags in the registry): `gh attestation verify oci://ghcr.io/daun-gatal/bezisync:X.Y.Z

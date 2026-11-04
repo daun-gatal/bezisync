@@ -189,10 +189,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
 - Flink CDC is optional: `services.EngineAvailable` is false until a Flink CDC image is registered
   (install default, empty by default, or a catalog image that is not deprecated); `ChooseEngine`
   then never picks it (`engine_unavailable` with how to turn it on) and `GET /engines` reports it.
-  BeziSync does not build or publish a Flink CDC image: `deploy/images/flink-cdc/Dockerfile` is a
-  reference Admins build (every download pinned and listed in `tools/licenses/flinkcdc.go`, checked
-  by a test; MySQL Connector/J only on request). BeziSync's helper is injected into each pipeline at
-  start, never baked into that image.
+  BeziSync's releases build no Flink CDC image: its Dockerfile lives in
+  [daun-gatal/image-repo](https://github.com/daun-gatal/image-repo) (`flink-cdc/`, every download
+  pinned by SHA-256, MySQL Connector/J only on request), whose CI publishes
+  `ghcr.io/daun-gatal/image-repo/flink-cdc:<version>`. `flinkhelper.DefaultLayout` is the layout that
+  image provides; change both together. BeziSync's helper is injected into each pipeline at start,
+  never baked into that image.
 - The helper (`internal/flinkhelper`, `bezisync engine flink-cdc ROLE`) runs in every container of a
   Flink CDC pipeline; `bezisync install-self DIR` copies the binary in (the image holds only Flink).
   Both roles link the image's Flink JARs, `flink-cdc-dist` and only the pipeline's connectors and

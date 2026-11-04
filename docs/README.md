@@ -5,7 +5,7 @@ platform teams connect runtimes and set guardrails once; anyone can then stream 
 database to a destination safely. This guide covers installing, using and operating it.
 
 - [Install](#install) · [Concepts](#concepts) · [Your first pipeline](#your-first-pipeline) · [Sources](#sources)
-- [Destinations](#destinations) · [Databases behind a bastion (SSH)](#databases-behind-a-bastion-ssh) · [Operate](#operate) · [Manage runtimes](#manage-runtimes) · [Remote runtimes (agents)](#remote-runtimes-agents) · [Google GKE and Amazon EKS](#google-gke-and-amazon-eks) · [Debezium versions](#debezium-versions) · [Flink CDC engine (optional)](#flink-cdc-engine-optional)
+- [Destinations](#destinations) · [Databases behind a bastion (SSH)](#databases-behind-a-bastion-ssh) · [Operate](#operate) · [Manage runtimes](#manage-runtimes) · [Remote runtimes (agents)](#remote-runtimes-agents) · [Google GKE and Amazon EKS](#google-gke-and-amazon-eks) · [Engine versions](#engine-versions) · [Flink CDC engine (optional)](#flink-cdc-engine-optional)
 - [Guardrails: policies, approvals, templates](#guardrails-policies-approvals-templates)
 - [Secrets and secret stores](#secrets-and-secret-stores) · [Single sign-on](#single-sign-on)
 - [Config-as-code and the CLI](#config-as-code-and-the-cli) · [Adopt an existing Debezium Server](#adopt-an-existing-debezium-server)
@@ -65,7 +65,7 @@ back it up.
 | Health | Healthy · Lagging · At risk (source impact) · Down · Unknown. Never green without fresh evidence |
 
 **Admin** is account-wide: Admins open every project with every permission and are the only ones who
-see **Settings** (people, projects, runtimes, Debezium versions, policies). Everyone else gets a role
+see **Settings** (people, projects, runtimes, engine versions, policies). Everyone else gets a role
 per project: Viewer, Operator (pause/resume, preview data) or Editor (create, deploy and upgrade
 pipelines and connections); "Can approve" is a separate per-project right. Everyone has **Account**
 (user menu) for their name, theme (System, Light or Dark, also in the user menu), Guided/Expert mode, notifications and personal API tokens. Long lists show 20 rows a page; the rows-per-page choice under each list (10 to 100) applies to every list in that browser. **Help & tour**
@@ -239,10 +239,49 @@ through the same catalogs.
 - **Preflight** signs in to the catalog, checks the namespace, writes a one-row test table, reads it
   back and drops it, then checks keys and tables that already exist. The **Events** tab and the
   delivery canary read the newest rows of each table.
-- **Image**: pipelines run `ghcr.io/memiiso/debezium-server-iceberg` (see [Debezium
-  versions](#debezium-versions)), amd64 only. It serves health on port 9000, which BeziSync probes;
+- **Image**: pipelines run `ghcr.io/memiiso/debezium-server-iceberg` (see [Engine
+  versions](#engine-versions)), amd64 only. It serves health on port 9000, which BeziSync probes;
   agent runtimes need an agent of this BeziSync version or newer (preflight says so). Deleting a pipeline with "drop destinations" drops its
   tables (purging files where the catalog allows; RustFS keeps them).
+- **On Flink CDC** (chosen in the wizard when a Flink CDC image is registered; Debezium stays the
+  default): the same connections and tables, written by Flink CDC's Iceberg sink. Rows are upserted
+  by key (deleted rows are removed, or kept and marked `__op = '-D'`; *every change appended* is
+  Debezium only), tables are unpartitioned and new columns are added.
+  The namespace must be one level of letters, digits and underscores, and a Glue catalog signs in
+  with the runtime's AWS role (no access keys). Catalog and storage credentials travel to the
+  cluster as catalog properties, filled in by BeziSync's helper inside the pipeline's containers.
+
+### StarRocks
+
+Changes land in one primary-key table per source table in a StarRocks database (`cdc` by default,
+created if missing), written by Flink CDC with Stream Load; schema changes are applied to the
+tables. Only Flink CDC writes StarRocks. The connection takes the FE host, its query port (9030,
+MySQL protocol) and HTTP port (8030, Stream Load), a user and password, and the replicas of each
+table (1 on a single-node cluster). The Flink CDC image needs MySQL Connector/J for StarRocks (see
+[Flink CDC engine](#flink-cdc-engine-optional)).
+
+- **Preflight** signs in over the MySQL protocol, creates and drops a test table in the database,
+  and shows the `GRANT` statements the user needs when it can't. Every table needs a key
+  (`flink_primary_key`). The **Events** tab and the delivery canary read rows back.
+- **No TLS**: Stream Load and the MySQL protocol connection are plain text upstream. Keep StarRocks
+  and the runtime in a network you trust.
+- Deleting a pipeline with "drop destinations" drops its tables.
+
+### Apache Doris
+
+The same as StarRocks for Doris: one unique-key table per source table, written with Stream Load
+(no TLS), read back and dropped over the MySQL protocol. Doris needs no MySQL Connector/J. When the
+BE addresses the FE hands out can't be reached from the runtime (Doris in Docker or behind NAT),
+list the BEs under **BE nodes** (`host:HTTP port`) and Flink CDC loads into them directly.
+
+### Apache Fluss
+
+Changes land in one primary-key table per source table in a Fluss database, created and evolved by
+Flink CDC; Fluss can tier those tables into a lakehouse. The connection takes the coordinators'
+`host:port` list and sign-in (none, or SASL PLAIN). BeziSync has no Fluss client: preflight checks
+that a coordinator can be reached, the Events tab has nothing to show (read the tables with Flink
+SQL or your own client), and deleting a pipeline leaves its tables in place (the report lists them as
+kept). Fluss documents no TLS for Flink CDC: keep it in a network you trust.
 
 ### Database (JDBC)
 
@@ -457,17 +496,23 @@ Around the cluster:
   the keys empty.
 - **Images:** connector pods pull `quay.io/debezium/server`; for clusters without that egress,
   mirror it to Artifact Registry / ECR and choose it as the runtime's default image (or under
-  Settings → Debezium versions).
+  Settings → Engine versions).
 
 **Checks run where connectors run.** For pipelines on an agent runtime, the final checks before a
 deploy run on the agent, inside the cluster's VPC, so a database reachable only from there passes
 (the sections say "checked by the agent"). If the agent cannot answer, BeziSync checks from its own
 network and says so. Checks on the Connections page always run from BeziSync.
 
-## Debezium versions
+## Engine versions
 
-**Settings → Debezium versions** (Admins) is the one list of Debezium Server images every project
-picks from, with how many pipelines run each one per project (each count links to that project's
+**Settings → Engine versions** (Admins) lists the images each engine runs, on two tabs: **Debezium**
+and **Flink CDC**. On the Flink CDC tab Admins add, label, deprecate and remove images and choose
+the default, which pipelines that pin no image (`flinkCdcImage` in YAML) run from their next deploy;
+running pipelines are not restarted. Flink CDC is off until the tab lists an image (see [Flink CDC
+engine](#flink-cdc-engine-optional)). Version counts, the version column and bulk moves are for
+Debezium pipelines.
+
+The Debezium tab is the one list of Debezium Server images every project picks from, with how many pipelines run each one per project (each count links to that project's
 Pipelines list filtered to that version). The install default (`BEZISYNC_DEBEZIUM_DEFAULT_IMAGE`) is always listed;
 add releases or your own builds (extra converters, SMTs or drivers) with a label and notes, make one
 the **default** (it overrides the install default; "Use install default" goes back), deprecate or
@@ -502,27 +547,80 @@ it reads MySQL/MariaDB, PostgreSQL and SQL Server and writes Iceberg, StarRocks,
 applies schema changes to the destination tables. Each pipeline runs its own small Flink cluster (a
 JobManager and TaskManagers), so it needs more memory than a Debezium pipeline.
 
-Flink CDC is **off until an Admin registers a Flink CDC image**. BeziSync does not publish one:
-build the reference image in [`deploy/images/flink-cdc`](../deploy/images/flink-cdc/Dockerfile)
-(Flink 2.2.1, Flink CDC 3.7.0 and the connectors, every download pinned), push it to a registry
-your runtimes can pull from, and add it under **Settings → Engine versions → Flink CDC** (or set
-`BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`). Until then the wizard shows StarRocks, Doris and Fluss as
+Flink CDC is **off until an Admin registers a Flink CDC image** under **Settings → Engine versions
+→ Flink CDC** (or `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`). The image is built in
+[daun-gatal/image-repo](https://github.com/daun-gatal/image-repo/tree/main/flink-cdc) (Flink 2.2.1,
+Flink CDC 3.7.0 and the connectors, every download pinned by SHA-256) and published as
+`ghcr.io/daun-gatal/image-repo/flink-cdc:3.7.0-2.2.1`; mirror it to a registry your runtimes can
+pull from where needed. Until an image is registered the wizard shows StarRocks, Doris and Fluss as
 unavailable with the reason, and Iceberg pipelines run on Debezium.
 
+MySQL/MariaDB sources and the StarRocks destination need MySQL Connector/J, which is GPL-licensed
+and, as in Flink CDC itself, not in the published image. Build your own with it (its licence is
+then yours to accept), or copy the JAR into `/opt/flink-cdc/drivers` in an image of your own:
+
 ```bash
-docker buildx build -t registry.example.com/bezisync-flink-cdc:3.7.0-2.2.1 deploy/images/flink-cdc
+git clone https://github.com/daun-gatal/image-repo && cd image-repo
+docker buildx build --build-arg MYSQL_DRIVER=8.4.0 -t registry.example.com/flink-cdc:3.7.0-2.2.1-mysql flink-cdc
 ```
 
-MySQL/MariaDB sources and the StarRocks destination need MySQL Connector/J, which is GPL-licensed
-and, as in Flink CDC itself, not included. Add it when you build (its licence is then yours to
-accept): `--build-arg MYSQL_DRIVER=8.4.0`, or copy the JAR into `/opt/flink-cdc/drivers` in an
-image of your own. PostgreSQL, SQL Server, Iceberg, Doris and Fluss work without it.
+PostgreSQL, SQL Server, Iceberg, Doris and Fluss work with the published image.
 
 The image holds Flink and Flink CDC only; BeziSync copies its own helper into each pipeline at
-start, so an image keeps working across BeziSync upgrades. Scan the image you build with your own
+start, so an image keeps working across BeziSync upgrades. Scan the image you run with your own
 tools: Flink CDC's connector JARs bundle libraries (Jackson, Netty, protobuf and others) with
 published vulnerabilities that only a Flink CDC release can update. Projects can limit which
 engines their pipelines use (**Policies → Allowed engines**).
+
+**Choosing it.** The wizard's destination step shows the engine: StarRocks, Doris and Fluss run on
+Flink CDC; Iceberg offers both (Debezium is the default). The engine can change until the pipeline's
+first deploy; after that, create a new pipeline. On Flink CDC:
+
+- **Tables** need a primary key, or key columns picked in the Tables step (`flink_primary_key`);
+  PostgreSQL tables need `REPLICA IDENTITY FULL` (`flink_replica_identity`, with the SQL to run).
+  MySQL readers get a block of server ids no other pipeline on that source uses
+  (`flink_server_ids`).
+- **Columns** can be removed or kept, not masked (Flink CDC has no hash function). Filters built
+  from rules, renames and added fields work; script filters, outbox, flattening and custom steps are
+  Debezium only.
+- **Settings** (review step): what a change of a source table's shape does (*apply*: new and renamed
+  columns are added, nothing is dropped; *ignore*; *stop*), whether new columns are held back until
+  the next deploy (default) or sent at once, how often the position is saved (and, for Iceberg, data
+  committed: 30 s, 1 min or 5 min) and, for StarRocks and Doris, how long a load batch may wait (2, 5
+  or 30 s). Expert mode adds Flink settings from a fixed list (checkpoint timeouts, restart
+  strategy, memory fractions, timeouts), each with its range; BeziSync keeps the rest.
+- **Size**: small runs one TaskManager (2 readers), medium two (4), large four (8); each
+  TaskManager asks for 1 CPU and 2 GiB, the JobManager 1 to 1.5 GiB. Preflight checks the runtime
+  has room (`runtime_capacity`). Kubernetes runtimes need the Role to allow Services
+  (`flink_kubernetes_services`; both charts grant it from 0.2.0), and agent runtimes an agent of this
+  BeziSync version (`flink_agent_version`).
+
+**Operating it.** The Overview shows the cluster: the job, its JobManager and TaskManagers, the
+last saved position and where the pipeline started from. Health comes from the job itself and is
+never green before it runs and reads changes. Logs choose the JobManager or a TaskManager. Pause, resume, restart, new versions and rollback work as for Debezium: each stop saves
+the position first and the next start resumes from it. The **Positions** tab (instead of Snapshots)
+lists the saved positions (encrypted in the state database; positions set aside by a restore or
+start over, and all but the newest 10 savepoints, are removed after 7 days) and, while the pipeline is paused, can **Restore** an earlier one or **Start over**: copy every table
+again, read from now, or read since a time (MySQL and SQL Server). Re-copying selected tables is
+not available: start over instead. Deleting the pipeline removes its saved positions and, for
+PostgreSQL, every replication slot it created.
+
+**Scripts and agents.** Manifests carry `spec.engine: flink-cdc`, the `flink_cdc` settings and an
+optional `flinkCdcImage`; exports write `engine` only for Flink CDC pipelines. `bezisync remote get`
+has an ENGINE column; `bezisync remote pipelines positions NAME`, `… restore NAME POSITION_ID --yes`
+and `… start-over NAME --from-scratch|--from-now|--since TIME --yes` operate positions. MCP adds
+`list_engines`, `list_saved_positions` and `restore_saved_position`, `reset_pipeline_offsets` takes
+`from_time`, and pipeline logs take a component.
+
+```yaml
+spec:
+  engine: flink-cdc
+  runtime: prod-k8s
+  source: {connection: orders-db, tables: {include: [shop.orders]}}
+  sink: {connection: warehouse-starrocks, naming: "{schema}_{table}"}
+  flink_cdc: {schema_changes: apply, new_columns: hold, commit_seconds: 60, freshness_seconds: 5}
+  policies: {resources: medium}
+```
 
 ## Personal data
 
@@ -867,7 +965,7 @@ and drop the old slot afterwards.
 ## Administration
 
 **Settings** (Admins only) is grouped by job: *People & projects*, *Running pipelines* (runtimes,
-secret stores, Debezium versions) and *Guardrails* (policies, templates, audit log). Sections that
+secret stores, engine versions) and *Guardrails* (policies, templates, audit log). Sections that
 belong to one project show which at the top, with a picker to switch. Links to the former `/admin/…`,
 Members and Pipeline images pages redirect to their new place.
 

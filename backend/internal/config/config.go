@@ -58,7 +58,7 @@ type Settings struct {
 	LogLevel                          string
 	LogJSON                           bool
 	DebeziumDefaultImage              string
-	// FlinkCDCDefaultImage is an Admin-built Flink CDC image (deploy/images/flink-cdc) registered at
+	// FlinkCDCDefaultImage is a Flink CDC image (github.com/daun-gatal/image-repo, flink-cdc) registered at
 	// install time. The Flink CDC engine is off until it or a catalog image is registered.
 	FlinkCDCDefaultImage string
 	// IcebergImage overrides the Iceberg sink image (a mirror); "" uses the pinned upstream image.

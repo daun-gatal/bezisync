@@ -251,7 +251,15 @@ export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: 
   const properties: NonNullable<JsonSchema['properties']> = {};
   for (const [name, prop] of Object.entries(schema.properties)) {
     if (!FLINK_OPTIONS.includes(name)) continue;
-    properties[name] = name === 'write_mode' && prop.enum ? { ...prop, enum: prop.enum.filter((v) => v !== 'append') } : prop;
+    properties[name] =
+      name === 'write_mode' && prop.enum
+        ? {
+            ...prop,
+            enum: prop.enum.filter((v) => v !== 'append'),
+            // Flink CDC marks a kept delete with its change type, not Debezium's __deleted.
+            ui: prop.ui && { ...prop.ui, labels: { ...prop.ui.labels, upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'" } },
+          }
+        : prop;
   }
   return Object.keys(properties).length ? { ...schema, properties } : null;
 }

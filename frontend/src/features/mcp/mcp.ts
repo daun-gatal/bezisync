@@ -124,7 +124,7 @@ export const GROUP_ORDER = [
   'Approvals',
   'Alerts',
   'Templates',
-  'Debezium versions',
+  'Engine versions',
   'Secret stores',
   'Projects',
   'People',

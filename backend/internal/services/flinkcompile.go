@@ -40,7 +40,7 @@ func ResolveFlinkImage(ctx context.Context, q db.Querier, spec domain.PipelineSp
 		return "", err
 	}
 	if img == "" {
-		return "", problem.New(422, "engine_unavailable", "No Flink CDC image is registered: an Admin adds one in Settings → Engines.")
+		return "", problem.New(422, "engine_unavailable", "No Flink CDC image is registered: an Admin adds one in Settings → Engine versions.")
 	}
 	return img, nil
 }

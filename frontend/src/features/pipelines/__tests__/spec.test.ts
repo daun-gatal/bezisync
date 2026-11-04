@@ -1,5 +1,5 @@
 import { DEFAULT_SINK_CAPS, type SinkCaps } from '@/lib/connections';
-import { deriveSinkOptions, destinationFor, fullSpec, namingError, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
+import { deriveSinkOptions, destinationFor, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
 
 describe('pipeline spec helpers', () => {
   it('fills defaults that mirror the backend', () => {
@@ -8,6 +8,20 @@ describe('pipeline spec helpers', () => {
     expect(s.snapshot.mode).toBe('initial');
     expect(s.transforms[0]?.type).toBe('unwrap');
     expect(s.policies.resources).toBe('small');
+  });
+  it('offers Flink CDC only the Iceberg options it writes, labelled as it writes them', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        write_mode: { type: 'string', enum: ['upsert_keep_deletes', 'upsert', 'append'], ui: { labels: { upsert_keep_deletes: 'Latest row; deletes kept with __deleted = true', upsert: 'Latest row; deletes removed' } } },
+        commit_interval: { type: 'string' },
+      },
+    } as never;
+    expect(optionsSchemaFor(schema, 'debezium')).toBe(schema);
+    const flink = optionsSchemaFor(schema, 'flink-cdc');
+    expect(Object.keys(flink?.properties ?? {})).toEqual(['write_mode']);
+    expect(flink?.properties?.write_mode?.enum).toEqual(['upsert_keep_deletes', 'upsert']);
+    expect(flink?.properties?.write_mode?.ui?.labels).toEqual({ upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'", upsert: 'Latest row; deletes removed' });
   });
   it('previews destinations', () => {
     expect(destinationFor('cdc.{schema}.{table}', 'shop.orders', 'p')).toBe('cdc.shop.orders');

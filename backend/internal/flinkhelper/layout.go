@@ -16,7 +16,7 @@ type Layout struct {
 	ConfigDir, SecretsDir, WorkDir, FlinkHome, FlinkCDCHome string
 }
 
-// DefaultLayout is the layout of the reference image (deploy/images/flink-cdc).
+// DefaultLayout is the layout of the Flink CDC image built from github.com/daun-gatal/image-repo (flink-cdc).
 func DefaultLayout() Layout {
 	return Layout{ConfigDir: DefaultConfigDir, SecretsDir: DefaultSecretsDir, WorkDir: DefaultWorkDir, FlinkHome: DefaultFlinkHome, FlinkCDCHome: DefaultFlinkCDCHome}
 }
@@ -53,17 +53,17 @@ func (l Layout) Prepare(s Settings) error {
 		return err
 	}
 	if len(flinkJars) == 0 {
-		return fmt.Errorf("this image has no Flink in %s: use a Flink CDC image built from deploy/images/flink-cdc", l.FlinkHome)
+		return fmt.Errorf("this image has no Flink in %s: use a Flink CDC image built from github.com/daun-gatal/image-repo (flink-cdc)", l.FlinkHome)
 	}
 	dist, _ := filepath.Glob(filepath.Join(l.FlinkCDCHome, "lib", "flink-cdc-dist-*.jar"))
 	if len(dist) != 1 {
-		return fmt.Errorf("this image has no Flink CDC runtime (%s/lib/flink-cdc-dist-*.jar): use a Flink CDC image built from deploy/images/flink-cdc", l.FlinkCDCHome)
+		return fmt.Errorf("this image has no Flink CDC runtime (%s/lib/flink-cdc-dist-*.jar): use a Flink CDC image built from github.com/daun-gatal/image-repo (flink-cdc)", l.FlinkCDCHome)
 	}
 	jars := append(flinkJars, dist[0])
 	for _, c := range s.Connectors {
 		path := filepath.Join(l.FlinkCDCHome, "connectors", c+".jar")
 		if _, err := os.Stat(path); err != nil {
-			return fmt.Errorf("the Flink CDC image has no %s connector (%s): rebuild it from deploy/images/flink-cdc", c, path)
+			return fmt.Errorf("the Flink CDC image has no %s connector (%s): rebuild it from github.com/daun-gatal/image-repo (flink-cdc)", c, path)
 		}
 		jars = append(jars, path)
 	}

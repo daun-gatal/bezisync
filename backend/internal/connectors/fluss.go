@@ -12,10 +12,9 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 )
 
-// Apache Fluss: one table per source table in a Fluss database (primary-key tables for tables
-// with a key, log tables otherwise), created and evolved by Flink CDC's Fluss sink. Only Flink
-// CDC writes it. BeziSync has no Fluss client: it checks the coordinators can be reached, can't
-// read rows back, and leaves tables in place on delete.
+// Apache Fluss: one primary-key table per source table in a Fluss database, created and evolved
+// by Flink CDC's Fluss sink. Only Flink CDC writes it. BeziSync has no Fluss client: it checks
+// the coordinators can be reached, can't read rows back, and leaves tables in place on delete.
 
 type flussSink struct{ BaseSink }
 
