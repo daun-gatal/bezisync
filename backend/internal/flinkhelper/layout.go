@@ -16,7 +16,7 @@ type Layout struct {
 	ConfigDir, SecretsDir, WorkDir, FlinkHome, FlinkCDCHome string
 }
 
-// DefaultLayout is the layout of the Flink CDC image built from github.com/daun-gatal/image-repo (flink-cdc).
+// DefaultLayout is the layout a Flink CDC image must have (the guide's Flink CDC engine section).
 func DefaultLayout() Layout {
 	return Layout{ConfigDir: DefaultConfigDir, SecretsDir: DefaultSecretsDir, WorkDir: DefaultWorkDir, FlinkHome: DefaultFlinkHome, FlinkCDCHome: DefaultFlinkCDCHome}
 }
@@ -28,7 +28,7 @@ func (l Layout) ConfDir() string { return filepath.Join(l.WorkDir, "conf") }
 // driverHelp says how to add a JDBC driver the image lacks.
 var driverHelp = map[string]string{
 	"mysql": "MySQL Connector/J is missing from the Flink CDC image: MySQL/MariaDB sources need it. " +
-		"Rebuild the image with --build-arg MYSQL_DRIVER=8.4.0, or copy the driver into /opt/flink-cdc/drivers (see the guide: Flink CDC engine).",
+		"Add mysql-connector-j-<version>.jar to /opt/flink-cdc/drivers in the image (see the guide: Flink CDC engine).",
 }
 
 // Prepare builds the pipeline's Flink classpath and configuration: LibDir holds links to Flink's
@@ -53,17 +53,17 @@ func (l Layout) Prepare(s Settings) error {
 		return err
 	}
 	if len(flinkJars) == 0 {
-		return fmt.Errorf("this image has no Flink in %s: use a Flink CDC image built from github.com/daun-gatal/image-repo (flink-cdc)", l.FlinkHome)
+		return fmt.Errorf("this image has no Flink in %s: use a Flink CDC image (see the guide: Flink CDC engine)", l.FlinkHome)
 	}
 	dist, _ := filepath.Glob(filepath.Join(l.FlinkCDCHome, "lib", "flink-cdc-dist-*.jar"))
 	if len(dist) != 1 {
-		return fmt.Errorf("this image has no Flink CDC runtime (%s/lib/flink-cdc-dist-*.jar): use a Flink CDC image built from github.com/daun-gatal/image-repo (flink-cdc)", l.FlinkCDCHome)
+		return fmt.Errorf("this image has no Flink CDC runtime (%s/lib/flink-cdc-dist-*.jar): use a Flink CDC image (see the guide: Flink CDC engine)", l.FlinkCDCHome)
 	}
 	jars := append(flinkJars, dist[0])
 	for _, c := range s.Connectors {
 		path := filepath.Join(l.FlinkCDCHome, "connectors", c+".jar")
 		if _, err := os.Stat(path); err != nil {
-			return fmt.Errorf("the Flink CDC image has no %s connector (%s): rebuild it from github.com/daun-gatal/image-repo (flink-cdc)", c, path)
+			return fmt.Errorf("the Flink CDC image has no %s connector (%s): add it to the image (see the guide: Flink CDC engine)", c, path)
 		}
 		jars = append(jars, path)
 	}

@@ -556,21 +556,27 @@ JobManager and TaskManagers), so it needs more memory than a Debezium pipeline.
 
 Flink CDC is **off until an Admin registers a Flink CDC image** under **Settings → Engine versions
 → Flink CDC** (or `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`). BeziSync publishes no Flink CDC image: build
-one from [daun-gatal/image-repo](https://github.com/daun-gatal/image-repo/tree/main/flink-cdc)
-(Flink 2.2.1, Flink CDC 3.7.0 and the connectors, every download pinned by SHA-256) and push it to a
-registry your runtimes can pull from. Until an image is registered the wizard shows StarRocks, Doris
-and Fluss as unavailable with the reason, and Iceberg pipelines run on Debezium.
+one on the official Flink image (`flink:2.2.1-java17`) with Flink CDC 3.7.0 in this layout, and push
+it to a registry your runtimes can pull from. Until an image is registered the wizard shows
+StarRocks, Doris and Fluss as unavailable with the reason, and Iceberg pipelines run on Debezium.
 
-```bash
-git clone https://github.com/daun-gatal/image-repo && cd image-repo
-docker buildx build -t registry.example.com/flink-cdc:3.7.0-2.2.1 flink-cdc
-```
+| Path | What |
+|---|---|
+| `/opt/flink` | Flink 2.2.1 (the base image); add `flink-shaded-guava-31.1-jre-17.0.jar` to `/opt/flink/lib` (Flink CDC on Flink 2.2 needs it) |
+| `/opt/flink-cdc/lib/flink-cdc-dist-3.7.0-2.2.jar` | Flink CDC's runtime, from the Flink CDC 3.7.0 release |
+| `/opt/flink-cdc/connectors/<name>.jar` | Flink CDC's pipeline connectors (`flink-cdc-pipeline-connector-*-3.7.0-2.2.jar`), renamed: `mysql`, `postgresql`, `sqlserver`, `iceberg`, `starrocks`, `doris`, `fluss`; for Iceberg also `iceberg-aws` (`iceberg-aws-bundle` 1.10.1), `hadoop-client-api` and `hadoop-client-runtime` (3.3.6) and `commons-logging` (1.3.5) |
+| `/opt/flink-cdc/drivers/` | JDBC drivers the connectors leave out (see below) |
+
+Only the connectors your pipelines use have to be there: a pipeline whose connector is missing
+fails at start and says which file it expected. End the image with `USER flink` (uid 9999, the base
+image's user): Kubernetes runtimes run it as that uid, Docker runtimes as the image's user, both on a
+read-only root filesystem, so these files must be readable by it.
 
 MySQL/MariaDB sources need MySQL Connector/J, which Flink CDC leaves out of its MySQL connector for
-licence reasons (it is GPL-licensed). Add it when you build (its licence is then yours to accept):
-`--build-arg MYSQL_DRIVER=8.4.0`, or copy the JAR into `/opt/flink-cdc/drivers` in an image of your
-own. Every other source and destination works without it; Flink CDC's StarRocks connector carries
-its own copy of the driver (Connector/J 5.1.49).
+licence reasons (it is GPL-licensed): copy `mysql-connector-j-<version>.jar` into
+`/opt/flink-cdc/drivers` (its licence is then yours to accept). Every other source and destination
+works without it; Flink CDC's StarRocks connector carries its own copy of the driver (Connector/J
+5.1.49).
 
 A Docker runtime pulls images anonymously: for a private registry, pull the image on the Docker host
 first. Kubernetes runtimes use the runtime's image pull secrets.

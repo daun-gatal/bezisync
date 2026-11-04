@@ -189,10 +189,9 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
 - Flink CDC is optional: `services.EngineAvailable` is false until a Flink CDC image is registered
   (install default, empty by default, or a catalog image that is not deprecated); `ChooseEngine`
   then never picks it (`engine_unavailable` with how to turn it on) and `GET /engines` reports it.
-  BeziSync publishes no Flink CDC image: its Dockerfile lives in
-  [daun-gatal/image-repo](https://github.com/daun-gatal/image-repo) (`flink-cdc/`, every download
-  pinned by SHA-256, MySQL Connector/J only on request), and Admins build and register their own.
-  `flinkhelper.DefaultLayout` is the layout that image provides; change both together. A
+  BeziSync publishes no Flink CDC image: Admins build and register their own. The layout it must
+  have (`flinkhelper.DefaultLayout`: `/opt/flink`, `/opt/flink-cdc/{lib,connectors,drivers}`, uid
+  9999) is documented in the guide (Flink CDC engine); change both together. A
   `FlinkBlock`'s `Drivers` are JDBC drivers the image must add: the MySQL source needs `mysql`; the
   StarRocks connector bundles its own (Connector/J 5.1.49), so it lists none. `NoDefaults`
   (StarRocks, Doris) marks destinations that refuse the source column defaults Flink CDC copies

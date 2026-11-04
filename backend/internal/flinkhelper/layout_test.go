@@ -156,7 +156,7 @@ func TestPrepareExplainsWhatTheImageLacks(t *testing.T) {
 	s := validSettings("mysql", "starrocks")
 	s.Drivers = []string{"mysql"}
 	err := l.Prepare(s)
-	if err == nil || !strings.Contains(err.Error(), "MYSQL_DRIVER") || !strings.Contains(err.Error(), "MySQL/MariaDB sources") {
+	if err == nil || !strings.Contains(err.Error(), "/opt/flink-cdc/drivers") || !strings.Contains(err.Error(), "MySQL/MariaDB sources") {
 		t.Fatalf("missing MySQL driver: %v", err)
 	}
 	with := fakeImage(t, []string{"mysql", "starrocks"}, "mysql-connector-j-8.4.0.jar")

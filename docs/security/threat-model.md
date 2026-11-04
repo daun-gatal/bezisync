@@ -123,12 +123,11 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   checked over the MySQL protocol without TLS, and Fluss documents no TLS for Flink CDC: rows and
   credentials cross the network in plain text. Keep them and the runtime on a private network.
   Their connection checks create and drop a test table (StarRocks, Doris).
-- **Flink CDC images.** BeziSync publishes no Flink CDC image: Admins build one from
-  `daun-gatal/image-repo` (`flink-cdc/`; downloads pinned by SHA-256, the Flink base by digest) and
-  register it; it holds the source and destination credentials at run time. Flink CDC's connector
+- **Flink CDC images.** BeziSync publishes no Flink CDC image: Admins build one (the guide lists
+  what it holds; pin the Flink base by digest and every download by checksum) and register it; it holds the source and destination credentials at run time. Flink CDC's connector
   JARs bundle libraries with published vulnerabilities that only a Flink CDC release can update
   (the StarRocks connector, for one, carries MySQL Connector/J 5.1.49): scan the image you build.
-  A newer MySQL Connector/J (for MySQL/MariaDB sources) is added only in builds that ask for it.
+  A newer MySQL Connector/J (for MySQL/MariaDB sources) is in an image only if its builder adds it.
 - **Unencrypted source connections.** Vitess's VStream gRPC (Debezium offers no TLS for it) and
   Oracle's listener traffic (BeziSync speaks plain TCP; enable Oracle Native Network Encryption on
   the server) are not TLS: keep them on a private network or behind the SSH bastion option.
