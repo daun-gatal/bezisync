@@ -1,4 +1,4 @@
-.PHONY: help verify verify-quick verify-backend verify-backend-quick verify-tools verify-frontend e2e e2e-quick e2e-down openapi openapi-check dev-db migration demo demo-down demo-smoke chart-test chart-docs
+.PHONY: help verify verify-quick verify-backend verify-backend-quick verify-tools verify-frontend e2e e2e-quick e2e-down openapi openapi-check licenses licenses-check dev-db migration demo demo-down demo-smoke chart-test chart-docs
 
 export PATH := $(HOME)/.local/bin:$(HOME)/.local/go/bin:$(HOME)/.local/node/bin:$(PATH)
 TEST_DB = $${BEZISYNC_TEST_DATABASE_URL:-$$(../scripts/dev-db.sh)}
@@ -10,6 +10,7 @@ help:
 	@echo "make e2e-quick SPECS=…  reuse the cluster, rebuild only changed images, run only these specs"
 	@echo "make e2e-down       remove everything the e2e run created"
 	@echo "make openapi        render frontend/openapi.json from backend/internal/api/openapi.json + typed client"
+	@echo "make licenses       regenerate the licence files the binary and the web image ship (after a dependency change)"
 	@echo "make migration m=…  start the next goose migration (SQL)"
 	@echo "make dev-db         start the disposable test Postgres and print its URL"
 	@echo "make demo           start the demo stack (deploy/compose) on http://localhost:8080"
@@ -20,10 +21,10 @@ help:
 dev-db:
 	@scripts/dev-db.sh
 
-verify: verify-backend verify-tools verify-frontend
+verify: verify-backend verify-tools verify-frontend licenses-check
 
 # While iterating: everything but the race detector and the production build.
-verify-quick: openapi-check verify-backend-quick verify-tools
+verify-quick: openapi-check verify-backend-quick verify-tools licenses-check
 	cd frontend && bun run typecheck && bun run test
 	cd e2e && npx tsc --noEmit
 
@@ -53,6 +54,14 @@ openapi-check:
 	cd backend && go run ./cmd/bezisync openapi --output /tmp/bezisync-openapi.json
 	diff -q /tmp/bezisync-openapi.json frontend/openapi.json || (echo "frontend/openapi.json is stale: run make openapi" && exit 1)
 	cd frontend && bun run check:api
+
+# backend/internal/legal/licenses.txt and frontend/public/licenses.txt: BeziSync's licence and
+# every shipped dependency's. Fails on a licence outside the allow-list (tools/licenses).
+licenses:
+	cd tools && go run ./cmd/licenses
+
+licenses-check:
+	cd tools && go run ./cmd/licenses --check
 
 migration:
 	scripts/new-migration.sh "$(m)"

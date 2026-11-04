@@ -34,6 +34,9 @@ jobs:
         run: |
           go run ./cmd/bezisync openapi --output /tmp/openapi.json
           diff -u ../frontend/openapi.json /tmp/openapi.json
+      - name: Licences are current and allowed (server)
+        working-directory: tools
+        run: go run ./cmd/licenses --check --only server
 
   backend:
     name: Backend tests
@@ -81,12 +84,17 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: tools/go.mod, cache: false }
       - name: Install
         working-directory: frontend
         run: bun install --frozen-lockfile
       - name: Generated API client is current
         working-directory: frontend
         run: bun run check:api
+      - name: Licences are current and allowed (web)
+        working-directory: tools
+        run: go run ./cmd/licenses --check --only web
       - name: Type check
         working-directory: frontend
         run: bun run typecheck

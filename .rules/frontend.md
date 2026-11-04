@@ -60,8 +60,9 @@ src/
   viewer in `localStorage` under `bz.sidebar.collapsed`, wrapped in try/catch); labels become
   `md:sr-only` and links get a `title`, so new nav items must keep a text label. Below `md` the
   navigation folds behind a menu button that closes on every navigation.
-- Sidebar footer: **Help & tour** (a menu: Tour, Getting started, Learn, Find anything, and Testing
-  policy in a lab), **Feedback**, the inbox and the user menu. Add help pages to that menu, not as more
+- Sidebar footer: **Help & tour** (a menu: Tour, Getting started, Learn, Find anything, Testing
+  policy in a lab, and About BeziSync: `app/AboutDialog`, the server version from `/api/v1/system/info`,
+  the license and links to `/licenses.txt` and `/api/v1/system/licenses`; `lib/about.ts`), **Feedback**, the inbox and the user menu. Add help pages to that menu, not as more
   footer links. The "New here?" card shows until `/tour` is visited or it is dismissed
   (`lib/tour.ts`, `localStorage` `bz.tour.seen`). `window.dispatchEvent(new Event(OPEN_PALETTE))`
   opens the command palette. The Tour (`features/tour/TourPage.tsx`) is static product copy: keep every

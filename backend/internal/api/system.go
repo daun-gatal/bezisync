@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/httpapi"
+	"github.com/daun-gatal/bezisync/backend/internal/legal"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
@@ -57,6 +59,13 @@ func systemRoutes(r chi.Router) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(openAPIDoc)))
 		_, _ = w.Write(openAPIDoc)
+	})
+	// The licences of BeziSync and of the Go modules in this binary (the web UI serves its own at
+	// /licenses.txt). Public, like the OpenAPI document: the same text ships in every image.
+	r.Get("/api/v1/system/licenses", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(legal.Licenses)))
+		_, _ = io.WriteString(w, legal.Licenses)
 	})
 	r.Get("/api/docs", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -15,7 +15,7 @@
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the demo smoke test (when the demo or an image changes). Read-only token, no secrets |
+| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, the licence files (current, every licence allowed), scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the demo smoke test (when the demo or an image changes). Read-only token, no secrets |
 | `helm.yml` | pull requests touching `deploy/helm/`, `backend/` or `frontend/` | `helm lint --strict` with every `ci/*-values.yaml`, helm-unittest (`unittests/`), kubeconform on three Kubernetes versions, the chart READMEs current (helm-docs), and installs on kind with the change's own images: bundled and external PostgreSQL, `helm test`, an agent that must report in, an in-place upgrade |
 | `build-branch.yml` | manual: branch (not `main`), include charts, version override | Pre-release images `X.Y.Z-pre` (and charts `<chart version>-pre`) of the version the branch would release (`release.sh --plan`), replacing the previous `-pre`. Commits, tags and releases nothing |
 | `release.yml` | manual, from `preview`: version override | The release: see below |
@@ -104,7 +104,7 @@ version, `--notes X.Y.Z` a release's notes.
 |---|---|
 | Images `ghcr.io/daun-gatal/bezisync` (api, controller, agent, migrate, CLI: one binary) and `ghcr.io/daun-gatal/bezisync-web` (UI), linux/amd64 + linux/arm64 | `X.Y.Z`, `latest`; `X.Y.Z-pre` while testing |
 | Charts `oci://ghcr.io/daun-gatal/charts/{bezisync,bezisync-agent}` | `<chart version>`; `<chart version>-pre` while testing |
-| CLI archives on the GitHub Release | `bezisync_X.Y.Z_<os>_<arch>.tar.gz` / `.zip`, `checksums.txt` |
+| CLI archives on the GitHub Release (binary, `LICENSE`, `NOTICE`, `LICENSES.txt`) | `bezisync_X.Y.Z_<os>_<arch>.tar.gz` / `.zip`, `checksums.txt` |
 
 Build provenance is attested with GitHub artifact attestations (stored by GitHub, so no
 signature tags in the registry): `gh attestation verify oci://ghcr.io/daun-gatal/bezisync:X.Y.Z

@@ -27,6 +27,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/controller"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/httpapi"
+	"github.com/daun-gatal/bezisync/backend/internal/legal"
 	"github.com/daun-gatal/bezisync/backend/internal/logging"
 	"github.com/daun-gatal/bezisync/backend/internal/migrate"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
@@ -91,7 +92,7 @@ func newRoot(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(apiCmd(), controllerCmd(), agentCmd(), migrateCmd(stdout), openapiCmd(stdout), uninstallCmd(stdout),
-		tunnelCmd(), tunnelProbeCmd(), healthcheckCmd(), checkDocsCmd(stdout), rotateKeyCmd(stdout), generateKeyCmd(stdout), passwordLoginCmd(stdout), remoteCmd(stdin, stdout, stderr))
+		tunnelCmd(), tunnelProbeCmd(), healthcheckCmd(), checkDocsCmd(stdout), rotateKeyCmd(stdout), generateKeyCmd(stdout), passwordLoginCmd(stdout), licensesCmd(stdout), remoteCmd(stdin, stdout, stderr))
 	return root
 }
 
@@ -442,6 +443,14 @@ func passwordLoginCmd(stdout io.Writer) *cobra.Command {
 			}
 			fmt.Fprintln(stdout, "Sign-in with email and password is on.")
 			return nil
+		}}
+}
+
+func licensesCmd(stdout io.Writer) *cobra.Command {
+	return &cobra.Command{Use: "licenses", Short: "Print the licences of BeziSync and of the third-party software in this binary.", Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			_, err := io.WriteString(stdout, legal.Licenses)
+			return err
 		}}
 }
 
