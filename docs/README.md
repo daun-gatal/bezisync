@@ -597,7 +597,8 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   (`flink_server_ids`).
 - **Columns** can be removed or kept, not masked (Flink CDC has no hash function). Filters built
   from rules, renames and added fields work; script filters, outbox, flattening and custom steps are
-  Debezium only.
+  Debezium only, and so are value formats (decimals, timestamps, binary): each column keeps its own
+  type.
 - **Settings** (review step): what a change of a source table's shape does (*apply*: new and renamed
   columns are added, nothing is dropped; *ignore*; *stop*), whether new columns are held back until
   the next deploy (default) or sent at once, how often the position is saved (and, for Iceberg, data

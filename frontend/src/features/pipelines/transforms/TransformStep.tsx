@@ -18,9 +18,11 @@ import {
   canMove,
   columnKind,
   DEBEZIUM_CLASS,
+  DEBEZIUM_ONLY_STEPS,
   defaultStep,
   moveStep,
   NO_CAPS,
+  stepCaps,
   stepErrors,
   summarize,
   summarizeValues,
@@ -68,15 +70,12 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   const sinkCaps = sinkCapsOf(types.data, pipeline.sink?.type);
   const sinkTitle = TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination';
   const sourceCaps: Caps = (types.data?.find((t) => t.kind === 'source' && t.type === sourceType)?.transforms as Caps | undefined) ?? NO_CAPS;
+  // Flink CDC writes each column with its own type: value formats (and the decimals warning) are
+  // Debezium's, and so are the outbox router, flattening and custom steps.
+  const flink = pipeline.engine === 'flink-cdc';
   // A destination that cannot read Debezium's default (epoch) timestamps gets ISO text, or Kafka
   // Connect's types where the source has no ISO mode: the epoch choice is not offered.
-  const caps: Caps = useMemo(
-    () =>
-      sinkCaps.time_precision
-        ? { ...sourceCaps, value_formats: { ...sourceCaps.value_formats, timestamps: sourceCaps.value_formats.timestamps?.filter((m) => m !== 'epoch') } }
-        : sourceCaps,
-    [sinkCaps.time_precision, sourceCaps],
-  );
+  const caps: Caps = useMemo(() => stepCaps(sourceCaps, Boolean(sinkCaps.time_precision), flink), [flink, sinkCaps.time_precision, sourceCaps]);
   const shapeRequired = Boolean(sinkCaps.unwrap?.required);
   const captured = spec.source.tables.include;
   const tables: TableInfo[] = useMemo(
@@ -93,9 +92,10 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   );
   const draft: FullSpec = useMemo(() => {
     const { values: _v, keys: _k, ...rest } = spec;
-    const v = cleanValues(values, caps);
+    // On Flink CDC never saved (saving the step also clears formats left from before).
+    const v = flink ? undefined : cleanValues(values, caps);
     return { ...rest, transforms: steps, ...(v ? { values: v } : {}), ...(Object.keys(keys).length ? { keys } : {}) };
-  }, [spec, steps, values, keys, caps]);
+  }, [spec, steps, values, keys, caps, flink]);
   const errors = stepErrors(steps);
   const dirty = JSON.stringify(draft) !== JSON.stringify(spec);
   useImperativeHandle(handle, () => ({
@@ -128,6 +128,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   }, [unkeyed.length, open]);
 
   function locked(type: TransformType): string | null {
+    if (flink && DEBEZIUM_ONLY_STEPS.includes(type)) return 'Runs only on Debezium: this pipeline runs on Flink CDC.';
     if (type === 'custom') {
       if (!policies?.allow_custom_transforms) return 'Turned off by this project’s policy. Ask an Admin under Settings → Policies.';
       if (!expert) return 'Switch to Expert mode (account menu) to add custom transforms.';
