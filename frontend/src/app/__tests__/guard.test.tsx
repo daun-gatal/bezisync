@@ -106,6 +106,21 @@ describe('pages know who is looking', () => {
     expect(accountsPhrase([])).toBe('an account');
   });
 
+  it('the testing policy points at the open source and the private GitHub report', async () => {
+    api({
+      '/api/v1/auth/providers': { status: 200, body: { password: true, providers: [{ id: 'p1', label: 'Google' }], lab: true } },
+      '/api/v1/auth/me': { status: 401, body: { code: 'unauthenticated', detail: 'Sign in' } },
+    });
+    renderAt(TestingPolicyPage, { path: '/testing-policy' });
+    expect(await screen.findByText(/open source \(Apache 2\.0\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/source code isn.t public/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'GitHub' })).toHaveAttribute('href', 'https://github.com/daun-gatal/bezisync');
+    expect(screen.getByRole('link', { name: 'Security → Report a vulnerability' })).toHaveAttribute(
+      'href',
+      'https://github.com/daun-gatal/bezisync/security/advisories/new',
+    );
+  });
+
   it('the testing policy offers "Sign in to try it" to someone signed out', async () => {
     api({
       '/api/v1/auth/providers': { status: 200, body: { password: true, providers: [{ id: 'p1', label: 'Google' }], lab: true } },

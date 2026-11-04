@@ -64,8 +64,10 @@ Browser / CLI ──▶ api (Go)       ─┐
 1. **Never weaken security.** Secrets are encrypted at rest, write-only, never logged or returned.
 2. **Thin routers/components.** Logic lives in `services/`, connectors, controller, or hooks.
 3. **Type everything.** `golangci-lint` and `tsc` strict pass; no untyped `any` in API or domain types without reason.
-4. **Every behavioural change ships with tests.** Each commit passes `make verify-quick` and
-   `make e2e-quick SPECS=…` for the specs it touches; a PR passes the full `make verify` and `make e2e`.
+4. **Every behavioural change ships with tests.** A PR passes the full `make verify` and, before
+   merge, `make e2e` (run by a maintainer; contributors run the specs they touch where they can).
+   Maintainers also keep each of their own commits passing `make verify-quick` and `make e2e-quick SPECS=…`;
+   see `.rules/testing.md`.
 5. **Health is evidence-based.** Missing or stale data is Unknown/stale, never healthy.
 6. **State-aware safety.** Destructive or disruptive actions show their effect and are audited.
 7. **Keep guides current** (self-updating mandate) and `AGENTS.md` == `CLAUDE.md`.

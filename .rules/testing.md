@@ -1,6 +1,7 @@
 # Testing & definition of done
 
-Each commit passes the **quick** gates for what it touches; a pull request passes the **full** gates:
+Each commit passes the **quick** gates for what it touches; a pull request passes the **full** gates
+before it merges (who runs which is under *Who runs what* below):
 
 ```bash
 # per commit (minutes)
@@ -48,9 +49,8 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   `bezisync-e2e-agent` (recreated); the Playwright runner has `kubectl`/`helm`, an in-network
   kubeconfig and the repo's `deploy/` directory, so tests install agents as users would.
 - `E2E_GREP="pattern" scripts/e2e.sh` runs a subset while iterating; commit only after a full run.
-- The e2e suite runs locally, not in CI: run the full `make e2e` before opening a pull request
-  (its ~15 data-plane services need more time and disk than a CI runner offers). CI type-checks
-  the suite (`e2e` tsc) only.
+- The e2e suite runs locally, not in CI (its ~15 data-plane services need more time and disk than a
+  CI runner offers, ~8 GB free); CI type-checks the suite (`e2e` tsc) only. See *Who runs what*.
 - Layout is a gate: `e2e/tests/28-layout.spec.ts` seeds names at their longest (63-character slugs,
   a long project name) in its own `layout-stress` project and sweeps every main screen at 390, 768
   and 1280 px with `layoutProblems()` (`e2e/tests/layout.ts`): no overflow, no sideways page
@@ -71,6 +71,19 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   endpoints for authz (404 concealment, 403 permissions), validation and secret non-disclosure;
   every user journey end-to-end in `e2e/tests/` against real Postgres, Kafka and Debezium Server.
 - A bug fix starts with a failing test.
+
+## Who runs what
+
+BeziSync is open source (Apache 2.0), and not every contributor can run the whole e2e cluster.
+
+- **Contributors** run `make verify` (CI runs it again) and add or update tests for every behavioural
+  change. When the change touches a screen, endpoint or journey, they also run the affected specs with
+  `make e2e-quick SPECS="…"` if they can. Either way, the PR's *Testing* section names the specs they ran
+  or says "not run". Commits inside a PR do not each have to pass the gates: pull requests are squash-merged.
+- **Maintainers** run the full `make e2e` on the PR's head commit before merging any change outside
+  docs-only paths (`docs/`, `*.md`, `.github/ISSUE_TEMPLATE/`), and post the result on the PR (pass,
+  or the failing specs). A head commit pushed after that run needs a new run.
+- Maintainers working on their own branches keep the stricter habit: the quick gates on every commit.
 
 CI runs on pull requests to `preview` (see `releases.md`): `ci.yml` runs the same gates plus the
 version and changelog-fragment checks (a fragment exactly when an image changes, a new version for
