@@ -17,7 +17,7 @@ import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
 import { slugify } from '@/lib/format';
 import { useDeploy, usePipelines, usePreflight, type Pipeline, type Preflight } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { flinkChoices, useEngines, type FlinkChoices } from '@/lib/engines';
+import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
 import { deriveSinkOptions, fullSpec, optionsSchemaFor, parseAdvanced, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
@@ -102,7 +102,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     snapshot: { ...spec.snapshot, mode, window: flink ? null : snapshotWindow || null },
     policies: { ...spec.policies, resources, latency_target_seconds: latency, delivery_canary: flink ? false : canary },
     advanced: flink ? {} : adv.values,
-    ...(flink ? { flink_cdc: fc } : {}),
+    ...(flink ? { flink_cdc: flinkSpecBlock(fc) } : {}),
   };
   const body: SaveBody = {
     ...(slugify(name) !== pipeline.name && !deployed ? { name: slugify(name) } : {}),
@@ -415,7 +415,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             ))}
             {report.properties ? (
               <details className="min-w-0">
-                <summary className="cursor-pointer text-sm font-semibold">Generated configuration (application.properties)</summary>
+                <summary className="cursor-pointer text-sm font-semibold">Generated configuration ({flink ? 'pipeline.yaml' : 'application.properties'})</summary>
                 <Meta as="p" className="my-2">
                   Secrets appear only as ${'{'}…{'}'} references and are injected at runtime.
                 </Meta>

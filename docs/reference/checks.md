@@ -2236,7 +2236,7 @@ Fix:
 Fix:
 
 ```
-Pick key columns for these tables in the Tables step, or add a primary key in the database.
+Pick key columns for these tables in the Transform step (Primary key), or add a primary key in the database.
 ```
 
 <a id="flink-replica-identity"></a>

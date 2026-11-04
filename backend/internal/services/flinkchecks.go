@@ -112,7 +112,7 @@ func flinkTableChecks(sourceType string, spec domain.PipelineSpec, found connect
 	if len(noKey) > 0 {
 		out = append(out, checks.Check{Code: "flink_primary_key", Title: "Primary keys", Category: checks.CatTables, Status: checks.Fail, Blocking: true,
 			Message: fmt.Sprintf("%s %s no primary key. Flink CDC writes each row by its key.", strings.Join(noKey, ", "), plural(len(noKey), "has", "have")),
-			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Pick key columns for these tables in the Tables step, or add a primary key in the database."}})
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Pick key columns for these tables in the Transform step (Primary key), or add a primary key in the database."}})
 	} else {
 		out = append(out, checks.Check{Code: "flink_primary_key", Title: "Primary keys", Category: checks.CatTables, Status: checks.Pass,
 			Message: "Every table has a key to write its rows by."})

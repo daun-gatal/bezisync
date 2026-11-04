@@ -232,7 +232,7 @@ func buildCatalog() []*Tool {
 				return cl.do(http.MethodGet, p+"/diff"+query("from", cl.intArg("from"), "to", cl.intArg("to")), nil)
 			}},
 		{Name: "get_pipeline_config", Title: "Generated configuration", Kind: Read, Project: true, Perm: auth.PipelineView,
-			Description: "The application.properties BeziSync generates (secrets appear only as ${ENV} placeholders).",
+			Description: "The configuration BeziSync generates: application.properties on Debezium, pipeline.yaml on Flink CDC (secrets appear only as ${ENV} placeholders).",
 			Params:      []Param{pipelineArg, opt("version", num("A version number; the current one when left out."))},
 			Call: func(cl *call) (any, error) {
 				p, err := cl.pipeline()

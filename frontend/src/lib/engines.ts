@@ -73,3 +73,20 @@ export function flinkChoices(raw: Partial<FlinkChoices> | null | undefined): Fli
     flink_conf: raw?.flink_conf ?? {},
   };
 }
+
+/**
+ * The spec's flink_cdc block as the server stores and returns it (domain dumpFlinkCDC): the
+ * choices in that order, flink_conf only when it holds settings. Saving any other
+ * shape makes the saved spec never equal the draft, so autosave would never settle. Keys are in
+ * JSONB order (om.JSONBKeys): shorter first, then bytewise.
+ */
+export function flinkSpecBlock(c: FlinkChoices): Partial<FlinkChoices> {
+  const keys = Object.keys(c.flink_conf).sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
+  return {
+    schema_changes: c.schema_changes,
+    new_columns: c.new_columns,
+    freshness_seconds: c.freshness_seconds,
+    commit_seconds: c.commit_seconds,
+    ...(keys.length ? { flink_conf: Object.fromEntries(keys.map((k) => [k, c.flink_conf[k]!])) } : {}),
+  };
+}

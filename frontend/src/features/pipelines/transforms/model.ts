@@ -18,6 +18,9 @@ export interface Caps {
 
 export const NO_CAPS: Caps = { value_formats: {}, key_columns: false, row_filters: false };
 
+/** Step titles on Flink CDC, which writes rows and columns into tables (the others as TYPE_TITLE). */
+export const FLINK_TITLE: Partial<Record<TransformType, string>> = { filter: 'Keep only some rows', rename: 'Rename columns', add_field: 'Add a column' };
+
 /** Step types that run only on Debezium (the Flink CDC compiler refuses them). */
 export const DEBEZIUM_ONLY_STEPS: readonly TransformType[] = ['outbox', 'flatten', 'custom'];
 
@@ -403,3 +406,49 @@ export const KNOWN_CLASSES = [
 
 /** Classes that run code from their properties (need the scripted-transforms policy). */
 export const SCRIPTED_CLASSES = ['io.debezium.transforms.Filter', 'io.debezium.transforms.ContentBasedRouter'];
+
+/**
+ * Flink CDC's filter operations: it can't tell rows from the first copy from new inserts, so
+ * "new rows" stands for both (the compiler refuses one without the other).
+ */
+export const FLINK_OPERATIONS: { value: 'new' | 'update' | 'delete'; label: string; ops: FilterOperation[] }[] = [
+  { value: 'new', label: 'new rows (first copy and inserts)', ops: ['insert', 'snapshot'] },
+  { value: 'update', label: 'update', ops: ['update'] },
+  { value: 'delete', label: 'delete', ops: ['delete'] },
+];
+
+/** Turns one Flink CDC operation on or off in a filter's operations (insert and snapshot together). */
+export function toggleFlinkOperation(ops: FilterOperation[], value: 'new' | 'update' | 'delete', on: boolean): FilterOperation[] {
+  const pick = FLINK_OPERATIONS.find((o) => o.value === value)!.ops;
+  const rest = ops.filter((o) => !pick.includes(o));
+  const next = on ? [...rest, ...pick] : rest;
+  return OPERATIONS.map((o) => o.value).filter((o) => next.includes(o));
+}
+
+/** A destination column of a Flink CDC table, and where it comes from. */
+export interface FlinkColumn {
+  name: string;
+  from: { kind: 'column'; column: string; renamed: boolean } | { kind: 'added'; value: string };
+  key: boolean;
+}
+
+/**
+ * The columns Flink CDC writes for a captured table (as the compiler builds its projection): the
+ * source's columns minus those left out, renamed where a rename step applies, then added fields.
+ * Key: the key columns chosen for the table, else its primary key.
+ */
+export function flinkColumns(table: TableInfo, spec: FullSpec, steps: TransformStep[], pipelineName: string): FlinkColumn[] {
+  const applies = (t: TransformStep) => !t.tables || t.tables.includes(table.name);
+  const renames = new Map<string, string>();
+  for (const t of steps) if (t.type === 'rename' && applies(t)) for (const r of t.renames ?? []) renames.set(r.from, r.to);
+  const excluded = spec.source.columns?.[table.name]?.exclude ?? [];
+  const keys = spec.keys?.[table.name]?.length ? spec.keys[table.name]! : table.primaryKey;
+  const out: FlinkColumn[] = table.columns
+    .filter((c) => !excluded.includes(c.name))
+    .map((c) => ({ name: renames.get(c.name) ?? c.name, from: { kind: 'column', column: c.name, renamed: renames.has(c.name) }, key: keys.includes(c.name) }));
+  for (const t of steps) {
+    if (t.type !== 'add_field' || !applies(t) || !t.name) continue;
+    out.push({ name: t.name, from: { kind: 'added', value: t.value?.kind === 'pipeline' ? pipelineName : (t.value?.text ?? '') }, key: false });
+  }
+  return out;
+}
