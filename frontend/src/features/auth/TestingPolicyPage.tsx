@@ -19,6 +19,17 @@ function List({ children }: { children: ReactNode }) {
   return <ul className="m-0 flex flex-col gap-1.5 pl-5">{children}</ul>;
 }
 
+/** The public source repository: issues, private vulnerability reports and pull requests. */
+const REPO_URL = 'https://github.com/daun-gatal/bezisync';
+
+function Ext({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="font-semibold text-accent hover:underline">
+      {children}
+    </a>
+  );
+}
+
 function B({ children }: { children: ReactNode }) {
   return <strong className="font-semibold text-ink">{children}</strong>;
 }
@@ -70,7 +81,7 @@ export function TestingPolicyPage() {
             Testing policy
           </Title>
           <p className="m-0 text-lg text-muted">
-            BeziSync is a pre-release product. Anyone with {accounts} can try it here, and we want you to push on it. This page says
+            BeziSync is open source (Apache 2.0) and still below 1.0. Anyone with {accounts} can try it here, and we want you to push on it. This page says
             what&apos;s fair game and how to tell us what you find.
           </p>
         </div>
@@ -90,8 +101,8 @@ export function TestingPolicyPage() {
         <section className="flex flex-col gap-2 rounded-xl bg-ok-soft p-card text-ok">
           <h2 className="m-0 text-lg font-semibold">Share it freely</h2>
           <p className="m-0">
-            Screenshots, posts and links to the lab are welcome. Tell people about it. The source code isn&apos;t public, so please don&apos;t try to
-            get at it.
+            Screenshots, posts and links to the lab are welcome. Tell people about it. The source code is open on{' '}
+            <Ext href={REPO_URL}>GitHub</Ext>: read it, run your own copy, and send fixes.
           </p>
         </section>
 
@@ -118,7 +129,7 @@ export function TestingPolicyPage() {
               servers, Google and GitHub alone. If a finding gives you that kind of access, stop and report it.
             </li>
             <li>Use anyone else&apos;s account, session or token.</li>
-            <li>Flood or load-test the lab, or try to fill its disks or memory. Describe the problem and we&apos;ll reproduce it.</li>
+            <li>Flood or load-test the lab, or try to fill its disks or memory. Describe the problem and we&apos;ll reproduce it, or run your own copy of BeziSync and load-test that.</li>
             <li>Enter real credentials, or connect BeziSync to a real database or service of yours or your employer&apos;s.</li>
             <li>Delete or wreck shared Playground resources. Clean up what you create when you&apos;re done.</li>
           </List>
@@ -129,10 +140,17 @@ export function TestingPolicyPage() {
         </Section>
 
         <Section title="How to report">
-          <p className="m-0">
-            Inside the app, open <B>Feedback</B> at the bottom of the sidebar and pick <B>Security issue</B>. Only BeziSync Admins can read those.
-            Please don&apos;t post security findings publicly before we&apos;ve fixed them.
-          </p>
+          <p className="m-0">Report security findings privately, in either of two ways:</p>
+          <List>
+            <li>
+              Inside the app, open <B>Feedback</B> at the bottom of the sidebar and pick <B>Security issue</B>. Only BeziSync Admins can read those.
+            </li>
+            <li>
+              On GitHub, open <Ext href={`${REPO_URL}/security/advisories/new`}>Security → Report a vulnerability</Ext>. It works for findings in
+              your own copy of BeziSync too.
+            </li>
+          </List>
+          <p className="m-0">Please don&apos;t open a public issue or post security findings before we&apos;ve fixed them.</p>
           <div className="flex flex-wrap items-start gap-3 rounded-xl border border-line bg-surface p-card">
             <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-ink" aria-hidden>
               <MessageSquare className="size-4" />
@@ -146,8 +164,13 @@ export function TestingPolicyPage() {
 
         <Section title="What happens next">
           <List>
-            <li>We reply within <B>3 business days</B>, to the email of the account you signed in with.</li>
-            <li>Serious issues (leaked secrets, escaping the Playground, extra access, running code where you shouldn&apos;t) are fixed first, and the lab is redeployed.</li>
+            <li>
+              We reply within <B>3 business days</B>: to the email of the account you signed in with, or on your GitHub report.
+            </li>
+            <li>
+              Serious issues (leaked secrets, escaping the Playground, extra access, running code where you shouldn&apos;t) are fixed first, released
+              with a security advisory, and the lab is redeployed.
+            </li>
             <li>We tell you when it&apos;s fixed, and credit you in the release notes if you&apos;d like.</li>
             <li>There&apos;s no bug bounty at this stage.</li>
           </List>
@@ -156,7 +179,7 @@ export function TestingPolicyPage() {
         <Section title="Not about security?">
           <p className="m-0">
             Confusing screens, wrong wording, ideas, or a pipeline that won&apos;t do what you expect are just as valuable to us right now. Send them
-            through Feedback too.
+            through Feedback too, or <Ext href={`${REPO_URL}/issues/new/choose`}>open an issue on GitHub</Ext>.
           </p>
         </Section>
       </main>
