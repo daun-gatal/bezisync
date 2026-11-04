@@ -26,13 +26,16 @@ Closes #
 
 ## Testing
 
-<!-- Describe how you tested your changes. -->
+<!-- Describe how you tested your changes. See `.rules/testing.md` ("Who runs what"). -->
 
-- [ ] Backend tests/lint/types pass
-- [ ] Frontend tests/types/build pass
-- [ ] Docker build or compose flow tested when relevant
+- [ ] `make verify` passes locally
 - [ ] Helm charts: `make chart-test` when a chart changed
+- [ ] Docker build or compose flow tested when relevant
 - [ ] Security-sensitive paths reviewed when relevant
+
+**End-to-end specs run** (`make e2e-quick SPECS="…"`): <!-- list them, or write "not run" -->
+
+<!-- Maintainers run the full `make e2e` on the head commit before merging and post the result here. -->
 
 ### Test Steps
 

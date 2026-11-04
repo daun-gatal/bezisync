@@ -78,8 +78,9 @@ it is also the job queue.
 
 ## Contributing
 
-Contributions are welcome! Open pull requests against the **`preview`** branch; CI runs every
-check except the end-to-end suite: run `make e2e` locally before opening one. [CLAUDE.md](CLAUDE.md) and [`.rules/`](.rules/) explain the
+Contributions are welcome! Open pull requests against the **`preview`** branch. Run `make verify`
+(CI runs it too) and, if you can, the end-to-end specs your change touches (`make e2e-quick SPECS=…`);
+the full end-to-end suite needs a large local cluster, so a maintainer runs it before merging. [CLAUDE.md](CLAUDE.md) and [`.rules/`](.rules/) explain the
 layout, the conventions and how to test. Please report security issues privately, as described in
 [SECURITY.md](SECURITY.md).
 
