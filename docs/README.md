@@ -872,6 +872,11 @@ approver right in that project (never an Admin). Make people Admins under **Peop
 - **Uninstall:** `bezisync uninstall` prints everything BeziSync created on sources and runtimes;
   `bezisync uninstall --yes [--drop-destinations]` removes it and reports each item. Then delete
   BeziSync and its database.
+- **Version and licenses:** **Help & tour → About BeziSync** shows the server version and the license
+  (Apache 2.0). BeziSync ships the licenses and notices of everything it includes: the web UI's at
+  `/licenses.txt`, the server's at `GET /api/v1/system/licenses` (public, plain text), from
+  `bezisync licenses`, and as `LICENSES.txt` in each CLI archive. Each starts with BeziSync's own NOTICE
+  and LICENSE. Debezium Server is a separate project under its own license and is not included.
 
 ## Configuration reference
 

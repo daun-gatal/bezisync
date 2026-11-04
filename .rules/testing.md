@@ -4,11 +4,11 @@ Each commit passes the **quick** gates for what it touches; a pull request passe
 
 ```bash
 # per commit (minutes)
-make verify-quick GO_PKGS="./internal/api/ …"     # golangci-lint + vet + tsc everywhere, scripts, vitest, only these Go packages
+make verify-quick GO_PKGS="./internal/api/ …"     # golangci-lint + vet + tsc everywhere, scripts, vitest, only these Go packages, licence files
 make e2e-quick SPECS="tests/23-admin.spec.ts …"   # reuse the cluster, rebuild only changed images, run these specs
 
 # per pull request
-make verify   # backend: golangci-lint, vet, go test -race (+ schema, corpus and check-reference drift); tools: golangci-lint, vet, go test; frontend: API drift, tsc, vitest, build; e2e tsc
+make verify   # backend: golangci-lint, vet, go test -race (+ schema, corpus and check-reference drift); tools: golangci-lint, vet, go test; frontend: API drift, tsc, vitest, build; e2e tsc; licence files
 make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, runs the Playwright suite
 ```
 
@@ -92,3 +92,12 @@ make chart-docs   # regenerate deploy/helm/*/README.md (README.md.gotmpl + value
   optional paths); `templates/tests/` holds the `helm test` pods (the bezisync image's own
   `healthcheck`).
 - Every values key carries a `# --` comment: it becomes the chart README's values table.
+
+## Licence files
+
+`make licenses` writes `backend/internal/legal/licenses.txt` (embedded in the binary) and
+`frontend/public/licenses.txt` (served by the web image): BeziSync's NOTICE and LICENSE, then every
+shipped dependency (Go modules the binary links on any release platform, the npm packages of the
+frontend's `dependencies`) with its licence texts and NOTICE files. `make verify`, `make verify-quick`
+and CI (`--check`) fail when either is stale or a licence is outside the allow-list
+(`tools/licenses`). Classifier changes come with a case in `tools/licenses/licenses_test.go`.

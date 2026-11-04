@@ -10,6 +10,7 @@ import {
   CircleQuestionMark,
   Compass,
   FlaskConical,
+  Info,
   LogOut,
   Menu as MenuIcon,
   MessageSquare,
@@ -39,6 +40,7 @@ import { CommandPalette, OPEN_PALETTE } from './CommandPalette';
 import { NotificationSettings } from './NotificationSettings';
 import { canOpenSettings } from '@/features/settings/SettingsPage';
 import { FeedbackDialog } from '@/features/feedback/FeedbackDialog';
+import { AboutDialog } from './AboutDialog';
 
 const COLLAPSED_KEY = 'bz.sidebar.collapsed';
 
@@ -74,6 +76,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [notifying, setNotifying] = useState(false);
   const [theme, setTheme] = useTheme();
   const [sendingFeedback, setSendingFeedback] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => readStored(COLLAPSED_KEY) === '1');
   const [menuOpen, setMenuOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -262,6 +265,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <ShieldCheck className="size-4 shrink-0 text-muted" aria-hidden /> Testing policy
                     </Dropdown.Item>
                   ) : null}
+                  <Dropdown.Item onSelect={() => setAboutOpen(true)} className={menuItem}>
+                    <Info className="size-4 shrink-0 text-muted" aria-hidden /> About BeziSync
+                  </Dropdown.Item>
                 </Dropdown.Content>
               </Dropdown.Portal>
             </Dropdown.Root>
@@ -332,6 +338,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <NotificationSettings open={notifying} onOpenChange={setNotifying} />
       <FeedbackDialog open={sendingFeedback} onOpenChange={setSendingFeedback} page={pathname} />
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
       <main id="main" tabIndex={-1} className="min-w-0 px-4 py-6 outline-none md:px-8">
         <div className="mx-auto flex max-w-[120rem] min-w-0 flex-col gap-5">
           {project.is_sandbox ? (

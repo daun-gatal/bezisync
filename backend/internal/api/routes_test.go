@@ -14,7 +14,7 @@ import (
 // Routes the Python app served outside the OpenAPI document (include_in_schema=False).
 var unlisted = map[string]bool{
 	"GET /healthz": true, "GET /readyz": true, "GET /metrics": true, "GET /api/v1/projects/{}/stream": true,
-	"GET /api/v1/openapi.json": true, "GET /api/docs": true,
+	"GET /api/v1/openapi.json": true, "GET /api/docs": true, "GET /api/v1/system/licenses": true,
 	// OAuth discovery for MCP agents (RFC 8414, RFC 9728) lives at the site root, outside the API.
 	"GET /.well-known/oauth-authorization-server": true, "GET /.well-known/oauth-protected-resource": true,
 	"GET /.well-known/oauth-protected-resource/api/v1/mcp": true,

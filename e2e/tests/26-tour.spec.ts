@@ -47,3 +47,24 @@ test('the Help menu holds the tour, getting started, Learn and search', async ({
   await page.getByRole('menuitem', { name: /Find anything/ }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
+
+test('About BeziSync shows the version and the licenses both images ship', async ({ page, request }) => {
+  await signIn(page);
+  await page.getByRole('button', { name: /Help & tour/ }).click();
+  await page.getByRole('menuitem', { name: 'About BeziSync' }).click();
+  const about = page.getByRole('dialog', { name: 'About BeziSync' });
+  const info = await (await request.get('/api/v1/system/info')).json();
+  await expect(about.getByText(info.version, { exact: true })).toBeVisible();
+  await expect(about.getByText('Apache License 2.0')).toBeVisible();
+
+  // The web image serves its licenses; the API serves the server binary's. BeziSync's own come first.
+  for (const name of ['Web app licenses', 'Server licenses']) {
+    const href = await about.getByRole('link', { name }).getAttribute('href');
+    const res = await request.get(href!);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/plain');
+    const text = await res.text();
+    expect(text.indexOf('BeziSync: LICENSE')).toBeGreaterThan(-1);
+    expect(text.indexOf('BeziSync: LICENSE')).toBeLessThan(text.indexOf('Third-party software'));
+  }
+});

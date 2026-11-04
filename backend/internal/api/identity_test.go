@@ -228,3 +228,18 @@ func TestHealthEndpoints(t *testing.T) {
 	anon.get("/api/v1/nope").expect(404)
 	anon.do("PUT", "/healthz", nil).expect(405)
 }
+
+// The server's licences are public plain text, like the OpenAPI document: the same text ships
+// in every image and release archive.
+func TestLicensesArePublicPlainText(t *testing.T) {
+	srv := server(t)
+	r := newClient(t, srv).get("/api/v1/system/licenses").expect(200)
+	if ct := r.Header.Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Fatalf("content type %q", ct)
+	}
+	for _, want := range []string{"BeziSync: LICENSE", "Apache License", "github.com/go-chi/chi/v5"} {
+		if !strings.Contains(string(r.Raw), want) {
+			t.Errorf("licences lack %q", want)
+		}
+	}
+}

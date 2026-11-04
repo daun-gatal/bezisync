@@ -22,6 +22,8 @@ for target in "${TARGETS[@]}"; do
     -ldflags "-s -w -X github.com/daun-gatal/bezisync/backend/internal/version.Version=$VERSION" \
     -o "$work/$name/$bin" ./cmd/bezisync)
   cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$work/$name/"
+  # BeziSync's and every linked module's licences (also `bezisync licenses`).
+  cp "$ROOT/backend/internal/legal/licenses.txt" "$work/$name/LICENSES.txt"
   if [ "$os" = windows ]; then
     (cd "$work" && zip -qr "$DIST/$name.zip" "$name")
   else

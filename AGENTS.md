@@ -53,7 +53,7 @@ Browser / CLI ──▶ api (Go)       ─┐
   (pre-release images and charts `-pre` from a branch) and `release.yml` (from preview, after an
   approval: images, charts, CLI and the GitHub Release) — see `.rules/releases.md`.
 - `tools/` is a small Go module (no dependencies, outside the image build contexts) with the
-  release tool (`scripts/release.sh`) and the demo smoke test. There is
+  release tool (`scripts/release.sh`), the licence-file generator (`make licenses`) and the demo smoke test. There is
   no Python anywhere in the repository.
 - User-facing docs live in [`docs/`](docs/README.md): the guide, the generated preflight-check
   reference (`bezisync check-docs`) and the [threat model](docs/security/threat-model.md) — a
