@@ -124,7 +124,7 @@ func (s *mysqlSource) FlinkSource(conn Resolved, c CompileContext, at FlinkEndpo
 		// caching_sha2_password sends the password RSA-encrypted when there is no TLS.
 		o.Set("jdbc.properties.allowPublicKeyRetrieval", "true")
 	}
-	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SRC_PASSWORD": PyStr(sec["password"])}, Connector: "mysql", Drivers: []string{"mysql"}}, nil
+	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SRC_PASSWORD": Str(sec, "password")}, Connector: "mysql", Drivers: []string{"mysql"}}, nil
 }
 
 func (*mysqlSource) FlinkTableID(_ Resolved, table string) string { return table }
@@ -165,7 +165,7 @@ func (s *postgresSource) FlinkSource(conn Resolved, c CompileContext, at FlinkEn
 			"INSERT INTO %s.heartbeat (pipeline, ts) VALUES ('%s', now()) ON CONFLICT (pipeline) DO UPDATE SET ts = EXCLUDED.ts",
 			pgManagedSchema, c.PipelineID))
 	}
-	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SRC_PASSWORD": PyStr(sec["password"])}, Connector: "postgresql"}, nil
+	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SRC_PASSWORD": Str(sec, "password")}, Connector: "postgresql"}, nil
 }
 
 // FlinkTableID: PostgreSQL events are named schema.table (the database is the connection's).

@@ -143,6 +143,14 @@ func ResolveImage(ctx context.Context, q db.Querier, spec domain.PipelineSpec, r
 	return DefaultImage(ctx, q)
 }
 
+// ResolvePipelineImage is the image a pipeline runs on its engine.
+func ResolvePipelineImage(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec, rt *models.Runtime, sinkType string) (string, error) {
+	if EngineOf(p) == engine.FlinkCDC {
+		return ResolveFlinkImage(ctx, q, spec)
+	}
+	return ResolveImage(ctx, q, spec, rt, sinkType)
+}
+
 // SinkTypeOf is the type of a pipeline's destination ("" when it has none).
 func SinkTypeOf(ctx context.Context, q db.Querier, p *models.Pipeline) (string, error) {
 	if p.SinkID == nil {
@@ -319,15 +327,15 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateSinkSpec(ctx, q, a.Project.ID, n.SinkID, n.Spec); err != nil {
-		return nil, err
-	}
 	sinkType, err := connectionType(ctx, q, n.SinkID)
 	if err != nil {
 		return nil, err
 	}
 	eng, err := ChooseEngine(ctx, q, n.Engine, "", source.Type, sinkType)
 	if err != nil {
+		return nil, err
+	}
+	if err := ValidateSinkSpec(ctx, q, a.Project.ID, n.SinkID, n.Spec, eng); err != nil {
 		return nil, err
 	}
 	if err := ValidateEngineSpec(eng, n.Spec); err != nil {
@@ -502,7 +510,7 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		if e.SinkID != nil {
 			sinkID = e.SinkID
 		}
-		if err := ValidateSinkSpec(ctx, q, a.Project.ID, sinkID, *e.Spec); err != nil {
+		if err := ValidateSinkSpec(ctx, q, a.Project.ID, sinkID, *e.Spec, eng); err != nil {
 			return nil, err
 		}
 		current, err := VersionOf(ctx, q, p.CurrentVersionID)
@@ -899,7 +907,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	if flink {
 		catalog = "Flink CDC"
 	}
-	standing, err := Standing(ctx, q, image)
+	standing, err := StandingFor(ctx, q, EngineOf(p), image)
 	if connectors.InSinkImageFamily(sinkConn.Type, image) {
 		// The sink's own build is never in the catalog of official images.
 		standing = "offered"
@@ -1047,7 +1055,7 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 	if err != nil {
 		return nil, nil, err
 	}
-	image, err := ResolveImage(ctx, q, domain.MustSpec(map[string]any(v.Spec)), rt, sinkType)
+	image, err := ResolvePipelineImage(ctx, q, p, domain.MustSpec(map[string]any(v.Spec)), rt, sinkType)
 	if err != nil {
 		return nil, nil, err
 	}

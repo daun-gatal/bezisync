@@ -2968,6 +2968,138 @@
   },
   {
    "descriptor": {
+    "supports_masking": false,
+    "kind": "sink",
+    "type": "starrocks",
+    "title": "StarRocks",
+    "description": "One primary-key table per source table in a StarRocks database, created and kept in step with the source. Runs on Flink CDC.",
+    "engines": [
+     "flink-cdc"
+    ],
+    "presets": [],
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "FE host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "starrocks-fe.internal"
+       }
+      },
+      "query_port": {
+       "default": 9030,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Query port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection",
+        "help": "The FE's MySQL protocol port."
+       }
+      },
+      "http_port": {
+       "default": 8030,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "HTTP port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection",
+        "help": "The FE's HTTP port for Stream Load. Stream Load has no TLS: keep StarRocks and the runtime in a network you trust."
+       }
+      },
+      "database": {
+       "default": "cdc",
+       "maxLength": 64,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "help": "Tables are created here; BeziSync creates the database if it is missing."
+       }
+      },
+      "user": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Connection"
+       }
+      },
+      "replicas": {
+       "default": 3,
+       "maximum": 9,
+       "minimum": 1,
+       "title": "Replicas",
+       "type": "integer",
+       "ui": {
+        "group": "Tables",
+        "help": "Replicas of each table BeziSync creates (1 on a single-node cluster)."
+       }
+      }
+     },
+     "required": [
+      "host",
+      "user"
+     ],
+     "title": "StarRocksConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Connection"
+       }
+      }
+     },
+     "title": "StarRocksSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "{schema}_{table}",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "max_length": 64,
+      "message": "Use letters, digits and '_' (dots become '_'; names are lower-cased).",
+      "flatten_dots": true,
+      "single": false
+     },
+     "formats": [],
+     "unwrap": {
+      "required": false,
+      "add_fields": [],
+      "delete_handling": []
+     },
+     "outbox": false,
+     "options_schema": {
+      "properties": {},
+      "title": "StarRocksOptions",
+      "type": "object"
+     }
+    }
+   },
+   "debezium_name": "",
+   "readable": true
+  },
+  {
+   "descriptor": {
     "supports_masking": true,
     "kind": "sink",
     "type": "jdbc",

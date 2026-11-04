@@ -259,6 +259,13 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   agents send `local_test.flink_cdc`), and `runtime_capacity` counts the whole cluster
   (`FlinkCapacityCheck`). The helper's `config_error` phase (an image without a connector or driver)
   is reported with the helper's own fix.
+- Flink-only destinations (`engine.FlinkOnlySink`: StarRocks, Doris, Fluss) carry `engines:
+  ["flink-cdc"]` in their descriptor; `connector-types` adds `available`/`unavailable_reason` and
+  creating such a connection is refused (`engine_unavailable`) until Flink CDC is available. Their
+  `CompileSink` refuses Debezium. StarRocks (`connectors/starrocks.go`): checked and read over the FE's
+  MySQL protocol, written by Stream Load over HTTP (no TLS upstream: the form says so). A Flink CDC
+  pipeline resolves its image with `ResolvePipelineImage` (deploy) and is left out of the Debezium
+  versions usage and upgrades; the sink spec's event format is checked for Debezium only.
 - Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll
   never hands a Flink CDC workload to an agent without it (an older agent would start it as a
   Debezium container), and `AgentDriver.Apply` refuses it with the release to upgrade to

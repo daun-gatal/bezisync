@@ -15,8 +15,10 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/httpapi"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
+	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
 	"github.com/daun-gatal/bezisync/backend/internal/ratelimit"
@@ -152,6 +154,14 @@ func sortedKeys(m map[string]any) []any {
 	return out
 }
 
+// typeTitleOf is a sink type's title ("StarRocks").
+func typeTitleOf(typ string) string {
+	if d, err := connectors.Describe("sink", typ); err == nil && d != nil {
+		return d.Title
+	}
+	return typ
+}
+
 func connectionRoutes(r chi.Router) {
 	r.Get("/projects/{project_id}/connector-types", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
 		if _, err := project(r); err != nil {
@@ -159,8 +169,26 @@ func connectionRoutes(r chi.Router) {
 		}
 		ds := connectors.Descriptors()
 		out := make([]any, len(ds))
+		ctx := r.Context()
+		flink, err := services.EngineAvailable(ctx, pool(ctx), engine.FlinkCDC)
+		if err != nil {
+			return err
+		}
 		for i, d := range ds {
 			out[i] = d.Descriptor
+			if d.Kind == "sink" && engine.FlinkOnlySink(d.Type) {
+				// Written by Flink CDC only: offered once an Admin has registered a Flink CDC image.
+				m := om.New()
+				for _, k := range d.Descriptor.Keys() {
+					v, _ := d.Descriptor.Get(k)
+					m.Set(k, v)
+				}
+				m.Set("available", flink.Available)
+				if !flink.Available {
+					m.Set("unavailable_reason", flink.Reason)
+				}
+				out[i] = m
+			}
 		}
 		httpapi.JSON(w, http.StatusOK, out)
 		return nil
@@ -233,6 +261,15 @@ func connectionRoutes(r chi.Router) {
 			return err
 		}
 		ctx := r.Context()
+		if b.Kind == "sink" && engine.FlinkOnlySink(b.Type) {
+			flink, err := services.EngineAvailable(ctx, pool(ctx), engine.FlinkCDC)
+			if err != nil {
+				return err
+			}
+			if !flink.Available {
+				return problem.New(422, "engine_unavailable", typeTitleOf(b.Type)+" is written by Flink CDC, which is not available: "+flink.Reason)
+			}
+		}
 		var out ConnectionRead
 		err = tx(ctx, func(q db.Querier) error {
 			if err := services.NormalizeLinks(ctx, q, a.Project.ID, b.Kind, b.Type, config); err != nil {

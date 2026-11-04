@@ -183,3 +183,48 @@ func TestCatalogPerEngine(t *testing.T) {
 		}
 	}
 }
+
+// StarRocks is written by Flink CDC only: offered, and connectable, once the engine is on. A
+// PostgreSQL pipeline to it compiles to a Flink CDC pipeline whose secrets stay out of the file.
+func TestStarRocksNeedsFlinkCDC(t *testing.T) {
+	e := newPipelineEnv(t)
+	types := func() any {
+		for _, d := range e.admin.get("/api/v1/projects/" + e.pid + "/connector-types").expect(200).List() {
+			if at(t, d, "type") == "starrocks" {
+				return d
+			}
+		}
+		t.Fatal("no StarRocks")
+		return nil
+	}
+	if d := types(); at(t, d, "available") != false || !strings.Contains(at(t, d, "unavailable_reason").(string), "Engine versions") {
+		t.Fatal(d)
+	}
+	body := map[string]any{"kind": "sink", "type": "starrocks", "name": "olap",
+		"config": map[string]any{"host": "starrocks.internal", "user": "loader", "database": "lake", "replicas": 1}, "secrets": map[string]any{"password": "sr-s3cret"}}
+	if r := e.admin.post("/api/v1/projects/"+e.pid+"/connections", body).expect(422); r.Code() != "engine_unavailable" {
+		t.Fatal(string(r.Raw))
+	}
+	enableFlink(t, e.admin)
+	if d := types(); at(t, d, "available") != true || at(t, d, "engines").([]any)[0] != "flink-cdc" {
+		t.Fatal(d)
+	}
+	olap := e.admin.post("/api/v1/projects/"+e.pid+"/connections", body).expect(201).Str("id")
+	// Debezium can't write it; the engine defaults to Flink CDC.
+	p := e.admin.post("/api/v1/projects/"+e.pid+"/pipelines", map[string]any{"name": "orders-olap", "source_id": e.ids.Source, "sink_id": olap,
+		"runtime_id": e.ids.Runtime, "spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}}}).expect(201)
+	if p.Str("engine") != "flink-cdc" {
+		t.Fatal(string(p.Raw))
+	}
+	cfg := e.admin.get("/api/v1/projects/" + e.pid + "/pipelines/" + p.Str("id") + "/config").expect(200)
+	yaml := cfg.Str("properties")
+	for _, want := range []string{`type: "starrocks"`, `load-url: "starrocks.internal:8030"`, "password: ${BZ_SINK_PASSWORD}", `sink-table: "lake.cdc_shop_orders"`,
+		"projection: \"`id`, `total`\"", `replication_num: "1"`} {
+		if !strings.Contains(yaml, want) {
+			t.Errorf("config lacks %s:\n%s", want, yaml)
+		}
+	}
+	if strings.Contains(string(cfg.Raw), "sr-s3cret") || cfg.At("destinations", "shop.orders") != "lake.cdc_shop_orders" {
+		t.Fatal(string(cfg.Raw))
+	}
+}

@@ -270,8 +270,37 @@ func TestFlinkPreflight(t *testing.T) {
 	if c := checkOf(t, pre, "flink_replica_identity"); c == nil || at(t, c, "status") != "pass" {
 		t.Fatal(c)
 	}
+	// The image is judged by the Flink CDC catalogue it is in.
+	if c := checkOf(t, pre, "debezium_image_unlisted"); c != nil {
+		t.Fatal(c)
+	}
 	// The capacity check counts the whole cluster.
 	if c := checkOf(t, pre, "runtime_capacity"); c == nil || !strings.Contains(at(t, c, "message").(string), "a JobManager and 1 TaskManager, 3072 MiB in all") {
 		t.Fatal(c)
+	}
+}
+
+// A Flink CDC pipeline deploys its engine's image, never the Debezium default.
+func TestFlinkPipelinesResolveTheirEngineImage(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe, _ := flinkPipeline(t, e)
+	ctx := context.Background()
+	q := testdb.Pool(t)
+	p, err := db.Find[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE id = $1`, pipe.Str("id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := services.SpecOf(ctx, q, p.CurrentVersionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := services.ResolvePipelineImage(ctx, q, p, *spec, nil, "iceberg")
+	if err != nil || image != "registry.example/bezisync-flink-cdc:3.7.0-2.2.1" {
+		t.Fatal(image, err)
+	}
+	// The Debezium versions view and its upgrades leave it alone.
+	usage := e.admin.get("/api/v1/projects/" + e.pid + "/debezium-images").expect(200)
+	if strings.Contains(string(usage.Raw), pipe.Str("id")) {
+		t.Fatal(string(usage.Raw))
 	}
 }

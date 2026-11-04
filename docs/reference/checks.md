@@ -1518,6 +1518,73 @@ Choose "Every change appended" in the Destination step.
 
 - Why: The connector creates tables and writes Parquet files with these credentials: BeziSync creates a one-row table, reads it back and drops it.
 
+## StarRocks
+
+<a id="starrocks-config"></a>
+### `starrocks_config`
+
+**Settings**
+
+<a id="starrocks-create-table"></a>
+### `starrocks_create_table`
+
+**Create tables**
+
+Fix:
+
+```
+GRANT CREATE DATABASE ON CATALOG default_catalog TO USER '{user}';
+GRANT ALL ON DATABASE {database} TO USER '{user}';
+GRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';
+```
+
+<a id="starrocks-http-blocked"></a>
+### `starrocks_http_blocked`
+
+**Reach the StarRocks FE (HTTP, Stream Load)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="starrocks-http-reachable"></a>
+### `starrocks_http_reachable`
+
+**Reach the StarRocks FE (HTTP, Stream Load)**
+
+- Why: The host answered on the port.
+
+<a id="starrocks-http-unreachable"></a>
+### `starrocks_http_unreachable`
+
+**Reach the StarRocks FE (HTTP, Stream Load)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
+<a id="starrocks-login"></a>
+### `starrocks_login`
+
+**Sign in**
+
+<a id="starrocks-network-blocked"></a>
+### `starrocks_network_blocked`
+
+**Reach the StarRocks FE (MySQL protocol)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="starrocks-network-reachable"></a>
+### `starrocks_network_reachable`
+
+**Reach the StarRocks FE (MySQL protocol)**
+
+- Why: The host answered on the port.
+
+<a id="starrocks-network-unreachable"></a>
+### `starrocks_network_unreachable`
+
+**Reach the StarRocks FE (MySQL protocol)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
 ## Database (JDBC)
 
 <a id="jdbc-config"></a>

@@ -11,13 +11,14 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 )
 
 // ValidateSinkSpec checks what the Destination step saves against the sink's capabilities:
 // its options, naming and event format. Transform steps are checked when the workload is
 // compiled (preflight), so changing the destination never needs a later step fixed first.
-func ValidateSinkSpec(ctx context.Context, q db.Querier, projectID uuid.UUID, sinkID *uuid.UUID, spec domain.PipelineSpec) error {
+func ValidateSinkSpec(ctx context.Context, q db.Querier, projectID uuid.UUID, sinkID *uuid.UUID, spec domain.PipelineSpec, eng engine.ID) error {
 	if sinkID == nil {
 		return nil
 	}
@@ -32,8 +33,10 @@ func ValidateSinkSpec(ctx context.Context, q db.Querier, projectID uuid.UUID, si
 	if _, err := d.Sink.Options(spec.Sink.Options); err != nil {
 		return err
 	}
-	if _, err := d.Sink.EventFormat(d.Title, spec.Sink.Format.Type); err != nil {
-		return err
+	if eng == engine.Debezium { // Flink CDC writes tables: there is no event format
+		if _, err := d.Sink.EventFormat(d.Title, spec.Sink.Format.Type); err != nil {
+			return err
+		}
 	}
 	return d.Sink.CheckNaming(d.Title, spec.Sink.Naming)
 }
