@@ -52,6 +52,7 @@ require (
 	k8s.io/api v0.37.2
 	k8s.io/apimachinery v0.37.2
 	k8s.io/client-go v0.37.2
+	software.sslmate.com/src/go-pkcs12 v0.6.0
 )
 
 require (

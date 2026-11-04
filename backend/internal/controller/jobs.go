@@ -13,6 +13,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
 	"github.com/daun-gatal/bezisync/backend/internal/runtime"
@@ -202,6 +203,12 @@ func jobCleanup(ctx context.Context, q db.Querier, j *models.Job) (map[string]an
 			return nil, err
 		}
 		results = append(results, map[string]any{"kind": "offsets", "name": "offsets_" + p.ShortID(), "outcome": "removed"})
+		if services.EngineOf(p) == engine.FlinkCDC {
+			if err := services.DropSavedPositions(ctx, p.ShortID()); err != nil {
+				return nil, err
+			}
+			results = append(results, map[string]any{"kind": "saved_positions", "name": "flink_state_" + p.ShortID(), "outcome": "removed"})
+		}
 	}
 	var failed []map[string]any
 	for _, r := range results {

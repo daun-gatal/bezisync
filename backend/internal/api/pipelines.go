@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/httpapi"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
@@ -52,6 +55,9 @@ type PipelineRead struct {
 	Version              int                  `json:"version"`
 	ApprovalRequired     bool                 `json:"approval_required"`
 	PendingChange        *ChangeRequestRead   `json:"pending_change"`
+	// Engine runs the pipeline; Caps is what it can do (actions it can't do carry a reason).
+	Engine string      `json:"engine"`
+	Caps   engine.Caps `json:"caps"`
 }
 
 func pipelineRead(ctx context.Context, q db.Querier, p *models.Pipeline, withSpec bool) (*PipelineRead, error) {
@@ -79,7 +85,13 @@ func pipelineRead(ctx context.Context, q db.Querier, p *models.Pipeline, withSpe
 	if err != nil {
 		return nil, err
 	}
+	eng := services.EngineOf(p)
+	sourceType := ""
+	if source != nil {
+		sourceType = source.Type
+	}
 	out := &PipelineRead{ID: p.ID, Name: p.Name, Description: p.Description, Owner: p.Owner, Labels: p.LabelMap(),
+		Engine: string(eng), Caps: engine.CapsFor(eng, sourceType),
 		DesiredState: p.DesiredState, Lifecycle: p.Lifecycle, Health: p.Health, Status: p.Status, Artifacts: p.Artifacts,
 		DeployedAt: pytime.P(p.DeployedAt), CreatedAt: pytime.T(p.CreatedAt), UpdatedAt: pytime.T(p.UpdatedAt), Version: p.Version,
 		ApprovalRequired: required}
@@ -117,6 +129,23 @@ func pipelineRead(ctx context.Context, q db.Querier, p *models.Pipeline, withSpe
 		}
 	}
 	return out, nil
+}
+
+// optEngine reads an optional engine id ("debezium", "flink-cdc").
+func optEngine(v *val.V, o *val.Object) *string {
+	f := o.Get("engine")
+	if !f.Present || f.IsNull() {
+		return nil
+	}
+	ids := make([]string, len(engine.All))
+	for i, id := range engine.All {
+		ids[i] = string(id)
+	}
+	s, ok := v.Literal(f.Loc, f.Raw, ids...)
+	if !ok {
+		return nil
+	}
+	return &s
 }
 
 // labelsOf reads labels: dict[str, str] (validate adds the create-time rule).
@@ -324,6 +353,8 @@ func schemaRead(ctx context.Context, q db.Querier, p *models.Pipeline) (*SchemaR
 	return out, nil
 }
 
+var logComponent = regexp.MustCompile(`^(jobmanager|tunnel|taskmanager-[1-9][0-9]?)$`)
+
 func pipelineRoutes(r chi.Router) {
 	base := "/projects/{project_id}/pipelines"
 	r.Get(base, httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
@@ -390,6 +421,9 @@ func pipelineRoutes(r chi.Router) {
 				c.Spec, _ = domain.ParseSpec(v, f.Loc, f.Raw)
 			}
 			c.TemplateID = optUUID(v, o, "template_id")
+			if e := optEngine(v, o); e != nil {
+				c.Engine = *e
+			}
 			return c
 		})
 		if err != nil {
@@ -451,7 +485,7 @@ func pipelineRoutes(r chi.Router) {
 		b, err := body(r, func(v *val.V, o *val.Object) services.PipelineEdit {
 			e := services.PipelineEdit{Name: slug(v, o, "name", false), SinkID: optUUID(v, o, "sink_id"), Spec: optSpec(v, o, "spec"),
 				Description: optStr(v, o, "description", val.StrRules{Max: 4000}), Owner: optStr(v, o, "owner", val.StrRules{Max: 200}),
-				RuntimeID: optUUID(v, o, "runtime_id"), Note: str(v, o, "note", "", val.StrRules{Max: 500}, false)}
+				RuntimeID: optUUID(v, o, "runtime_id"), Note: str(v, o, "note", "", val.StrRules{Max: 500}, false), Engine: optEngine(v, o)}
 			e.Labels, e.LabelsSet = labelsOf(v, o, "labels", false)
 			return e
 		})
@@ -651,6 +685,11 @@ func pipelineRoutes(r chi.Router) {
 		if err := qs.Err(); err != nil {
 			return err
 		}
+		// A Flink CDC pipeline's component: jobmanager (default), taskmanager-<n> or tunnel.
+		component := r.URL.Query().Get("component")
+		if component != "" && !logComponent.MatchString(component) {
+			return problem.New(422, "unknown_component", "Logs come from jobmanager, taskmanager-<n> or tunnel.")
+		}
 		_, p, err := viewPipeline(r, auth.PipelineView, true)
 		if err != nil {
 			return err
@@ -665,6 +704,13 @@ func pipelineRoutes(r chi.Router) {
 			d, err := services.DriverFor(ctx, q, rt)
 			if err != nil {
 				return "", err
+			}
+			if component != "" {
+				c, ok := d.(runtime.ComponentLogs)
+				if !ok || services.EngineOf(p) != engine.FlinkCDC {
+					return "", &runtime.Error{Msg: "Only Flink CDC pipelines have components."}
+				}
+				return c.LogsOf(ctx, p.ShortID(), component, tail, false)
 			}
 			return d.Logs(ctx, p.ShortID(), tail, false)
 		}()
@@ -932,13 +978,23 @@ func pipelineRoutes(r chi.Router) {
 		if err != nil {
 			return err
 		}
-		type request struct{ Mode, Confirm string }
+		type request struct {
+			Mode, Confirm string
+			FromMS        int64
+		}
 		b, err := body(r, func(v *val.V, o *val.Object) request {
 			req := request{}
 			if f := o.Get("mode"); f.Required() {
-				req.Mode, _ = v.Literal(f.Loc, f.Raw, "resnapshot", "skip_to_now")
+				req.Mode, _ = v.Literal(f.Loc, f.Raw, "resnapshot", "skip_to_now", "from_time")
 			}
 			req.Confirm = str(v, o, "confirm", "", val.StrRules{}, true)
+			if f := o.Get("from_time"); f.Present && !f.IsNull() {
+				if t, ok := v.Datetime(f.Loc, f.Raw); ok {
+					req.FromMS = t.UnixMilli()
+				}
+			} else if req.Mode == "from_time" {
+				v.Fail(f.Loc, "missing", "Field required")
+			}
 			return req
 		})
 		if err != nil {
@@ -957,13 +1013,68 @@ func pipelineRoutes(r chi.Router) {
 			if b.Confirm != p.Name {
 				return problem.New(422, "confirmation_mismatch", "Type the pipeline name to confirm.")
 			}
-			out, err = services.ResetOffsets(ctx, q, a, p, b.Mode)
+			out, err = services.ResetOffsets(ctx, q, a, p, b.Mode, b.FromMS)
 			return err
 		})
 		if err != nil {
 			return err
 		}
 		httpapi.JSON(w, http.StatusOK, out)
+		return nil
+	}))
+	r.Get(base+"/{pipeline_id}/positions", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		_, p, err := viewPipeline(r, auth.PipelineView, false)
+		if err != nil {
+			return err
+		}
+		if services.EngineOf(p) != engine.FlinkCDC {
+			httpapi.JSON(w, http.StatusOK, obj("positions", []services.SavedPosition{}))
+			return nil
+		}
+		positions, err := services.SavedPositions(r.Context(), p)
+		if err != nil {
+			return problem.New(503, "state_db_unavailable", "The state database is not reachable: "+err.Error())
+		}
+		httpapi.JSON(w, http.StatusOK, obj("positions", positions))
+		return nil
+	}))
+	r.Post(base+"/{pipeline_id}/positions/{position_id}/restore", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		id, err := pathID(r, "pipeline_id")
+		if err != nil {
+			return err
+		}
+		position, err := strconv.ParseInt(chi.URLParam(r, "position_id"), 10, 64)
+		if err != nil || position <= 0 {
+			return problem.NotFound("Saved position")
+		}
+		a, err := project(r)
+		if err != nil {
+			return err
+		}
+		b, err := body(r, func(v *val.V, o *val.Object) string { return str(v, o, "confirm", "", val.StrRules{}, true) })
+		if err != nil {
+			return err
+		}
+		if err := a.Require(auth.OffsetsReset); err != nil {
+			return err
+		}
+		ctx := r.Context()
+		var out *services.SavedPosition
+		err = tx(ctx, func(q db.Querier) error {
+			p, err := services.GetPipeline(ctx, q, a, id, false)
+			if err != nil {
+				return err
+			}
+			if b != p.Name {
+				return problem.New(422, "confirmation_mismatch", "Type the pipeline name to confirm.")
+			}
+			out, err = services.RestoreSavedPosition(ctx, q, a, p, position)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		httpapi.JSON(w, http.StatusOK, obj("position", out))
 		return nil
 	}))
 	r.Get(base+"/{pipeline_id}/diff", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {

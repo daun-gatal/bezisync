@@ -50,10 +50,10 @@ func TestPgImpact(t *testing.T) {
 
 func TestMysqlImpact(t *testing.T) {
 	logs := []binlogFile{{"bin.000001", 100}, {"bin.000002", 200}, {"bin.000003", 300}}
-	if got := mysqlImpact(nil, ptr("bin.000001"), 1000); got.Summary != "No binary logs reported." || got.LimitBytes != nil {
+	if got := mysqlImpact(nil, ptr("bin.000001"), 1000, false); got.Summary != "No binary logs reported." || got.LimitBytes != nil {
 		t.Fatalf("%+v", got)
 	}
-	if got := mysqlImpact(logs, nil, 1000); !strings.Contains(got.Summary, "position not stored yet") || got.RetainedBytes != nil {
+	if got := mysqlImpact(logs, nil, 1000, false); !strings.Contains(got.Summary, "position not stored yet") || got.RetainedBytes != nil {
 		t.Fatalf("%+v", got)
 	}
 	cases := []struct {
@@ -73,7 +73,7 @@ func TestMysqlImpact(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := mysqlImpact(c.logs, ptr(c.file), c.limit)
+			got := mysqlImpact(c.logs, ptr(c.file), c.limit, false)
 			if got.Lost || got.LogStatus == nil || *got.LogStatus != c.wantStatus || *got.RetainedBytes != c.wantRetained {
 				t.Fatalf("%+v", got)
 			}
@@ -85,7 +85,7 @@ func TestMysqlImpact(t *testing.T) {
 			}
 		})
 	}
-	purged := mysqlImpact(logs, ptr("bin.000000"), 1000)
+	purged := mysqlImpact(logs, ptr("bin.000000"), 1000, false)
 	if !purged.Lost || purged.Risk == nil || *purged.ReadingFile != "bin.000000" || purged.RetainedBytes != nil {
 		t.Fatalf("%+v", purged)
 	}
@@ -177,5 +177,12 @@ func TestMssqlImpact(t *testing.T) {
 	}
 	if mssqlImpact(nil, nil, nil, nil, nil, nil).Summary != "Nothing could be measured (needs db_owner on the database)." {
 		t.Fatal("summary")
+	}
+}
+
+func TestMySQLImpactOnFlinkCDC(t *testing.T) {
+	got := mysqlImpact([]binlogFile{{"mysql-bin.000001", 10}, {"mysql-bin.000002", 20}}, nil, 1000, true)
+	if !strings.Contains(got.Summary, "Flink CDC keeps its position in its saved state") || got.RetainedBytes != nil || got.Risk != nil {
+		t.Fatalf("%+v", got)
 	}
 }

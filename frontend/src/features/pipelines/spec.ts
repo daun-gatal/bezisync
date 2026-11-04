@@ -1,6 +1,7 @@
 import type { PipelineSpec } from '@/lib/pipelines';
 import type { SinkCaps } from '@/lib/connections';
 import type { JsonSchema } from '@/components/SchemaForm';
+import type { EngineId, FlinkChoices } from '@/lib/engines';
 
 /** The spec with every default filled in (mirrors backend defaults in domain/spec.py).
  *  Fields this file does not know are kept, so saving from the wizard never drops settings
@@ -27,8 +28,25 @@ export interface FullSpec {
   advanced: Record<string, string>;
   /** Connector value encodings; absent = connector defaults. */
   values?: ValueFormats;
-  /** Message key columns per captured table; absent = primary keys. */
+  /** Message key columns per captured table; absent = primary keys. On Flink CDC: the
+   *  destination's primary key for a table that has none. */
   keys?: Record<string, string[]>;
+  /** Flink CDC pipelines only: their choices and image pin. */
+  flink_cdc?: Partial<FlinkChoices>;
+  flink_cdc_image?: string | null;
+}
+
+/** The spec with only the settings of its engine: Flink CDC and Debezium refuse each other's. */
+export function specForEngine(spec: FullSpec, engine: EngineId): FullSpec {
+  if (engine === 'flink-cdc') {
+    const { values: _values, ...rest } = spec;
+    void _values;
+    return { ...rest, debezium_image: null, advanced: {}, snapshot: { ...spec.snapshot, delay_seconds: 0, window: null } };
+  }
+  const { flink_cdc: _fc, flink_cdc_image: _img, ...rest } = spec;
+  void _fc;
+  void _img;
+  return rest;
 }
 
 export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom';
@@ -221,4 +239,27 @@ export function deriveSinkOptions(
     out = { ...out, [name]: map };
   }
   return out;
+}
+
+/** Destination options a Flink CDC pipeline has: Iceberg keeps how rows are written (upserts by
+ *  key: no append) and the table format; commit timing and bucket partitioning are Debezium's. */
+const FLINK_OPTIONS = ['write_mode', 'format_version'];
+
+export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: EngineId): JsonSchema | null {
+  if (!schema) return null;
+  if (engine !== 'flink-cdc' || !schema.properties) return schema;
+  const properties: NonNullable<JsonSchema['properties']> = {};
+  for (const [name, prop] of Object.entries(schema.properties)) {
+    if (!FLINK_OPTIONS.includes(name)) continue;
+    properties[name] =
+      name === 'write_mode' && prop.enum
+        ? {
+            ...prop,
+            enum: prop.enum.filter((v) => v !== 'append'),
+            // Flink CDC marks a kept delete with its change type, not Debezium's __deleted.
+            ui: prop.ui && { ...prop.ui, labels: { ...prop.ui.labels, upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'" } },
+          }
+        : prop;
+  }
+  return Object.keys(properties).length ? { ...schema, properties } : null;
 }

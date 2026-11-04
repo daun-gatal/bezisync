@@ -319,6 +319,12 @@ type DeriveInput struct {
 	LastLifecycle   string
 	// ImagePull describes an image download the runtime is doing for this pipeline ("" = none).
 	ImagePull string
+	// EngineDown is why an engine that explains itself (Flink CDC) is down; it replaces reading
+	// Debezium's logs. Code "health_down" while a young pipeline starts means it is deploying.
+	EngineDown *Reason
+	// StartedAt is when the workload last started: an engine that explains itself is starting,
+	// not failed, for DeployGrace after a resume or restart too.
+	StartedAt *time.Time
 }
 
 // Derive turns observations into one honest verdict: nothing is healthy without fresh,
@@ -389,18 +395,25 @@ func derive(in DeriveInput) Verdict {
 		return Verdict{LifecycleFailed, HealthDown, []Reason{r}, r.Message}
 	}
 	if in.Phase == "restarting" || in.Phase == "failed" {
-		d := Diagnose(in.Logs)
+		d := in.EngineDown
+		if d == nil {
+			d = Diagnose(in.Logs)
+		}
 		if d == nil {
 			d = &Reason{Code: "crashing", Message: fmt.Sprintf("The connector keeps restarting (%d restarts).", in.Restarts), Severity: "error"}
 		}
 		return Verdict{LifecycleFailed, HealthDown, []Reason{*d}, d.Message}
 	}
 	if in.HealthUp != nil && !*in.HealthUp {
-		d := Diagnose(in.Logs)
+		d := in.EngineDown
+		if d == nil {
+			d = Diagnose(in.Logs)
+		}
 		if d == nil {
 			d = &Reason{Code: "health_down", Message: "Debezium Server reports DOWN.", Severity: "error"}
 		}
-		if young && d.Code == "health_down" {
+		starting := young || (in.EngineDown != nil && in.StartedAt != nil && in.Now.Sub(*in.StartedAt) < DeployGrace)
+		if starting && d.Code == "health_down" {
 			return Verdict{Lifecycle: LifecycleDeploying, Health: HealthUnknown, Summary: "Connector starting…"}
 		}
 		return Verdict{LifecycleFailed, HealthDown, []Reason{*d}, d.Message}

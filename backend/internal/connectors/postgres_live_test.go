@@ -150,3 +150,59 @@ func TestPostgresCheckMatchesPythonLive(t *testing.T) {
 		t.Errorf("discovery\n got %s\nwant %s", a, b)
 	}
 }
+
+// Cleanup removes the pipeline's slot and the copy slots Flink CDC may leave behind (<slot>_<n>),
+// and no other pipeline's.
+func TestPostgresCleanupDropsFlinkCopySlots(t *testing.T) {
+	host, port := setupPGFixture(t)
+	s, err := config.Load(func(k string) (string, bool) {
+		if k == "BEZISYNC_SSRF_ALLOW_CIDRS" {
+			return `["127.0.0.0/8", "172.16.0.0/12", "10.0.0.0/8"]`, true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Set(s)
+	t.Cleanup(config.Reset)
+	ctx := context.Background()
+	u, _ := url.Parse(testdb.AdminURL())
+	u.Path = "/contract_src"
+	pg, err := pgx.Connect(ctx, u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pg.Close(ctx) }()
+	short := "c1ea0c1ea0c1"
+	names := []string{"bz_" + short, "bz_" + short + "_1", "bz_" + short + "_12", "bz_" + short + "x", "bz_c1ea0c1ea0c2_1"}
+	for _, n := range names {
+		_, _ = pg.Exec(ctx, "SELECT pg_drop_replication_slot($1)", n)
+		if _, err := pg.Exec(ctx, "SELECT pg_create_logical_replication_slot($1, 'pgoutput')", n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, n := range names {
+			_, _ = pg.Exec(context.Background(), "SELECT pg_drop_replication_slot($1)", n)
+		}
+	})
+	src, _ := connectors.GetSource("postgresql")
+	conn := connectors.Resolved{Type: "postgresql", Config: map[string]any{"host": host, "port": port, "database": "contract_src", "user": "bezisync",
+		"ssl_mode": "disable"}, Secrets: map[string]any{"password": "bezisync"}}
+	results, err := src.Cleanup(ctx, conn, connectors.CompileContext{PipelineID: "p", ShortID: short})
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := map[string]bool{}
+	for _, r := range results {
+		if r.Kind == "replication_slot" && r.Outcome == "removed" {
+			removed[r.Name] = true
+		}
+	}
+	rows, _ := pg.Query(ctx, "SELECT slot_name FROM pg_replication_slots WHERE slot_name = ANY($1)", names)
+	left, _ := pgx.CollectRows(rows, pgx.RowTo[string])
+	if len(removed) != 3 || !removed["bz_"+short+"_12"] || strings.Join(left, ",") != "bz_"+short+"x,bz_c1ea0c1ea0c2_1" && strings.Join(left, ",") != "bz_c1ea0c1ea0c2_1,bz_"+short+"x" {
+		t.Fatalf("removed %v, left %v", removed, left)
+	}
+}

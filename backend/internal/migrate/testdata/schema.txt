@@ -95,6 +95,7 @@ connections.version integer NO
 debezium_images.created_at timestamp with time zone NO 
 debezium_images.created_by_id uuid YES 
 debezium_images.deprecated boolean NO 
+debezium_images.engine character varying(20) NO 'debezium'::character varying
 debezium_images.id uuid NO 
 debezium_images.image character varying(300) NO 
 debezium_images.is_default boolean NO 
@@ -237,6 +238,8 @@ pipelines.deployed_image character varying(300) YES
 pipelines.deployed_version_id uuid YES 
 pipelines.description text NO 
 pipelines.desired_state character varying(16) NO 
+pipelines.engine character varying(20) NO 'debezium'::character varying
+pipelines.engine_secrets_enc text YES 
 pipelines.health character varying(16) NO 
 pipelines.id uuid NO 
 pipelines.labels jsonb NO 
@@ -369,6 +372,7 @@ connections fk_connections_created_by_id_users FOREIGN KEY (created_by_id) REFER
 connections fk_connections_project_id_projects FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 connections pk_connections PRIMARY KEY (id)
 connections uq_connections_project_id_name UNIQUE (project_id, name)
+debezium_images debezium_images_engine_check CHECK (((engine)::text = ANY ((ARRAY['debezium'::character varying, 'flink-cdc'::character varying])::text[])))
 debezium_images fk_debezium_images_created_by_id_users FOREIGN KEY (created_by_id) REFERENCES users(id) ON DELETE SET NULL
 debezium_images pk_debezium_images PRIMARY KEY (id)
 debezium_images uq_debezium_images_image UNIQUE (image)
@@ -420,6 +424,7 @@ pipelines fk_pipelines_project_id_projects FOREIGN KEY (project_id) REFERENCES p
 pipelines fk_pipelines_runtime_id_runtimes FOREIGN KEY (runtime_id) REFERENCES runtimes(id)
 pipelines fk_pipelines_sink_id_connections FOREIGN KEY (sink_id) REFERENCES connections(id)
 pipelines fk_pipelines_source_id_connections FOREIGN KEY (source_id) REFERENCES connections(id)
+pipelines pipelines_engine_check CHECK (((engine)::text = ANY ((ARRAY['debezium'::character varying, 'flink-cdc'::character varying])::text[])))
 pipelines pk_pipelines PRIMARY KEY (id)
 projects pk_projects PRIMARY KEY (id)
 projects uq_projects_slug UNIQUE (slug)

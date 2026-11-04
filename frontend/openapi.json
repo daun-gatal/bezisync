@@ -451,6 +451,22 @@
       },
       "CatalogCreate": {
         "properties": {
+          "engine": {
+            "anyOf": [
+              {
+                "enum": [
+                  "debezium",
+                  "flink-cdc"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The engine the image runs (default debezium).",
+            "title": "Engine"
+          },
           "image": {
             "maxLength": 300,
             "pattern": "^[\\w.\\-/:@]+$",
@@ -606,7 +622,23 @@
       "CatalogRead": {
         "properties": {
           "default_image": {
-            "title": "Default Image",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The engine's default image (null while the engine has none).",
+            "title": "Default Image"
+          },
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
             "type": "string"
           },
           "entries": {
@@ -619,7 +651,8 @@
         },
         "required": [
           "default_image",
-          "entries"
+          "entries",
+          "engine"
         ],
         "title": "CatalogRead",
         "type": "object"
@@ -1546,6 +1579,11 @@
       },
       "ConnectorType": {
         "properties": {
+          "available": {
+            "description": "False while no engine that writes it is available (Flink CDC needs a registered image).",
+            "title": "Available",
+            "type": "boolean"
+          },
           "capture": {
             "$ref": "#/components/schemas/CaptureCaps"
           },
@@ -1557,6 +1595,18 @@
           "description": {
             "title": "Description",
             "type": "string"
+          },
+          "engines": {
+            "description": "Engines that can write this destination, when only some can (Flink CDC for StarRocks, Doris and Fluss).",
+            "items": {
+              "enum": [
+                "debezium",
+                "flink-cdc"
+              ],
+              "type": "string"
+            },
+            "title": "Engines",
+            "type": "array"
           },
           "kind": {
             "enum": [
@@ -1596,6 +1646,11 @@
           },
           "type": {
             "title": "Type",
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "description": "Why it can't be used yet, and who can change that.",
+            "title": "Unavailable Reason",
             "type": "string"
           }
         },
@@ -2046,6 +2101,199 @@
         "title": "DraftCheck",
         "type": "object"
       },
+      "EngineCaps": {
+        "description": "What the pipeline's engine can do. Actions it can't do carry a reason in why (action \u2192 text).",
+        "properties": {
+          "add_tables": {
+            "title": "Add Tables",
+            "type": "boolean"
+          },
+          "edit_position": {
+            "title": "Edit Position",
+            "type": "boolean"
+          },
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
+            "type": "string"
+          },
+          "event_formats": {
+            "title": "Event Formats",
+            "type": "boolean"
+          },
+          "hash_mask": {
+            "title": "Hash Mask",
+            "type": "boolean"
+          },
+          "parallel_copy": {
+            "title": "Parallel Copy",
+            "type": "boolean"
+          },
+          "recopy_table": {
+            "title": "Recopy Table",
+            "type": "boolean"
+          },
+          "resize_parallelism": {
+            "title": "Resize Parallelism",
+            "type": "boolean"
+          },
+          "saved_positions": {
+            "title": "Saved Positions",
+            "type": "boolean"
+          },
+          "schema_changes": {
+            "title": "Schema Changes",
+            "type": "boolean"
+          },
+          "start_from_time": {
+            "title": "Start From Time",
+            "type": "boolean"
+          },
+          "why": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Why",
+            "type": "object"
+          }
+        },
+        "required": [
+          "engine",
+          "edit_position",
+          "recopy_table",
+          "add_tables",
+          "start_from_time",
+          "saved_positions",
+          "event_formats",
+          "schema_changes",
+          "parallel_copy",
+          "hash_mask",
+          "resize_parallelism",
+          "why"
+        ],
+        "title": "EngineCaps",
+        "type": "object"
+      },
+      "EngineRead": {
+        "description": "An engine and whether this install can run it. Flink CDC is available once an Admin registers a Flink CDC image.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "default_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Image"
+          },
+          "except_sinks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Destination types it never writes.",
+            "title": "Except Sinks"
+          },
+          "id": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the engine is unavailable and how to turn it on.",
+            "title": "Reason"
+          },
+          "settings": {
+            "description": "Flink CDC: the Flink settings a pipeline may choose.",
+            "items": {
+              "$ref": "#/components/schemas/FlinkSetting"
+            },
+            "title": "Settings",
+            "type": "array"
+          },
+          "sinks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Destination types it writes (null: every one except except_sinks).",
+            "title": "Sinks"
+          },
+          "sizes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FlinkSize"
+            },
+            "description": "Flink CDC: each size preset's cluster.",
+            "title": "Sizes",
+            "type": "object"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source types it reads (null: every one).",
+            "title": "Sources"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "available",
+          "reason",
+          "default_image",
+          "sources",
+          "sinks",
+          "except_sinks"
+        ],
+        "title": "EngineRead",
+        "type": "object"
+      },
       "ErrorPolicy": {
         "additionalProperties": false,
         "properties": {
@@ -2493,6 +2741,186 @@
           "code"
         ],
         "title": "Fix",
+        "type": "object"
+      },
+      "FlinkCDCSpec": {
+        "additionalProperties": false,
+        "description": "Choices of a pipeline that runs on Flink CDC. Unset fields take their default; returned only when something is set.",
+        "properties": {
+          "commit_seconds": {
+            "anyOf": [
+              {
+                "enum": [
+                  30,
+                  60,
+                  300
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How often the position is saved and, for Iceberg, new data becomes visible (default 60).",
+            "title": "Commit Seconds"
+          },
+          "flink_conf": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Flink settings chosen from the catalogue (key \u2192 value).",
+            "title": "Flink Conf",
+            "type": "object"
+          },
+          "freshness_seconds": {
+            "anyOf": [
+              {
+                "enum": [
+                  2,
+                  5,
+                  30
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long a change may wait in a load batch (StarRocks, Doris; default 5).",
+            "title": "Freshness Seconds"
+          },
+          "new_columns": {
+            "anyOf": [
+              {
+                "enum": [
+                  "hold",
+                  "send"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "hold: a new source column is left out until someone reviews it (default); send: it is sent as it is.",
+            "title": "New Columns"
+          },
+          "schema_changes": {
+            "anyOf": [
+              {
+                "enum": [
+                  "apply",
+                  "ignore",
+                  "stop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What happens when a source table changes shape (default apply).",
+            "title": "Schema Changes"
+          }
+        },
+        "title": "FlinkCDCSpec",
+        "type": "object"
+      },
+      "FlinkSetting": {
+        "properties": {
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "default": {
+            "title": "Default",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "max": {
+            "title": "Max",
+            "type": "string"
+          },
+          "min": {
+            "title": "Min",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "duration",
+              "int",
+              "fraction",
+              "enum"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "type",
+          "default",
+          "why"
+        ],
+        "title": "FlinkSetting",
+        "type": "object"
+      },
+      "FlinkSize": {
+        "properties": {
+          "jobmanager_cpu": {
+            "title": "Jobmanager Cpu",
+            "type": "string"
+          },
+          "jobmanager_memory": {
+            "title": "Jobmanager Memory",
+            "type": "string"
+          },
+          "parallelism": {
+            "title": "Parallelism",
+            "type": "integer"
+          },
+          "taskmanager_cpu": {
+            "title": "Taskmanager Cpu",
+            "type": "string"
+          },
+          "taskmanager_memory": {
+            "title": "Taskmanager Memory",
+            "type": "string"
+          },
+          "taskmanagers": {
+            "title": "Taskmanagers",
+            "type": "integer"
+          },
+          "total_memory_mib": {
+            "title": "Total Memory Mib",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobmanager_cpu",
+          "jobmanager_memory",
+          "taskmanagers",
+          "taskmanager_cpu",
+          "taskmanager_memory",
+          "parallelism",
+          "total_memory_mib"
+        ],
+        "title": "FlinkSize",
         "type": "object"
       },
       "FormatSpec": {
@@ -3857,10 +4285,25 @@
             "title": "Confirm",
             "type": "string"
           },
+          "from_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where mode from_time starts.",
+            "title": "From Time"
+          },
           "mode": {
+            "description": "resnapshot: copy every table again; skip_to_now: changes from now; from_time: changes since from_time (Flink CDC on MySQL or SQL Server).",
             "enum": [
               "resnapshot",
-              "skip_to_now"
+              "skip_to_now",
+              "from_time"
             ],
             "title": "Mode",
             "type": "string"
@@ -3962,6 +4405,22 @@
             "maxLength": 4000,
             "title": "Description",
             "type": "string"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "enum": [
+                  "debezium",
+                  "flink-cdc"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The engine (default: Debezium wherever it can run the source and destination, else Flink CDC). Fixed once deployed.",
+            "title": "Engine"
           },
           "labels": {
             "additionalProperties": {
@@ -4112,6 +4571,9 @@
             "title": "Artifacts",
             "type": "object"
           },
+          "caps": {
+            "$ref": "#/components/schemas/EngineCaps"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -4157,6 +4619,14 @@
           },
           "desired_state": {
             "title": "Desired State",
+            "type": "string"
+          },
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
             "type": "string"
           },
           "has_undeployed_changes": {
@@ -4270,7 +4740,9 @@
           "deployed_at",
           "created_at",
           "updated_at",
-          "version"
+          "version",
+          "engine",
+          "caps"
         ],
         "title": "PipelineRead",
         "type": "object"
@@ -4298,6 +4770,23 @@
             ],
             "title": "Debezium Image"
           },
+          "flink_cdc": {
+            "$ref": "#/components/schemas/FlinkCDCSpec"
+          },
+          "flink_cdc_image": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "pattern": "^[\\w.\\-/:@]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Flink CDC image pinned for this pipeline. Returned only when set.",
+            "title": "Flink Cdc Image"
+          },
           "keys": {
             "additionalProperties": {
               "items": {
@@ -4307,7 +4796,7 @@
               "minItems": 1,
               "type": "array"
             },
-            "description": "Message key columns per captured table (overrides the primary key). Returned only when set.",
+            "description": "Key columns per captured table. Debezium: message key (overrides the primary key). Flink CDC: the destination primary key of a table without one. Returned only when set.",
             "title": "Keys",
             "type": "object"
           },
@@ -4350,6 +4839,22 @@
               }
             ],
             "title": "Description"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "enum": [
+                  "debezium",
+                  "flink-cdc"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The engine (default: Debezium wherever it can run the source and destination, else Flink CDC). Fixed once deployed.",
+            "title": "Engine"
           },
           "labels": {
             "anyOf": [
@@ -4817,6 +5322,25 @@
             "description": "Lets pipelines run filter scripts their authors wrote. Scripts run inside the connector, next to its credentials. Returned only when true.",
             "title": "Allow Scripted Transforms",
             "type": "boolean"
+          },
+          "allowed_engines": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "debezium",
+                    "flink-cdc"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Engines pipelines may run on (null = every engine). Returned only when set.",
+            "title": "Allowed Engines"
           },
           "allowed_runtime_ids": {
             "anyOf": [
@@ -6558,6 +7082,56 @@
           "approver"
         ],
         "title": "SSORuleRead",
+        "type": "object"
+      },
+      "SavedPositionRead": {
+        "description": "A stored checkpoint or savepoint of a Flink CDC pipeline.",
+        "properties": {
+          "current": {
+            "description": "After the last Start over: the pipeline resumes from the newest current position.",
+            "title": "Current",
+            "type": "boolean"
+          },
+          "flink_id": {
+            "title": "Flink Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "checkpoint",
+              "savepoint"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "taken_at": {
+            "format": "date-time",
+            "title": "Taken At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "reason",
+          "flink_id",
+          "taken_at",
+          "size",
+          "current"
+        ],
+        "title": "SavedPositionRead",
         "type": "object"
       },
       "SchemaChangeRead": {
@@ -8702,6 +9276,19 @@
             ],
             "title": "Config Hash"
           },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the runtime reports about the workload, such as a Flink CDC pipeline's components. Older agents never send it.",
+            "title": "Details"
+          },
           "exit_code": {
             "anyOf": [
               {
@@ -8802,6 +9389,28 @@
               }
             ],
             "title": "Started At"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A Flink CDC pipeline's helper status (/bz/status): HTTP status and body. Older agents never send it.",
+            "title": "Status"
           }
         },
         "required": [
@@ -9356,6 +9965,21 @@
     "/api/v1/debezium-catalog": {
       "get": {
         "operationId": "read_catalog_api_v1_debezium_catalog_get",
+        "parameters": [
+          {
+            "description": "The engine whose images to list (default debezium).",
+            "in": "query",
+            "name": "engine",
+            "required": false,
+            "schema": {
+              "enum": [
+                "debezium",
+                "flink-cdc"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9502,6 +10126,31 @@
           }
         },
         "summary": "Update Image",
+        "tags": [
+          "debezium-images"
+        ]
+      }
+    },
+    "/api/v1/engines": {
+      "get": {
+        "operationId": "list_engines_api_v1_engines_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EngineRead"
+                  },
+                  "title": "Response List Engines Api V1 Engines Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Engines",
         "tags": [
           "debezium-images"
         ]
@@ -13351,6 +14000,17 @@
               "title": "Tail",
               "type": "integer"
             }
+          },
+          {
+            "description": "A Flink CDC pipeline's component: jobmanager (default), taskmanager-<n> or tunnel.",
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "schema": {
+              "pattern": "^(jobmanager|tunnel|taskmanager-[1-9][0-9]?)$",
+              "title": "Component",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -13664,6 +14324,144 @@
           }
         },
         "summary": "Pause",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions": {
+      "get": {
+        "operationId": "list_positions_api_v1_projects__project_id__pipelines__pipeline_id__positions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "positions": {
+                      "items": {
+                        "$ref": "#/components/schemas/SavedPositionRead"
+                      },
+                      "title": "Positions",
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "positions"
+                  ],
+                  "title": "SavedPositionsRead",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List saved positions (Flink CDC)",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions/{position_id}/restore": {
+      "post": {
+        "operationId": "restore_position_api_v1_projects__project_id__pipelines__pipeline_id__positions__position_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "confirm": {
+                    "description": "The pipeline name, typed by the user.",
+                    "title": "Confirm",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "confirm"
+                ],
+                "title": "RestorePositionRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "position": {
+                      "$ref": "#/components/schemas/SavedPositionRead"
+                    }
+                  },
+                  "required": [
+                    "position"
+                  ],
+                  "title": "RestoredPositionRead",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Resume a paused Flink CDC pipeline from a saved position",
         "tags": [
           "pipelines"
         ]

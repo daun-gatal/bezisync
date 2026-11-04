@@ -30,3 +30,11 @@ tests:
     asserts:
       - hasDocuments: { count: 1 }
       - isKind: { of: ServiceAccount }
+  - it: may create Services (a Flink CDC pipeline's JobManager)
+    template: templates/rbac.yaml
+    values: [../ci/default-values.yaml]
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - contains:
+          path: rules
+          content: { apiGroups: [""], resources: [configmaps, secrets, services], verbs: [get, list, create, update, patch, delete] }

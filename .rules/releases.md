@@ -106,6 +106,9 @@ version, `--notes X.Y.Z` a release's notes.
 | Charts `oci://ghcr.io/daun-gatal/charts/{bezisync,bezisync-agent}` | `<chart version>`; `<chart version>-pre` while testing |
 | CLI archives on the GitHub Release (binary, `LICENSE`, `NOTICE`, `LICENSES.txt`) | `bezisync_X.Y.Z_<os>_<arch>.tar.gz` / `.zip`, `checksums.txt` |
 
+Not published: the Flink CDC engine image. Admins build it (the guide's Flink CDC engine section
+lists its layout), push it to their registry and register it in Settings.
+
 Build provenance is attested with GitHub artifact attestations (stored by GitHub, so no
 signature tags in the registry): `gh attestation verify oci://ghcr.io/daun-gatal/bezisync:X.Y.Z
 --owner daun-gatal`. They need the repository to be public. buildx's own provenance and SBOM are

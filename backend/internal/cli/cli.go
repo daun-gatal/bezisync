@@ -91,6 +91,7 @@ func newRoot(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		Version: version.Version, Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
 	root.CompletionOptions.DisableDefaultCmd = true
+	root.AddCommand(engineCmd(), installSelfCmd())
 	root.AddCommand(apiCmd(), controllerCmd(), agentCmd(), migrateCmd(stdout), openapiCmd(stdout), uninstallCmd(stdout),
 		tunnelCmd(), tunnelProbeCmd(), healthcheckCmd(), checkDocsCmd(stdout), rotateKeyCmd(stdout), generateKeyCmd(stdout), passwordLoginCmd(stdout), licensesCmd(stdout), remoteCmd(stdin, stdout, stderr))
 	return root
@@ -320,7 +321,7 @@ func uninstallCmd(stdout io.Writer) *cobra.Command {
 }
 
 func tunnelCmd() *cobra.Command {
-	var target, via, hostKey string
+	var target, via, hostKey, listenHost string
 	var listenPort int
 	cmd := &cobra.Command{Use: "tunnel", Short: "Keep an SSH tunnel open for a connector (sidecar). The key comes from BZ_SSH_KEY.", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
@@ -345,7 +346,7 @@ func tunnelCmd() *cobra.Command {
 			logging.Configure()
 			ctx, stop := signalContext()
 			defer stop()
-			err := connectors.Serve(ctx, &connectors.SSHConfig{Host: sshHost, Port: sp, User: user, HostKey: hostKey}, key, host, portNum, listenPort)
+			err := connectors.ServeOn(ctx, &connectors.SSHConfig{Host: sshHost, Port: sp, User: user, HostKey: hostKey}, key, host, portNum, listenHost, listenPort)
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -354,7 +355,8 @@ func tunnelCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&target, "target", "", "Database host:port as seen from the bastion.")
 	f.StringVar(&via, "via", "", "user@bastion[:port]")
-	f.IntVar(&listenPort, "listen-port", connectors.TunnelPort, "Local port Debezium connects to (127.0.0.1).")
+	f.IntVar(&listenPort, "listen-port", connectors.TunnelPort, "Port the connector connects to.")
+	f.StringVar(&listenHost, "listen-host", "127.0.0.1", "Address to listen on (a Flink CDC pipeline's private network on Docker: 0.0.0.0).")
 	f.StringVar(&hostKey, "host-key", os.Getenv("BZ_SSH_HOST_KEY"), "Pinned bastion host key. [env BZ_SSH_HOST_KEY]")
 	_ = cmd.MarkFlagRequired("target")
 	_ = cmd.MarkFlagRequired("via")

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
@@ -34,6 +35,7 @@ type ProjectPolicies struct {
 	AllowScriptedTransforms bool     `json:"allow_scripted_transforms"`
 	AllowCustomTransforms   bool     `json:"allow_custom_transforms"`
 	AllowedTransforms       []string `json:"allowed_transforms"` // nil = every built-in type
+	AllowedEngines          []string `json:"allowed_engines"`    // nil = every engine
 }
 
 // DefaultPolicies is ProjectPolicies().
@@ -82,6 +84,9 @@ func (p ProjectPolicies) Dump() *om.Map {
 	}
 	if p.AllowedTransforms != nil {
 		out.Set("allowed_transforms", strList(p.AllowedTransforms))
+	}
+	if p.AllowedEngines != nil {
+		out.Set("allowed_engines", strList(p.AllowedEngines))
 	}
 	return out
 }
@@ -168,8 +173,37 @@ func ParsePolicies(v *val.V, loc val.Loc, raw any) (ProjectPolicies, bool) {
 			p.AllowedTransforms = types
 		}
 	}
+	if f := o.Get("allowed_engines"); f.Present && !f.IsNull() {
+		if items, ok := v.List(f.Loc, f.Raw); ok {
+			ids := make([]string, 0, len(items))
+			for i, item := range items {
+				if id, ok := v.Literal(f.Loc.Add(i), item, engineIDs()...); ok {
+					ids = append(ids, id)
+				}
+			}
+			p.AllowedEngines = ids
+		}
+	}
 	o.Forbid()
 	return p, v.Count() == before
+}
+
+func engineIDs() []string {
+	out := make([]string, len(engine.All))
+	for i, id := range engine.All {
+		out[i] = string(id)
+	}
+	return out
+}
+
+// EngineViolation is the policy failure of a pipeline on an engine the project does not allow
+// (nil when allowed).
+func EngineViolation(p ProjectPolicies, id string) *checks.Check {
+	if id == "" || p.AllowedEngines == nil || slices.Contains(p.AllowedEngines, id) {
+		return nil
+	}
+	c := policyFail("policy_engine", "Engine", fmt.Sprintf("This project does not allow pipelines on %s.", engine.ID(id).Title()), AskAdmin)
+	return &c
 }
 
 // LoadPolicies reads stored policies; invalid stored data falls back to defaults, as
@@ -214,10 +248,19 @@ func SaveViolations(p ProjectPolicies, runtimeID *uuid.UUID, sourceType, sinkTyp
 	return out
 }
 
-// EvaluatePolicies returns the policy preflight section.
+// EvaluatePolicies returns the policy preflight section of a Debezium pipeline.
 func EvaluatePolicies(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UUID, sourceType, sinkType string,
 	otherPipelinesOnSource int) []checks.Check {
+	return EvaluatePoliciesOn(p, spec, runtimeID, sourceType, sinkType, string(engine.Debezium), otherPipelinesOnSource)
+}
+
+// EvaluatePoliciesOn returns the policy preflight section of a pipeline on an engine.
+func EvaluatePoliciesOn(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UUID, sourceType, sinkType, engineID string,
+	otherPipelinesOnSource int) []checks.Check {
 	out := SaveViolations(p, runtimeID, sourceType, sinkType)
+	if c := EngineViolation(p, engineID); c != nil {
+		out = append(out, *c)
+	}
 	mode := spec.Snapshot.Mode
 	if p.AllowedSnapshotModes != nil && !slices.Contains(p.AllowedSnapshotModes, mode) {
 		out = append(out, policyFail("policy_snapshot_mode", "Snapshot mode",

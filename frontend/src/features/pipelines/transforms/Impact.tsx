@@ -48,9 +48,24 @@ export function OutputImpact({ pipeline, version, spec }: { pipeline: Pipeline; 
 }
 
 /** The steps in plain language (Review and Overview). */
-export function StepsSummary({ spec }: { spec: FullSpec }) {
+export function StepsSummary({ spec, flink = false }: { spec: FullSpec; flink?: boolean }) {
   const values = summarizeValues(spec.values);
   const keys = Object.entries(spec.keys ?? {});
+  if (flink) {
+    // Flink CDC writes tables: no event shape, keys are the destination's primary key.
+    const items = [
+      'Tables are kept in sync, row by row, by primary key.',
+      ...spec.transforms.filter((t) => t.type !== 'unwrap').map((t) => `${TYPE_TITLE[t.type]}: ${summarize(t)}.`),
+      ...keys.map(([t, c]) => `Primary key of ${t}: ${c.join(', ')}.`),
+    ];
+    return (
+      <ol className="m-0 flex flex-col gap-1 pl-5 text-sm">
+        {items.map((s) => (
+          <li key={s}>{s}</li>
+        ))}
+      </ol>
+    );
+  }
   const items = [
     ...(values ? [`Value formats: ${values}.`] : []),
     ...spec.transforms.map((t) => `${t.type === 'unwrap' ? 'Event shape' : TYPE_TITLE[t.type]}: ${summarize(t)}.`),

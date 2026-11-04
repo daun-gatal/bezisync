@@ -174,6 +174,12 @@ func Tunnel(ctx context.Context, config, secrets map[string]any, host string, po
 
 // Serve keeps a forward open forever, reconnecting with backoff (the connector sidecar).
 func Serve(ctx context.Context, cfg *SSHConfig, key, host string, port, listenPort int) error {
+	return ServeOn(ctx, cfg, key, host, port, "127.0.0.1", listenPort)
+}
+
+// ServeOn is Serve listening on listenHost: a Flink CDC pipeline's tunnel on Docker listens on the
+// pipeline's private network so its JobManager and TaskManagers all reach it.
+func ServeOn(ctx context.Context, cfg *SSHConfig, key, host string, port int, listenHost string, listenPort int) error {
 	log := logging.Logger("bezisync.tunnel")
 	delay := time.Second
 	for ctx.Err() == nil {
@@ -181,12 +187,12 @@ func Serve(ctx context.Context, cfg *SSHConfig, key, host string, port, listenPo
 		if err == nil {
 			var l net.Listener
 			var lc net.ListenConfig
-			l, err = lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(listenPort)))
+			l, err = lc.Listen(ctx, "tcp", net.JoinHostPort(listenHost, strconv.Itoa(listenPort)))
 			if err != nil {
 				_ = client.Close()
 				err = &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: %v", cfg.Host, cfg.Port, err)}
 			} else {
-				log.Info(fmt.Sprintf("tunnel 127.0.0.1:%d → %s:%d via %s", listenPort, host, port, cfg.Host))
+				log.Info(fmt.Sprintf("tunnel %s:%d → %s:%d via %s", listenHost, listenPort, host, port, cfg.Host))
 				delay = time.Second
 				go forward(l, client, host, port)
 				_ = client.Wait()

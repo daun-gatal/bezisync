@@ -1,5 +1,5 @@
 import { captureOf, sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/connections';
-import type { JsonSchema } from '@/components/SchemaForm';
+import { cleanValues, type FormValues, type JsonSchema } from '@/components/SchemaForm';
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Check as CheckIcon, Loader2 } from 'lucide-react';
@@ -17,9 +17,11 @@ import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
 import { slugify } from '@/lib/format';
 import { useDeploy, usePipelines, usePreflight, type Pipeline, type Preflight } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
+import { flinkChoices, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
-import { deriveSinkOptions, fullSpec, parseAdvanced, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
+import { deriveSinkOptions, fullSpec, optionsSchemaFor, parseAdvanced, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
+import { FlinkRunSettings } from './FlinkSettings';
 import { OwnerPicker } from './OwnerPicker';
 import { personalSummary } from './personal';
 import { StepHeader } from './shared';
@@ -35,6 +37,13 @@ const AUTOSAVE_MS = 800;
 function personalLine({ masked, removed, kept }: { masked: number; removed: number; kept: number }): string {
   const parts = [masked && `${masked} masked`, removed && `${removed} removed`, kept && `${kept} kept as is`].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'No column masked or removed';
+}
+
+/** A Flink CDC size in a line: its TaskManagers, readers and memory in all. */
+export function flinkSizeHelp(size: { taskmanagers: number; parallelism: number; total_memory_mib: number } | undefined): string {
+  if (!size) return '';
+  const gib = Math.round((size.total_memory_mib / 1024) * 10) / 10;
+  return `A JobManager and ${size.taskmanagers} TaskManager${size.taskmanagers === 1 ? '' : 's'} · ${size.parallelism} readers · ${gib} GiB in all`;
 }
 
 export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; handle: Ref<StepHandle>; onBack: () => void }) {
@@ -53,6 +62,9 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const others = (usePipelines(project.id).data ?? []).filter((p) => p.id !== pipeline.id).map((p) => p.name);
   const spec = useMemo(() => fullSpec(pipeline.spec), [pipeline.spec]);
   const deployed = Boolean(pipeline.deployed_version);
+  const flink = pipeline.engine === 'flink-cdc';
+  const flinkEngine = useEngines().data?.find((e) => e.id === 'flink-cdc');
+  const [fc, setFc] = useState<FlinkChoices>(flinkChoices(spec.flink_cdc));
   const [name, setName] = useState(pipeline.name);
   const [owner, setOwner] = useState(pipeline.owner);
   const [runtimeId, setRuntimeId] = useState<string | undefined>(pipeline.runtime?.id);
@@ -75,9 +87,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const discovery = useDiscovery(project.id, pipeline.source.id);
   // Options the destination derives from the tables (Iceberg's partition keys) follow the
   // tables and keys chosen in earlier steps.
+  const sinkSchema = optionsSchemaFor(sinkCaps.options_schema as JsonSchema | null, pipeline.engine);
   const sinkOptions = deriveSinkOptions(
-    spec.sink.options,
-    sinkCaps.options_schema as JsonSchema | null,
+    // A Flink CDC pipeline keeps only its engine's options (no recorded partitions).
+    pipeline.engine === 'flink-cdc' && sinkSchema ? cleanValues(sinkSchema, spec.sink.options as FormValues) : spec.sink.options,
+    sinkSchema,
     spec.source.tables.include,
     spec.keys ?? {},
     discovery.data?.tables,
@@ -85,9 +99,10 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const nextSpec: FullSpec = {
     ...spec,
     sink: { ...spec.sink, options: sinkOptions },
-    snapshot: { ...spec.snapshot, mode, window: snapshotWindow || null },
-    policies: { ...spec.policies, resources, latency_target_seconds: latency, delivery_canary: canary },
-    advanced: adv.values,
+    snapshot: { ...spec.snapshot, mode, window: flink ? null : snapshotWindow || null },
+    policies: { ...spec.policies, resources, latency_target_seconds: latency, delivery_canary: flink ? false : canary },
+    advanced: flink ? {} : adv.values,
+    ...(flink ? { flink_cdc: fc } : {}),
   };
   const body: SaveBody = {
     ...(slugify(name) !== pipeline.name && !deployed ? { name: slugify(name) } : {}),
@@ -248,9 +263,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               options={RESOURCES.map((r) => ({
                 value: r.value,
                 label: r.title,
-                description: r.help,
-                disabled: (!sizeAllowed(policies, r.value) || tooSmall(r.value)) && r.value !== resources,
-                why: tooSmall(r.value)
+                description: flink ? flinkSizeHelp(flinkEngine?.sizes?.[r.value]) : r.help,
+                disabled: (!sizeAllowed(policies, r.value) || (!flink && tooSmall(r.value)) || (flink && deployed)) && r.value !== resources,
+                why: flink && deployed
+                  ? 'A Flink CDC pipeline keeps the readers it was deployed with: Start over to change its size.'
+                  : tooSmall(r.value)
                   ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${sinkCaps.min_resources}.`
                   : `This project allows up to ${policies?.max_resources ?? 'a smaller size'}.`,
               }))}
@@ -270,13 +287,19 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                 value={mode}
                 onChange={setMode}
                 options={SNAPSHOT_MODES.filter(
-                  (m) => m.value === mode || (capture.snapshot_modes.includes(m.value) && (expert || ['initial', 'no_data'].includes(m.value))),
+                  (m) =>
+                    m.value === mode ||
+                    (capture.snapshot_modes.includes(m.value) &&
+                      (expert || ['initial', 'no_data'].includes(m.value)) &&
+                      // A Flink CDC pipeline resumes from its saved position: no copy on every start.
+                      !(flink && m.value === 'always')),
                 ).map((m) => {
                   const offered = capture.snapshot_modes.includes(m.value);
                   return {
                     value: m.value,
                     label: m.title,
-                    description: m.help,
+                    // Flink CDC pipelines don't need Debezium's terms.
+                    description: flink ? m.help.replace(/\s*Debezium:.*$/, '') : m.help,
                     disabled: (!offered || !allows(policies?.allowed_snapshot_modes, m.value)) && m.value !== mode,
                     why: offered ? 'Not allowed in this project.' : `${sourceLabel} doesn’t offer this.`,
                   };
@@ -285,21 +308,39 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             )}
           </Field>
         )}
-        <Switch
-          checked={canary}
-          onChange={setCanary}
-          label="Verify delivery end to end"
-          disabled={!capture.canary && !canary}
-          why={`${sourceLabel} sources don’t support the delivery canary.`}
-          description="Every few minutes BeziSync writes a tiny canary row to the source and checks it arrives at the destination, and alerts if it doesn’t. Needs a destination BeziSync can read back (not HTTP or SQS); adds one small canary topic, stream or table."
-        />
-        <TimeRange
-          value={snapshotWindow}
-          onChange={setSnapshotWindow}
-          label="Only re-copy rows inside a maintenance window"
-          description="Backfills and re-syncs wait for this daily window (UTC) to spare the source. The first copy is not delayed."
-        />
-        {expert ? (
+        {flink ? (
+          <Field label="Flink CDC" group>
+            {() => (
+              <FlinkRunSettings
+                value={fc}
+                onChange={setFc}
+                sinkType={pipeline.sink?.type}
+                expert={expert}
+                catalogue={flinkEngine?.settings ?? []}
+                deployed={deployed}
+              />
+            )}
+          </Field>
+        ) : null}
+        {flink ? null : (
+          <Switch
+            checked={canary}
+            onChange={setCanary}
+            label="Verify delivery end to end"
+            disabled={!capture.canary && !canary}
+            why={`${sourceLabel} sources don’t support the delivery canary.`}
+            description="Every few minutes BeziSync writes a tiny canary row to the source and checks it arrives at the destination, and alerts if it doesn’t. Needs a destination BeziSync can read back (not HTTP or SQS); adds one small canary topic, stream or table."
+          />
+        )}
+        {flink ? null : (
+          <TimeRange
+            value={snapshotWindow}
+            onChange={setSnapshotWindow}
+            label="Only re-copy rows inside a maintenance window"
+            description="Backfills and re-syncs wait for this daily window (UTC) to spare the source. The first copy is not delayed."
+          />
+        )}
+        {expert && !flink ? (
           <Field label="Advanced Debezium properties" optional error={adv.error} hint="One key=value per line. BeziSync-managed keys are rejected.">
             {(id) => (
               <Textarea
@@ -316,7 +357,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       </Card>
 
       <Card
-        title="Events"
+        title={flink ? "What reaches the destination" : "Events"}
         actions={
           <ButtonLink
             size="sm"
@@ -329,7 +370,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
           </ButtonLink>
         }
       >
-        <StepsSummary spec={spec} />
+        <StepsSummary spec={spec} flink={flink} />
         {deployed ? <OutputImpact pipeline={pipeline} spec={spec} /> : null}
       </Card>
 
@@ -337,7 +378,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
         <KeyValue
           items={[
             ['From', `${pipeline.source.name} · ${plural(spec.source.tables.include.length, 'table')}`],
-            ['To', `${pipeline.sink?.name ?? '—'} · ${spec.sink.format.type.toUpperCase()}`],
+            ['To', `${pipeline.sink?.name ?? '—'} · ${flink ? 'tables' : spec.sink.format.type.toUpperCase()}`],
             ['Personal data', personalLine(personalSummary(spec.source.columns, spec.source.tables.include))],
           ]}
         />

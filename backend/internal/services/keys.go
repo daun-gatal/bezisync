@@ -14,6 +14,7 @@ func RotateKeys(ctx context.Context, q db.Querier) (map[string]int, []string, er
 	tables := []struct{ table, column string }{
 		{"connections", "secrets_enc"}, {"runtimes", "secrets_enc"}, {"secret_stores", "secrets_enc"},
 		{"alert_channels", "secrets_enc"}, {"agent_workloads", "spec_enc"}, {"sso_providers", "client_secret_enc"},
+		{"pipelines", "engine_secrets_enc"},
 	}
 	counts := map[string]int{}
 	order := []string{}

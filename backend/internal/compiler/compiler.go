@@ -70,14 +70,30 @@ type Compiled struct {
 	Tunnel map[string]any
 	// HealthPort serves /q/health (8080, unless the image moves it).
 	HealthPort int
+	// Flink is set for a pipeline that runs on Flink CDC (Properties is then empty).
+	Flink *FlinkCompiled
 }
 
-// Render is application.properties.
-func (c *Compiled) Render() string { return RenderProperties(c.Properties) }
+// Render is application.properties, or a Flink CDC pipeline's pipeline.yaml.
+func (c *Compiled) Render() string {
+	if c.Flink != nil {
+		return c.Flink.Pipeline
+	}
+	return RenderProperties(c.Properties)
+}
+
+// FromFlink wraps a Flink CDC compile for the callers both engines share.
+func FromFlink(f *FlinkCompiled) *Compiled {
+	return &Compiled{Env: f.Env, Image: f.Image, Destinations: f.Destinations, Artifacts: map[string]any{}, Files: f.Files, Tunnel: f.Tunnel,
+		HealthPort: HTTPPort, Flink: f, Resources: map[string]any{}}
+}
 
 // ConfigHash identifies what the workload runs. It must stay byte-identical to the Python
 // implementation: json.dumps(…, sort_keys=True) with default separators.
 func (c *Compiled) ConfigHash() string {
+	if c.Flink != nil {
+		return c.Flink.ConfigHash()
+	}
 	files := c.Files
 	if files == nil {
 		files = map[string]string{}

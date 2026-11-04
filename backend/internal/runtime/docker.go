@@ -39,6 +39,7 @@ type DockerDriver struct {
 	mu      sync.Mutex
 	pulls   map[string]*imagePull // image ref → download in progress or just finished
 	pulling map[string]string     // workload short id → image ref it waits for
+	stops   map[string]*flinkStop // Flink CDC short id → ordered stop in progress or just finished
 }
 
 // imagePull is one image download running in the background.
@@ -76,7 +77,7 @@ func NewDocker(host string, tlsCfg *DockerTLS, network string, pullTimeout time.
 		return nil, err
 	}
 	return &DockerDriver{cli: cli, pullCli: pullCli, network: network, pullTimeout: pullTimeout,
-		pulls: map[string]*imagePull{}, pulling: map[string]string{}}, nil
+		pulls: map[string]*imagePull{}, pulling: map[string]string{}, stops: map[string]*flinkStop{}}, nil
 }
 
 // dockerClient builds an API client; timeout 0 leaves requests bounded only by their context.
@@ -375,6 +376,9 @@ func sortedFileNames(m map[string]string) []string {
 // Apply creates or replaces the container when its config hash changes and sets its
 // running state.
 func (d *DockerDriver) Apply(ctx context.Context, w Workload) error {
+	if w.IsFlink() {
+		return d.applyFlink(ctx, w)
+	}
 	existing, err := d.get(ctx, w.ResourceName())
 	if err != nil {
 		return d.apiErr(err)
@@ -530,6 +534,15 @@ func (d *DockerDriver) Delete(ctx context.Context, shortID string) error {
 	d.mu.Lock()
 	delete(d.pulling, shortID) // a download it started finishes for whoever needs the image next
 	d.mu.Unlock()
+	have, err := d.flinkContainers(ctx, shortID)
+	if err != nil {
+		return err
+	}
+	for _, c := range have {
+		if c.Labels[RoleLabel] != "" {
+			return d.deleteFlink(ctx, shortID, have)
+		}
+	}
 	for _, name := range []string{"bz-" + shortID, "bz-" + shortID + "-tunnel"} {
 		c, err := d.get(ctx, name)
 		if err != nil {
@@ -546,7 +559,16 @@ func (d *DockerDriver) Delete(ctx context.Context, shortID string) error {
 
 // Observe reports the container state, and the image download it waits for, if any.
 func (d *DockerDriver) Observe(ctx context.Context, shortID string) (Observation, error) {
-	obs, err := d.observe(ctx, shortID)
+	jm, err := d.get(ctx, "bz-"+shortID)
+	if err != nil {
+		return Observation{}, err
+	}
+	var obs Observation
+	if jm != nil && jm.Config.Labels[RoleLabel] == RoleJobManager {
+		obs, err = d.observeFlink(ctx, shortID, jm)
+	} else {
+		obs, err = d.observe(ctx, shortID)
+	}
 	if err == nil {
 		obs.ImagePull = d.imagePullNote(shortID)
 	}
@@ -584,7 +606,12 @@ func (d *DockerDriver) observe(ctx context.Context, shortID string) (Observation
 
 // Logs returns the last lines of the connector's output.
 func (d *DockerDriver) Logs(ctx context.Context, shortID string, tail int, _ bool) (string, error) {
-	c, err := d.get(ctx, "bz-"+shortID)
+	return d.logsOf(ctx, "bz-"+shortID, tail)
+}
+
+// logsOf returns the last lines of a container's output ("" when it doesn't exist).
+func (d *DockerDriver) logsOf(ctx context.Context, name string, tail int) (string, error) {
+	c, err := d.get(ctx, name)
 	if err != nil || c == nil {
 		return "", err
 	}
@@ -675,8 +702,10 @@ func (d *DockerDriver) ListWorkloads(ctx context.Context, owner string) ([]strin
 		return nil, err
 	}
 	out := []string{}
+	seen := map[string]bool{}
 	for _, c := range list.Items {
-		if id, ok := c.Labels[Label]; ok {
+		if id, ok := c.Labels[Label]; ok && !seen[id] { // a Flink CDC pipeline has several containers
+			seen[id] = true
 			out = append(out, id)
 		}
 	}

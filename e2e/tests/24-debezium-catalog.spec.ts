@@ -4,12 +4,12 @@ import { Api, signIn, unique } from './helpers';
 /** Same Debezium build under its own name (tagged in k3s by scripts/e2e.sh). */
 const CUSTOM_IMAGE = 'bezisync-local/debezium-custom:e2e';
 
-test('an Admin curates the Debezium versions and picks the default', async ({ page }) => {
+test('an Admin curates the Debezium images and picks the default', async ({ page }) => {
   const api = await Api.signIn();
   const label = unique('tested');
   await signIn(page);
-  await page.goto('/p/default/settings/debezium');
-  await expect(page.getByRole('heading', { name: 'Debezium versions' })).toBeVisible();
+  await page.goto('/p/default/settings/engines');
+  await expect(page.getByRole('heading', { name: 'Engine versions' })).toBeVisible();
   await expect(page.getByText('Install default', { exact: true })).toBeVisible();
 
   await page.getByLabel('Image', { exact: true }).fill(CUSTOM_IMAGE);
@@ -21,15 +21,15 @@ test('an Admin curates the Debezium versions and picks the default', async ({ pa
   expect(catalog.default_image).toBe(CUSTOM_IMAGE);
 
   // Old links to the separate catalog and project image pages land here.
-  for (const old of ['/p/default/settings/debezium-catalog', '/p/default/settings/images', '/p/default/admin/debezium']) {
+  for (const old of ['/p/default/settings/debezium-catalog', '/p/default/settings/images', '/p/default/admin/debezium', '/p/default/settings/debezium']) {
     await page.goto(old);
-    await expect(page).toHaveURL(/\/settings\/debezium$/);
+    await expect(page).toHaveURL(/\/settings\/engines$/);
   }
   const info = await api.get<{ default_debezium_image: string }>('/api/v1/system/info');
   expect(info.default_debezium_image).toBe(CUSTOM_IMAGE);
 
   // Back to the install default, deprecate, then remove it.
-  await page.goto('/p/default/settings/debezium');
+  await page.goto('/p/default/settings/engines');
   await page.getByRole('button', { name: `Use install default instead of ${CUSTOM_IMAGE}` }).click();
   // Changing the default says what it affects first.
   await page.getByRole('dialog').getByRole('button', { name: 'Use install default' }).click();

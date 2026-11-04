@@ -87,7 +87,14 @@ export function PipelinePage() {
 
   const operate: MenuEntry[] = canOperate
     ? [
-        running ? { label: 'Pause', icon: <Pause />, description: 'Stops the connector; the position is kept', onSelect: () => act('pause') } : null,
+        running
+          ? {
+              label: 'Pause',
+              icon: <Pause />,
+              description: p.engine === 'flink-cdc' ? 'Saves the position and stops the cluster' : 'Stops the connector; the position is kept',
+              onSelect: () => act('pause'),
+            }
+          : null,
         !running && primary !== 'resume' ? { label: 'Resume', icon: <Play />, onSelect: () => act('resume') } : null,
         running && primary !== 'restart'
           ? { label: 'Restart', icon: <RotateCw />, description: 'Restarts the connector; it resumes where it stopped', onSelect: () => act('restart') }
@@ -104,7 +111,7 @@ export function PipelinePage() {
         ]
       : [];
   const more: MenuEntry[] = [
-    canEdit && deployed ? { label: 'Change Debezium version…', icon: <Wrench />, onSelect: () => setChangingImage(true) } : null,
+    canEdit && deployed && p.engine === 'debezium' ? { label: 'Change Debezium version…', icon: <Wrench />, onSelect: () => setChangingImage(true) } : null,
     can('pipeline.deploy') && !gone ? { label: 'Delete…', icon: <Trash2 />, danger: true, onSelect: () => setDeleting(true) } : null,
   ];
 
@@ -194,7 +201,7 @@ export function PipelinePage() {
         label="Pipeline sections"
         value={tab}
         onChange={(t) => void navigate({ search: t === 'overview' ? {} : { tab: t }, replace: true })}
-        tabs={tabs.map((t) => ({ id: t, label: TAB_LABEL[t] }))}
+        tabs={tabs.map((t) => ({ id: t, label: t === 'snapshots' && p.engine === 'flink-cdc' ? 'Positions' : TAB_LABEL[t] }))}
       />
       <TabPanel idBase="pipeline" value={tab}>
         {tab === 'overview' ? <Overview pipeline={p} /> : null}

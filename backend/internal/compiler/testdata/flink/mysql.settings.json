@@ -1,0 +1,19 @@
+{
+  "pipeline_id": "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f",
+  "short_id": "6f1c2d3e4b5a",
+  "connectors": [
+    "mysql",
+    "values"
+  ],
+  "drivers": [
+    "mysql"
+  ],
+  "taskmanagers": 2,
+  "restore": "latest",
+  "restore_after": 0,
+  "allow_non_restored": false,
+  "state_dir": "/state",
+  "keep_checkpoints": 5,
+  "health_port": 8080,
+  "stop_timeout_seconds": 60
+}

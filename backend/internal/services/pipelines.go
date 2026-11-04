@@ -15,9 +15,11 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/auth"
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/compiler"
+	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
@@ -139,6 +141,14 @@ func ResolveImage(ctx context.Context, q db.Querier, spec domain.PipelineSpec, r
 		return *rt.DefaultImage, nil
 	}
 	return DefaultImage(ctx, q)
+}
+
+// ResolvePipelineImage is the image a pipeline runs on its engine.
+func ResolvePipelineImage(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec, rt *models.Runtime, sinkType string) (string, error) {
+	if EngineOf(p) == engine.FlinkCDC {
+		return ResolveFlinkImage(ctx, q, spec)
+	}
+	return ResolveImage(ctx, q, spec, rt, sinkType)
 }
 
 // SinkTypeOf is the type of a pipeline's destination ("" when it has none).
@@ -307,14 +317,31 @@ type NewPipeline struct {
 	SourceID                 uuid.UUID
 	SinkID, RuntimeID        *uuid.UUID
 	Spec                     domain.PipelineSpec
+	// Engine is the requested engine ("" = the default for the source and destination).
+	Engine string
 }
 
 // CreatePipeline creates a draft pipeline with version 1.
 func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n NewPipeline) (*models.Pipeline, error) {
-	if _, err := GetConnectionOfKind(ctx, q, a.Project.ID, n.SourceID, "source"); err != nil {
+	source, err := GetConnectionOfKind(ctx, q, a.Project.ID, n.SourceID, "source")
+	if err != nil {
 		return nil, err
 	}
-	if err := ValidateSinkSpec(ctx, q, a.Project.ID, n.SinkID, n.Spec); err != nil {
+	sinkType, err := connectionType(ctx, q, n.SinkID)
+	if err != nil {
+		return nil, err
+	}
+	eng, err := ChooseEngine(ctx, q, n.Engine, "", source.Type, sinkType)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateSinkSpec(ctx, q, a.Project.ID, n.SinkID, n.Spec, eng); err != nil {
+		return nil, err
+	}
+	if err := ValidateEngineSpec(eng, n.Spec); err != nil {
+		return nil, err
+	}
+	if err := enforceEnginePolicy(ctx, q, a.Project.ID, eng); err != nil {
 		return nil, err
 	}
 	if n.RuntimeID != nil {
@@ -334,7 +361,7 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	}
 	now := db.Now()
 	p := &models.Pipeline{ID: db.NewID(), ProjectID: a.Project.ID, Name: n.Name, Description: n.Description, Owner: n.Owner,
-		Labels: labels, SourceID: n.SourceID, SinkID: n.SinkID, RuntimeID: n.RuntimeID, DesiredState: "paused",
+		Labels: labels, SourceID: n.SourceID, SinkID: n.SinkID, RuntimeID: n.RuntimeID, DesiredState: "paused", Engine: string(eng),
 		Status: db.Map{"lifecycle": "draft", "health": "unknown", "summary": "Not deployed yet."}, Lifecycle: "draft",
 		Health: "unknown", Artifacts: db.Map{}, Version: 1, CreatedByID: &a.Principal.User.ID, CreatedAt: now, UpdatedAt: now}
 	if err := db.Insert(ctx, q, "pipelines", p); err != nil {
@@ -405,10 +432,64 @@ type PipelineEdit struct {
 	Labels                   map[string]string
 	LabelsSet                bool
 	RuntimeID, SinkID        *uuid.UUID
-	Note                     string
+	// Engine is a requested engine; nil keeps the current one while it still runs the pipeline.
+	Engine *string
+	Note   string
 	// Separate always starts a new version (a change that must be its own, like a Debezium image
 	// move), instead of updating the caller's working draft.
 	Separate bool
+}
+
+// nextEngine is the engine a pipeline has after an edit: the requested one, or the current one
+// while it still runs the (new) destination, else the pair's default. A deployed pipeline keeps
+// its engine; the spec must hold only settings of that engine.
+func nextEngine(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, e PipelineEdit) (engine.ID, error) {
+	current := EngineOf(p)
+	sinkID := p.SinkID
+	if e.SinkID != nil {
+		sinkID = e.SinkID
+	}
+	requested := ""
+	if e.Engine != nil {
+		requested = *e.Engine
+	}
+	id := current
+	sinkChanged := e.SinkID != nil && (p.SinkID == nil || *e.SinkID != *p.SinkID)
+	if requested != "" || sinkChanged {
+		sourceType, err := connectionType(ctx, q, &p.SourceID)
+		if err != nil {
+			return "", err
+		}
+		sinkType, err := connectionType(ctx, q, sinkID)
+		if err != nil {
+			return "", err
+		}
+		if id, err = ChooseEngine(ctx, q, requested, p.Engine, sourceType, sinkType); err != nil {
+			return "", err
+		}
+	}
+	if id != current {
+		if p.DeployedVersionID != nil {
+			return "", problem.Conflict("engine_after_deploy", "The engine of a deployed pipeline can't change. Create a new pipeline.", nil)
+		}
+		if err := enforceEnginePolicy(ctx, q, a.Project.ID, id); err != nil {
+			return "", err
+		}
+	}
+	spec := e.Spec
+	if spec == nil && id != current {
+		if spec, err := SpecOf(ctx, q, p.CurrentVersionID); err != nil {
+			return "", err
+		} else if spec != nil {
+			return id, ValidateEngineSpec(id, *spec)
+		}
+	}
+	if spec != nil {
+		if err := ValidateEngineSpec(id, *spec); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
 }
 
 // UpdatePipeline applies an edit; returns the version holding the spec when it changed: the
@@ -419,13 +500,17 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		return nil, problem.New(412, "version_conflict", "Someone else changed this pipeline. Reload and try again.").
 			WithExtra(map[string]any{"current_version": p.Version})
 	}
+	eng, err := nextEngine(ctx, q, a, p, e)
+	if err != nil {
+		return nil, err
+	}
 	var created *models.PipelineVersion
 	if e.Spec != nil {
 		sinkID := p.SinkID
 		if e.SinkID != nil {
 			sinkID = e.SinkID
 		}
-		if err := ValidateSinkSpec(ctx, q, a.Project.ID, sinkID, *e.Spec); err != nil {
+		if err := ValidateSinkSpec(ctx, q, a.Project.ID, sinkID, *e.Spec, eng); err != nil {
 			return nil, err
 		}
 		current, err := VersionOf(ctx, q, p.CurrentVersionID)
@@ -500,6 +585,7 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		}
 		p.RuntimeID = e.RuntimeID
 	}
+	p.Engine = string(eng)
 	p.Version++
 	if err := SavePipeline(ctx, q, p); err != nil {
 		return nil, err
@@ -508,7 +594,7 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 	if created != nil {
 		summary += fmt.Sprintf(" → v%d", created.Number)
 	}
-	_, err := Record(ctx, q, AuditEvent{Kind: "pipeline.updated", Summary: summary, ProjectID: &a.Project.ID, Principal: a.Principal,
+	_, err = Record(ctx, q, AuditEvent{Kind: "pipeline.updated", Summary: summary, ProjectID: &a.Project.ID, Principal: a.Principal,
 		ResourceType: "pipeline", ResourceID: &p.ID})
 	return created, err
 }
@@ -520,8 +606,14 @@ func CompileFor(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 	if err != nil {
 		return nil, err
 	}
+	flink := EngineOf(p) == engine.FlinkCDC
 	if image == "" {
-		if image, err = ResolveImage(ctx, q, spec, rt, sink.Type); err != nil {
+		if flink {
+			image, err = ResolveFlinkImage(ctx, q, spec)
+		} else {
+			image, err = ResolveImage(ctx, q, spec, rt, sink.Type)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -536,6 +628,17 @@ func CompileFor(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 	snk, err := Resolve(ctx, q, sink)
 	if err != nil {
 		return nil, err
+	}
+	if flink {
+		in, err := flinkInput(ctx, q, p, spec, rt)
+		if err != nil {
+			return nil, err
+		}
+		f, err := compiler.CompileFlink(cctx, src, snk, image, *in)
+		if err != nil {
+			return nil, err
+		}
+		return compiler.FromFlink(f), nil
 	}
 	return compiler.Compile(cctx, src, snk, image)
 }
@@ -584,6 +687,12 @@ func WorkloadFor(ctx context.Context, q db.Querier, p *models.Pipeline) (*runtim
 	if files == nil {
 		files = map[string]string{}
 	}
+	if c.Flink != nil {
+		return &runtime.Workload{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Image: c.Image, Env: c.Env, Files: files,
+			ConfigHash: c.ConfigHash(), Running: p.DesiredState == "running", ImagePullSecrets: pull, ServiceAccount: sa, Tunnel: c.Tunnel,
+			HealthPort: c.HealthPort, Engine: string(engine.FlinkCDC), Flink: c.Flink.Topology(config.Get().AgentImage),
+			StopGraceSeconds: compiler.FlinkStopGrace}, nil
+	}
 	return &runtime.Workload{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Image: c.Image, Properties: c.Render(),
 		Env: c.Env, Files: files, ConfigHash: c.ConfigHash(), CPU: fmt.Sprint(c.Resources["cpu"]), Memory: fmt.Sprint(c.Resources["memory"]),
 		Heap: fmt.Sprint(c.Resources["heap"]), Running: p.DesiredState == "running", ImagePullSecrets: pull, ServiceAccount: sa, Tunnel: c.Tunnel,
@@ -612,19 +721,22 @@ func toFloat(v any) float64 {
 
 // CapacityCheck warns when a runtime has no room for the pipeline's size.
 func CapacityCheck(capacity map[string]any, resources string) *checks.Check {
+	return capacityCheck(capacity, cpuOf(compiler.Resources[resources].CPU), "")
+}
+
+func capacityCheck(capacity map[string]any, need float64, what string) *checks.Check {
 	if len(capacity) == 0 || toFloat(capacity["cpu_allocatable"]) == 0 {
 		return nil
 	}
-	need := cpuOf(compiler.Resources[resources].CPU)
 	free := toFloat(capacity["cpu_allocatable"]) - toFloat(capacity["cpu_requested"])
 	needS := strconv.FormatFloat(need, 'g', -1, 64)
 	if free < need {
 		return &checks.Check{Code: "runtime_capacity", Title: "Runtime capacity", Category: checks.CatCapacity, Status: checks.Warn,
-			Message: fmt.Sprintf("The runtime has %s free CPU; this pipeline asks for %s.", domain.FormatFixed(max(free, 0), 1), needS),
+			Message: fmt.Sprintf("The runtime has %s free CPU; this pipeline asks for %s%s.", domain.FormatFixed(max(free, 0), 1), needS, what),
 			Why:     "The connector may stay pending until resources free up."}
 	}
 	return &checks.Check{Code: "runtime_capacity", Title: "Runtime capacity", Category: checks.CatCapacity, Status: checks.Pass,
-		Message: fmt.Sprintf("%s CPU free; this pipeline needs %s.", domain.FormatFixed(free, 1), needS)}
+		Message: fmt.Sprintf("%s CPU free; this pipeline needs %s%s.", domain.FormatFixed(free, 1), needS, what)}
 }
 
 func runtimeReport(ctx context.Context, q db.Querier, rt *models.Runtime) checks.Report {
@@ -740,7 +852,11 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		{Key: "sink", Title: "Destination · " + sinkConn.Name + agentNote(sinkAgent), Report: sinkReport},
 		{Key: "runtime", Title: "Runtime · " + rt.Name, Report: rtReport},
 	}
-	if c := CapacityCheck(rt.Capacity, spec.Policies.Resources); c != nil {
+	capacity := CapacityCheck(rt.Capacity, spec.Policies.Resources)
+	if EngineOf(p) == engine.FlinkCDC {
+		capacity = FlinkCapacityCheck(rt.Capacity, spec.Policies.Resources)
+	}
+	if c := capacity; c != nil {
 		// Appended after summarizing, like the Python report (no doc link, summary unchanged).
 		sections[2].Report.Checks = append(sections[2].Report.Checks, *c)
 	}
@@ -762,6 +878,9 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		destinations = compiled.Destinations
 		cfgCheck = checks.Check{Code: "config_valid", Title: "Configuration", Category: checks.CatDestination, Status: checks.Pass,
 			Message: fmt.Sprintf("Generated %d Debezium Server properties.", len(compiled.Properties))}
+		if compiled.Flink != nil {
+			cfgCheck.Message = fmt.Sprintf("Generated the Flink CDC pipeline: %d tables on %d readers.", len(compiled.Destinations), compiled.Flink.Size.Parallelism())
+		}
 	case errors.As(err, &prob):
 		var msgs []string
 		for _, e := range prob.Errors {
@@ -774,11 +893,21 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		return nil, err
 	}
 	configChecks := []checks.Check{cfgCheck}
-	image, err := ResolveImage(ctx, q, spec, rt, sinkConn.Type)
+	flink := EngineOf(p) == engine.FlinkCDC
+	var image string
+	if flink {
+		image, err = ResolveFlinkImage(ctx, q, spec)
+	} else {
+		image, err = ResolveImage(ctx, q, spec, rt, sinkConn.Type)
+	}
 	if err != nil {
 		return nil, err
 	}
-	standing, err := Standing(ctx, q, image)
+	catalog := "Debezium"
+	if flink {
+		catalog = "Flink CDC"
+	}
+	standing, err := StandingFor(ctx, q, EngineOf(p), image)
 	if connectors.InSinkImageFamily(sinkConn.Type, image) {
 		// The sink's own build is never in the catalog of official images.
 		standing = "offered"
@@ -788,17 +917,17 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	}
 	switch standing {
 	case "deprecated":
-		configChecks = append(configChecks, checks.Check{Code: "debezium_image_deprecated", Title: "Debezium version", Category: checks.CatDestination,
-			Status: checks.Warn, Message: image + " is deprecated in the Debezium version catalog.",
+		configChecks = append(configChecks, checks.Check{Code: "debezium_image_deprecated", Title: catalog + " version", Category: checks.CatDestination,
+			Status: checks.Warn, Message: image + " is deprecated in the " + catalog + " version catalog.",
 			Why: "Your Admins marked this image deprecated; move to one they offer."})
 	case "unlisted":
-		configChecks = append(configChecks, checks.Check{Code: "debezium_image_unlisted", Title: "Debezium version", Category: checks.CatDestination,
-			Status: checks.Warn, Message: image + " is not in the Debezium version catalog.",
-			Why: "Your Admins keep a catalog of tested Debezium Server images; this one is not among them."})
+		configChecks = append(configChecks, checks.Check{Code: "debezium_image_unlisted", Title: catalog + " version", Category: checks.CatDestination,
+			Status: checks.Warn, Message: image + " is not in the " + catalog + " version catalog.",
+			Why: "Your Admins keep a catalog of tested " + catalog + " images; this one is not among them."})
 	}
 	srcDesc, _ := connectors.Describe("source", sourceConn.Type)
 	sinkDesc, _ := connectors.Describe("sink", sinkConn.Type)
-	if c := MinimumDebeziumCheck(image, srcDesc); c != nil {
+	if c := MinimumDebeziumCheck(image, srcDesc); c != nil && !flink {
 		configChecks = append(configChecks, *c)
 	}
 	if spec.Policies.DeliveryCanary && !(srcDesc != nil && srcDesc.SupportsCanary && sinkDesc != nil && sinkDesc.Canary) {
@@ -823,9 +952,16 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	configChecks = append(configChecks, personalDataChecks(ctx, srcDesc, discover, spec)...)
 	if sinkDesc != nil && compiled != nil {
 		cctx := connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec}
-		configChecks = append(configChecks, sinkChecks(ctx, sink, sinkDesc, cctx, compiled.Destinations, discover)...)
+		configChecks = append(configChecks, sinkChecks(ctx, sink, sinkDesc, cctx, compiled.Destinations, discover, flink)...)
 	}
 	sections = append(sections, PreflightSection{Key: "config", Title: "Configuration", Report: checks.Summarize(configChecks, started)})
+	if flink {
+		engineChecks, err := FlinkChecks(ctx, q, p, spec, rt, sourceConn, discover)
+		if err != nil {
+			return nil, err
+		}
+		sections = append(sections, PreflightSection{Key: "engine", Title: "Flink CDC", Report: checks.Summarize(engineChecks, started)})
+	}
 	policy, err := PolicyChecks(ctx, q, p, spec)
 	if err != nil {
 		return nil, err
@@ -919,7 +1055,7 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 	if err != nil {
 		return nil, nil, err
 	}
-	image, err := ResolveImage(ctx, q, domain.MustSpec(map[string]any(v.Spec)), rt, sinkType)
+	image, err := ResolvePipelineImage(ctx, q, p, domain.MustSpec(map[string]any(v.Spec)), rt, sinkType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1057,8 +1193,19 @@ func Enqueue(ctx context.Context, q db.Querier, kind string, p *models.Pipeline,
 	return j, db.Insert(ctx, q, "jobs", j)
 }
 
-// ResetOffsets resets the stored position of a paused pipeline.
-func ResetOffsets(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, mode string) (map[string]any, error) {
+// ResetOffsets resets the stored position of a paused pipeline. fromMS is the start of mode
+// "from_time" (Flink CDC on MySQL or SQL Server).
+func ResetOffsets(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, mode string, fromMS int64) (map[string]any, error) {
+	if EngineOf(p) == engine.FlinkCDC {
+		if err := requireStoppedFlink(ctx, q, p); err != nil {
+			return nil, err
+		}
+		return resetFlink(ctx, q, a, p, mode, fromMS)
+	}
+	if mode == "from_time" {
+		caps := engine.CapsFor(engine.Debezium, "")
+		return nil, problem.New(422, "engine_unsupported", caps.Why["start_from_time"])
+	}
 	if p.DeployedVersionID == nil {
 		return nil, problem.Conflict("not_deployed", "The pipeline has never run; there is no position to reset.", nil)
 	}

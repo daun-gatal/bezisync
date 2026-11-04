@@ -11,13 +11,14 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 )
 
 // ValidateSinkSpec checks what the Destination step saves against the sink's capabilities:
 // its options, naming and event format. Transform steps are checked when the workload is
 // compiled (preflight), so changing the destination never needs a later step fixed first.
-func ValidateSinkSpec(ctx context.Context, q db.Querier, projectID uuid.UUID, sinkID *uuid.UUID, spec domain.PipelineSpec) error {
+func ValidateSinkSpec(ctx context.Context, q db.Querier, projectID uuid.UUID, sinkID *uuid.UUID, spec domain.PipelineSpec, eng engine.ID) error {
 	if sinkID == nil {
 		return nil
 	}
@@ -32,8 +33,10 @@ func ValidateSinkSpec(ctx context.Context, q db.Querier, projectID uuid.UUID, si
 	if _, err := d.Sink.Options(spec.Sink.Options); err != nil {
 		return err
 	}
-	if _, err := d.Sink.EventFormat(d.Title, spec.Sink.Format.Type); err != nil {
-		return err
+	if eng == engine.Debezium { // Flink CDC writes tables: there is no event format
+		if _, err := d.Sink.EventFormat(d.Title, spec.Sink.Format.Type); err != nil {
+			return err
+		}
 	}
 	return d.Sink.CheckNaming(d.Title, spec.Sink.Naming)
 }
@@ -83,9 +86,9 @@ func personalDataChecks(ctx context.Context, desc *connectors.Descriptor, discov
 // sinkChecks are preflight's pipeline-level destination checks: the connector size the sink
 // needs, and the sink's own checks on the captured tables (keys, existing destinations).
 func sinkChecks(ctx context.Context, sink connectors.Resolved, desc *connectors.Descriptor, cctx connectors.CompileContext,
-	destinations map[string]string, discover *discoverOnce) []checks.Check {
+	destinations map[string]string, discover *discoverOnce, flink bool) []checks.Check {
 	var out []checks.Check
-	if min := desc.Sink.MinResources; min != "" && connectors.ResourceRank(cctx.Spec.Policies.Resources) < connectors.ResourceRank(min) {
+	if min := desc.Sink.MinResources; min != "" && !flink && connectors.ResourceRank(cctx.Spec.Policies.Resources) < connectors.ResourceRank(min) {
 		out = append(out, checks.Check{Code: "sink_resources", Title: "Connector size", Category: checks.CatResilience, Status: checks.Fail,
 			Blocking: true, Message: fmt.Sprintf("%s needs at least the %s connector size.", desc.Title, min),
 			Why: "Smaller connectors run out of memory while the destination buffers its writes.",
@@ -99,7 +102,7 @@ func sinkChecks(ctx context.Context, sink connectors.Resolved, desc *connectors.
 	if err != nil {
 		return out
 	}
-	facts := connectors.PipelineFacts{Destinations: destinations, Options: options}
+	facts := connectors.PipelineFacts{Destinations: destinations, Options: options, FlinkCDC: flink}
 	if found, err := discover.get(ctx); err == nil {
 		for _, t := range found.Tables {
 			if contains(cctx.Spec.Source.Tables.Include, t.Identifier()) {

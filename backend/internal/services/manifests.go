@@ -55,7 +55,7 @@ func ExportPipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 			rtName = &r.Name
 		}
 	}
-	return domain.ToDocument(p.Name, a.Project.Slug, p.Description, p.Owner, p.LabelMap(), source.Name, sinkName, rtName, *spec), nil
+	return domain.ToDocument(p.Name, a.Project.Slug, p.Description, p.Owner, p.LabelMap(), source.Name, sinkName, rtName, *spec, p.Engine), nil
 }
 
 // FindConnectionByName finds a project connection by name and kind.
@@ -174,8 +174,9 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 	if existing != nil && existing.SourceID != *sourceID {
 		return nil, problem.Conflict("source_changed", fmt.Sprintf("Pipeline %s reads from another source; the source cannot change.", parsed.Name), nil)
 	}
+	engineChanged := existing != nil && parsed.Engine != "" && parsed.Engine != existing.Engine
 	metaChanged := existing != nil && (existing.Description != parsed.Description || existing.Owner != parsed.Owner ||
-		!labelsEqual(existing.Labels, parsed.Labels) || uuidChanged(existing.SinkID, sinkID) || uuidChanged(existing.RuntimeID, runtimeID))
+		!labelsEqual(existing.Labels, parsed.Labels) || uuidChanged(existing.SinkID, sinkID) || uuidChanged(existing.RuntimeID, runtimeID) || engineChanged)
 	if o.DryRun {
 		action := "would_create"
 		var id *uuid.UUID
@@ -192,7 +193,7 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 	action := "unchanged"
 	if existing == nil {
 		if p, err = CreatePipeline(ctx, q, a, NewPipeline{Name: parsed.Name, Description: parsed.Description, Owner: parsed.Owner,
-			Labels: parsed.Labels, SourceID: *sourceID, SinkID: sinkID, RuntimeID: runtimeID, Spec: parsed.Spec}); err != nil {
+			Labels: parsed.Labels, SourceID: *sourceID, SinkID: sinkID, RuntimeID: runtimeID, Spec: parsed.Spec, Engine: parsed.Engine}); err != nil {
 			return nil, err
 		}
 		action = "created"
@@ -201,8 +202,12 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 		if len(diff) > 0 || metaChanged {
 			spec := parsed.Spec
 			desc, owner := parsed.Description, parsed.Owner
-			if _, err := UpdatePipeline(ctx, q, a, p, PipelineEdit{ExpectedVersion: p.Version, Spec: &spec, Description: &desc, Owner: &owner,
-				Labels: parsed.Labels, LabelsSet: true, RuntimeID: runtimeID, SinkID: sinkID, Note: o.Note}); err != nil {
+			edit := PipelineEdit{ExpectedVersion: p.Version, Spec: &spec, Description: &desc, Owner: &owner,
+				Labels: parsed.Labels, LabelsSet: true, RuntimeID: runtimeID, SinkID: sinkID, Note: o.Note}
+			if engineChanged {
+				edit.Engine = &parsed.Engine
+			}
+			if _, err := UpdatePipeline(ctx, q, a, p, edit); err != nil {
 				return nil, err
 			}
 			action = "updated"

@@ -16,12 +16,16 @@
   "Redis Streams",
   "NATS JetStream",
   "Apache Iceberg",
+  "StarRocks",
+  "Apache Doris",
+  "Apache Fluss",
   "Database (JDBC)",
   "Amazon SQS",
   "Amazon SNS",
   "Azure Event Hubs",
   "Apache Pulsar",
   "Deploy",
+  "Flink CDC",
   "Secret stores",
   "Project policies"
  ],
@@ -1981,6 +1985,17 @@
    ]
   },
   {
+   "code": "policy_engine",
+   "fixes": [],
+   "section": "Project policies",
+   "titles": [
+    "Engine"
+   ],
+   "whys": [
+    "This project does not allow pipelines on {engine}."
+   ]
+  },
+  {
    "code": "policy_snapshot_mode",
    "fixes": [
     "Pick an allowed snapshot mode in the pipeline settings."
@@ -2742,6 +2757,304 @@
    "whys": [
     "Some sources need a recent Debezium Server: CockroachDB's sinkless changefeed arrived in Debezium 3.7. Blocks for an older official image; warns for a custom image whose release BeziSync can't read."
    ]
+  },
+  {
+   "code": "flink_agent_version",
+   "section": "Flink CDC",
+   "titles": [
+    "Agent version"
+   ],
+   "whys": [],
+   "fixes": [
+    "Upgrade the agent to BeziSync 0.3.0 or later (Settings → Runtimes shows the install command)."
+   ]
+  },
+  {
+   "code": "flink_kubernetes_services",
+   "section": "Flink CDC",
+   "titles": [
+    "Kubernetes Services"
+   ],
+   "whys": [],
+   "fixes": [
+    "# The runtime's Role (both BeziSync charts from 0.2.0 grant it)\n- apiGroups: [\"\"]\n  resources: [configmaps, secrets, services]\n  verbs: [get, list, create, update, patch, delete]"
+   ]
+  },
+  {
+   "code": "flink_tables_unknown",
+   "section": "Flink CDC",
+   "titles": [
+    "Tables for Flink CDC"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "flink_primary_key",
+   "section": "Flink CDC",
+   "titles": [
+    "Primary keys"
+   ],
+   "whys": [],
+   "fixes": [
+    "Pick key columns for these tables in the Tables step, or add a primary key in the database."
+   ]
+  },
+  {
+   "code": "flink_replica_identity",
+   "section": "Flink CDC",
+   "titles": [
+    "Whole-row changes"
+   ],
+   "whys": [
+    "PostgreSQL logs the old row of an update only with REPLICA IDENTITY FULL. It makes the WAL larger for these tables."
+   ],
+   "fixes": [
+    "ALTER TABLE \"{schema}\".\"{table}\" REPLICA IDENTITY FULL;"
+   ]
+  },
+  {
+   "code": "flink_server_ids",
+   "section": "Flink CDC",
+   "titles": [
+    "MySQL server ids"
+   ],
+   "whys": [],
+   "fixes": [
+    "Create this pipeline again: a new pipeline gets other server ids."
+   ]
+  },
+  {
+   "code": "starrocks_config",
+   "section": "StarRocks",
+   "titles": [
+    "Settings"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "starrocks_network_reachable",
+   "section": "StarRocks",
+   "titles": [
+    "Reach the StarRocks FE (MySQL protocol)"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "starrocks_network_unreachable",
+   "section": "StarRocks",
+   "titles": [
+    "Reach the StarRocks FE (MySQL protocol)"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "starrocks_network_blocked",
+   "section": "StarRocks",
+   "titles": [
+    "Reach the StarRocks FE (MySQL protocol)"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "starrocks_http_reachable",
+   "section": "StarRocks",
+   "titles": [
+    "Reach the StarRocks FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "starrocks_http_unreachable",
+   "section": "StarRocks",
+   "titles": [
+    "Reach the StarRocks FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "starrocks_http_blocked",
+   "section": "StarRocks",
+   "titles": [
+    "Reach the StarRocks FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "starrocks_login",
+   "section": "StarRocks",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "starrocks_create_table",
+   "section": "StarRocks",
+   "titles": [
+    "Create tables"
+   ],
+   "whys": [],
+   "fixes": [
+    "GRANT CREATE DATABASE ON CATALOG default_catalog TO USER '{user}';\nGRANT ALL ON DATABASE {database} TO USER '{user}';\nGRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';"
+   ]
+  },
+  {
+   "code": "doris_config",
+   "section": "Apache Doris",
+   "titles": [
+    "Settings"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "doris_network_reachable",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (MySQL protocol)"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_network_unreachable",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (MySQL protocol)"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_network_blocked",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (MySQL protocol)"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_http_reachable",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_http_unreachable",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_http_blocked",
+   "section": "Apache Doris",
+   "titles": [
+    "Reach the Doris FE (HTTP, Stream Load)"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "doris_login",
+   "section": "Apache Doris",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "doris_create_table",
+   "section": "Apache Doris",
+   "titles": [
+    "Create tables"
+   ],
+   "whys": [],
+   "fixes": [
+    "GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{database}.* TO '{user}'@'%';"
+   ]
+  },
+  {
+   "code": "fluss_config",
+   "section": "Apache Fluss",
+   "titles": [
+    "Settings"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "fluss_network_reachable",
+   "section": "Apache Fluss",
+   "titles": [
+    "Reach the Fluss coordinator"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "fluss_network_unreachable",
+   "section": "Apache Fluss",
+   "titles": [
+    "Reach the Fluss coordinator"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "fluss_network_blocked",
+   "section": "Apache Fluss",
+   "titles": [
+    "Reach the Fluss coordinator"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
   }
  ]
 }

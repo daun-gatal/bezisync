@@ -1,7 +1,7 @@
 # BeziSync threat model
 
 Scope: a self-hosted BeziSync 1.0 install (API, controller, web, agents) and the Debezium
-Server workloads it starts. This document lists what we protect, where trust changes, the
+Server and Flink CDC workloads it starts. This document lists what we protect, where trust changes, the
 threats we considered (STRIDE), the controls that exist in the code today, and the risks
 operators must handle themselves. Report vulnerabilities privately (see `SECURITY.md`).
 
@@ -16,6 +16,7 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
 | Runtime access (Kubernetes ServiceAccount, Docker socket, agents) | Chart RBAC, controller host, agent hosts | Code execution where connectors run |
 | Source health (WAL / binlog / oplog retention) | Replication slots and readers on the source | A stuck pipeline can fill a production disk |
 | Audit log | `events` table | Accountability, compliance |
+| Flink CDC saved positions | State database, `flink_state_<id>` (AES-256-GCM with a per-pipeline key that is itself stored under the master key) | Where a pipeline resumes; source positions and copy progress |
 
 ## Trust boundaries
 
@@ -29,7 +30,11 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
    for remote runtimes an **agent dials out** with a `bza_…` token, so no inbound access is
    needed to the runtime.
 5. **API ↔ identity provider** — OpenID Connect (authorization code + PKCE).
-6. **Connector ↔ state database** — Debezium JDBC offset / schema-history store.
+6. **Connector ↔ state database** — Debezium JDBC offset / schema-history store; for Flink CDC,
+   BeziSync's helper in the JobManager stores the encrypted saved positions.
+7. **JobManager ↔ TaskManagers** (Flink CDC) — Flink's internal RPC and data traffic over mutual
+   TLS with a per-pipeline keystore; Flink's REST API listens on loopback only; the helper's port
+   answers health and job status only.
 
 ## Threats and controls
 
@@ -52,6 +57,8 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
 | Spoofing | Rogue agent | Per-runtime random token, stored hashed, rotation invalidates the old one immediately; agents only receive their own runtime's workloads |
 | Tampering | Changing a pipeline behind someone's back | Optimistic concurrency (`If-Match`), immutable versions, full audit trail; optional four-eyes approval per project |
 | Tampering | Overriding managed Debezium properties (offset store, slot, credentials, the transform chain) | `advanced` properties are rejected when they match managed patterns; `debezium.transforms*` and `debezium.predicates*` are managed, so BeziSync's own filter (heartbeat and signal records) and routing always stay in the chain and every step goes through the spec |
+| Tampering | Injection into a Flink CDC pipeline definition (YAML, transform expressions, Flink settings) | Every value in `pipeline.yaml` is a quoted scalar; names are back-quoted identifiers and filter values escaped literals built from typed rules (no free expressions); secrets stay `${BZ_…}` placeholders that the helper fills with quoted values at start; Flink settings come from a fixed catalogue with ranges, and the keys BeziSync sets (state, security, addresses) can't be overridden |
+| Information disclosure | Credentials or saved positions of a Flink CDC pipeline leaking from its cluster | Credentials reach only the JobManager (environment and secret files; TaskManagers get none in their environment) and travel inside the job over mutual TLS; keystore passwords sit in a private settings file, never in logs; saved positions are encrypted before they leave the pod; the helper is copied from BeziSync's own image at start, not taken from the Flink CDC image |
 | Repudiation | "Who deployed this?" | Every mutation is an audit event (actor, summary, details, request ID); forced deploys record the skipped checks and the reason; export to CSV / JSON Lines |
 | Information disclosure | Secrets in API responses, logs or check messages | Write-only secret fields (only `secret_fields_set` / `secret_refs` returned), secret values scrubbed from check messages, secrets rendered as `${ENV}` in configs, a canary-secret test asserts no leak |
 | Information disclosure | Personal data reaching destinations | Per-pipeline choices: columns that look like personal data are masked (salted, per-pipeline hash) or removed as soon as their table is picked; "Keep as is" is an explicit, versioned choice. Preflight blocks a mask Debezium can't apply (non-text columns, MongoDB, Spanner) so a "masked" column never leaks; Spanner removes columns by leaving them out of BeziSync's change stream and refuses removal it can't enforce (a user's own stream), warns about undecided personal-data columns, and new ones show in schema changes; event previews need `pipeline.preview_data` and mask PII-looking keys |
@@ -112,6 +119,15 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   default plus signals between a container's own processes; its privileged DaemonSet in
   `kube-system` loads it at every boot and it runs the host's `apparmor_parser` through a mount of
   the host's root, so treat its manifest and image like node configuration.
+- **Unencrypted Flink CDC destinations.** StarRocks and Doris load over HTTP Stream Load and are
+  checked over the MySQL protocol without TLS, and Fluss documents no TLS for Flink CDC: rows and
+  credentials cross the network in plain text. Keep them and the runtime on a private network.
+  Their connection checks create and drop a test table (StarRocks, Doris).
+- **Flink CDC images.** BeziSync publishes no Flink CDC image: Admins build one (the guide lists
+  what it holds; pin the Flink base by digest and every download by checksum) and register it; it holds the source and destination credentials at run time. Flink CDC's connector
+  JARs bundle libraries with published vulnerabilities that only a Flink CDC release can update
+  (the StarRocks connector, for one, carries MySQL Connector/J 5.1.49): scan the image you build.
+  A newer MySQL Connector/J (for MySQL/MariaDB sources) is in an image only if its builder adds it.
 - **Unencrypted source connections.** Vitess's VStream gRPC (Debezium offers no TLS for it) and
   Oracle's listener traffic (BeziSync speaks plain TCP; enable Oracle Native Network Encryption on
   the server) are not TLS: keep them on a private network or behind the SSH bastion option.

@@ -1,7 +1,7 @@
 import type { Tone } from '@/components/ui/feedback';
 import { plural } from '@/components/ui/text';
 import { formatBytes } from '@/lib/format';
-import type { SourceImpact } from '@/lib/status';
+import type { FlinkStatus, SourceImpact } from '@/lib/status';
 import type { FullSpec, TransformType } from '../spec';
 import { METADATA, metadataField, summarize, summarizeValues, TYPE_TITLE } from '../transforms/model';
 
@@ -196,8 +196,9 @@ export interface Row {
 }
 
 /** The deployed spec as what consumers receive (output) and the steps that change events on the way. */
-export function transformView(spec: FullSpec): { output: Row[]; steps: Row[] } {
+export function transformView(spec: FullSpec, flink?: { sinkType?: string }): { output: Row[]; steps: Row[] } {
   const output: Row[] = [];
+  if (flink) return flinkTransformView(spec, flink.sinkType);
   const unwrap = spec.transforms.find((t) => t.type === 'unwrap');
   if (spec.transforms.some((t) => t.type === 'outbox')) {
     output.push({ icon: 'outbox', title: 'Outbox events', detail: 'Each row added to the outbox table becomes one message' });
@@ -239,6 +240,29 @@ export function transformView(spec: FullSpec): { output: Row[]; steps: Row[] } {
   return { output, steps };
 }
 
+/** A Flink CDC pipeline writes tables, not events: rows by key, columns left out, chosen keys. */
+function flinkTransformView(spec: FullSpec, sinkType?: string): { output: Row[]; steps: Row[] } {
+  const keepDeletes = sinkType === 'iceberg' && (spec.sink.options.write_mode ?? 'upsert_keep_deletes') === 'upsert_keep_deletes';
+  const output: Row[] = [{ icon: 'shape', title: 'Tables kept in sync', detail: 'Each row is written by its primary key' }];
+  output.push(
+    keepDeletes
+      ? { icon: 'delete', title: 'Deleted rows are kept', detail: 'Marked by their change type', code: ['__op = -D'] }
+      : { icon: 'delete', title: 'Deletes remove the row', detail: 'The destination mirrors the source' },
+  );
+  const removed = Object.values(spec.source.columns).reduce((n, r) => n + (r.exclude?.length ?? 0), 0);
+  if (removed) output.push({ icon: 'fields', title: removed === 1 ? 'One column left out' : `${removed} columns left out`, detail: 'Never written to the destination' });
+  const keys = Object.entries(spec.keys ?? {});
+  if (keys.length) {
+    output.push({
+      icon: 'key',
+      title: keys.length === 1 ? 'Chosen primary key' : `Chosen primary keys on ${plural(keys.length, 'table')}`,
+      detail: keys.map(([table, cols]) => `${table} by ${cols.join(', ')}`).join(' · '),
+    });
+  }
+  const steps = spec.transforms.filter((t) => t.type !== 'unwrap').map((t): Row => ({ icon: t.type, title: TYPE_TITLE[t.type], detail: summarize(t) }));
+  return { output, steps };
+}
+
 /** The latest value of a series (its last point, or null when that point is unknown). */
 export function latest(values: (number | null)[]): number | null {
   return values.length ? (values[values.length - 1] ?? null) : null;
@@ -252,4 +276,40 @@ export function formatLatency(ms: number): string {
   if (s < 60) return `${Number(s.toFixed(s < 10 ? 1 : 0))} s`;
   if (s < 3600) return `${Math.round(s / 60)} min`;
   return `${Number((s / 3600).toFixed(1))} h`;
+}
+
+/** A Flink CDC cluster in a few facts: the job, its TaskManagers, its saves and the first copy. */
+export interface FlinkView {
+  job: string;
+  taskmanagers: string | null;
+  saved: string | null;
+  restored: string | null;
+  copy: { table: string; chunks: number }[] | null;
+  problem: string | null;
+}
+
+const JOB_PHASE: Record<string, string> = {
+  starting: 'Starting Flink',
+  waiting: 'Waiting for TaskManagers',
+  submitting: 'Submitting the pipeline',
+  resubmitting: 'Submitting again after a start-up race',
+  running: 'Running',
+  restarting: 'Restarting after a failure',
+  stopping: 'Saving the position and stopping',
+  failed: 'Failed',
+  config_error: 'Can’t start: the image or settings',
+  finished: 'Finished (copy only)',
+};
+
+export function flinkView(f: FlinkStatus | undefined, agoOf: (iso: string) => string): FlinkView | null {
+  if (!f) return null;
+  const copying = f.phase === 'running' && !f.streaming;
+  return {
+    job: (JOB_PHASE[f.phase ?? ''] ?? f.phase ?? 'Unknown') + (f.phase === 'running' ? (f.streaming ? ' · streaming changes' : ' · copying existing rows') : ''),
+    taskmanagers: f.taskmanagers_wanted ? `${f.taskmanagers ?? 0} of ${f.taskmanagers_wanted} connected` : null,
+    saved: f.last_saved ? `${agoOf(f.last_saved.taken_at)}${f.checkpoints_failed ? ` · ${f.checkpoints_failed} failed saves` : ''}` : null,
+    restored: f.restored_from ? `#${f.restored_from.id}, saved ${agoOf(f.restored_from.taken_at)}` : null,
+    copy: copying && f.chunks ? Object.entries(f.chunks).map(([table, chunks]) => ({ table, chunks })).sort((a, b) => a.table.localeCompare(b.table)) : null,
+    problem: f.store_error ? `Saving positions failed: ${f.store_error}` : null,
+  };
 }

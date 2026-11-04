@@ -16,6 +16,8 @@ internal/
 ├── controller/       # leader-elected reconcile loop, jobs, uninstall
 ├── agent/            # `bezisync agent` (dials out; never listens)
 ├── connectors/       # sources and sinks (+ descriptors.json: their forms/validation schemas)
+├── engine/           # the engines (Debezium, Flink CDC): which source/destination pairs each runs, capabilities (pure)
+├── flinkhelper/      # `bezisync engine flink-cdc jobmanager|taskmanager`: runs inside a Flink CDC pipeline's containers
 ├── compiler/         # spec + resolved connections → application.properties + env (pure)
 ├── runtime/          # Docker and Kubernetes drivers (+ GKE/EKS auth)
 ├── secrets/          # external secret store clients (Vault, AWS, GCP, Kubernetes)
@@ -167,6 +169,149 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   connector shares. MongoDB is excluded.
 
 ## Pipelines, compiler, runtimes, controller
+- Engines (`internal/engine`): a pipeline runs on Debezium Server or Flink CDC. `engine.Supports`
+  and `engine.Choices` say which engines can run a source/destination pair (Flink CDC: MySQL/MariaDB,
+  PostgreSQL and SQL Server into Iceberg, StarRocks, Doris and Fluss; StarRocks, Doris and Fluss are
+  Flink CDC only); `engine.Default` is Debezium wherever it can run. `engine.CapsFor` is what an
+  engine can do (edit offsets, copy a table again, saved positions, event formats…), with `Why` for
+  every unavailable action. Capabilities always come from the engine, never from the destination
+  type; a source's own `capture` limits still apply on top.
+- A pipeline's engine is stored on its row (`pipelines.engine`, `services.ChooseEngine`): chosen with
+  the destination (the requested one, else the current one while it still runs the pair, else the
+  default), fixed once deployed (`engine_after_deploy`). The spec's Flink CDC block (`flink_cdc`:
+  schema changes, new columns, freshness, commit interval, Flink settings) and `flink_cdc_image` are
+  refused on Debezium pipelines and `debezium_image` on Flink CDC ones (`ValidateEngineSpec`); on Flink
+  CDC, `keys` are the destination primary key of a table that has none. Both new spec fields are
+  dumped only when set, so existing specs and their hashes never change. Project policy
+  `allowed_engines` (`policy_engine`) limits engines. The image catalog (`debezium_images`, routes
+  `/debezium-catalog?engine=`) holds both engines' images with one default per engine; each engine's
+  install default comes from `BEZISYNC_DEBEZIUM_DEFAULT_IMAGE` / `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`.
+- Flink CDC is optional: `services.EngineAvailable` is false until a Flink CDC image is registered
+  (install default, empty by default, or a catalog image that is not deprecated); `ChooseEngine`
+  then never picks it (`engine_unavailable` with how to turn it on) and `GET /engines` reports it.
+  BeziSync publishes no Flink CDC image: Admins build and register their own. The layout it must
+  have (`flinkhelper.DefaultLayout`: `/opt/flink`, `/opt/flink-cdc/{lib,connectors,drivers}`, uid
+  9999) is documented in the guide (Flink CDC engine); change both together. A
+  `FlinkBlock`'s `Drivers` are JDBC drivers the image must add: the MySQL source needs `mysql`; the
+  StarRocks connector bundles its own (Connector/J 5.1.49), so it lists none. `NoDefaults`
+  (StarRocks, Doris) marks destinations that refuse the source column defaults Flink CDC copies
+  verbatim: discovery records `HasDefault` (never sent), deploy stores those columns in
+  `artifacts.flink_defaults`, and the compiler writes each as `CASE WHEN TRUE THEN col END` (an
+  expression carries no default; a plain or renamed column keeps it), so these destinations
+  require held-back new columns. BeziSync's helper is injected into each pipeline at start,
+  never baked into that image.
+- The helper (`internal/flinkhelper`, `bezisync engine flink-cdc ROLE`) runs in every container of a
+  Flink CDC pipeline; `bezisync install-self DIR` copies the binary in (the image holds only Flink).
+  Both roles link the image's Flink JARs, `flink-cdc-dist` and only the pipeline's connectors and
+  drivers into a lib dir in tmpfs (`FLINK_LIB_DIR`, with `classloader.resolve-order: parent-first`:
+  per-job `--jar` loading leaked Metaspace until TaskManagers died) and keep the image's
+  `config.yaml` (its JVM options); BeziSync's settings (`config/flink-conf.yaml`) are passed as
+  `-D key=value` pairs. The JobManager helper waits for its TaskManagers, restores the position named
+  in `settings.json` (`latest`, a stored id, or fresh), renders `pipeline.yaml`'s `${BZ_…}` secrets
+  into a 0600 temp file only for the submit, stores every completed checkpoint encrypted
+  (AES-256-GCM, `BZ_STATE_KEY`) in `debezium_state.flink_state_<id>` (newest 5 kept, 64 MB cap),
+  resubmits after Flink CDC's start-up schema-registry race (3 times), cancels and reports failures
+  that don't heal (renamed or missing destination tables, replica identity, transforms), serves
+  `/q/health` and `/bz/status`, and on SIGTERM stops with a canonical savepoint (`drain: false`) it
+  stores before exiting (falling back to the newest checkpoint).
+- Flink CDC on Docker (`runtime/docker_flink.go`, `Workload.Flink`): a private network
+  `bz-<id>-net` (the runtime's network is joined too), volumes `bz-<id>-opt` (the helper, copied by
+  a short-lived container from `Flink.HelperImage` running `install-self`; `config/` and `secrets/`
+  owned by uid 9999, secrets 0600) and `bz-<id>-state` (tmpfs, `StateSize`), the JobManager `bz-<id>`
+  (the only container with `Workload.Env`), TaskManagers `bz-<id>-tm-N` and the tunnel on the private
+  network as `bz-tunnel` (`tunnel --listen-host 0.0.0.0`). Every container has a read-only rootfs,
+  no capabilities and an exec tmpfs `/tmp`. A config-hash or TaskManager change stops the running
+  cluster first, then recreates it on a later Apply; stops run in the background, JobManager first
+  within `StopGraceSeconds` (it saves the position), and Observe reports them as pending. `LogsOf`
+  reads one component (`jobmanager`, `taskmanager-N`, `tunnel`).
+- Flink CDC on Kubernetes (`runtime/kubernetes_flink.go`): Deployments `bz-<id>` (JobManager, the
+  only one with the env Secret) and `bz-<id>-tm`, Service `bz-<id>-jm` (RPC 6123, blob 6124,
+  `publishNotReadyAddresses`), ConfigMap `bz-<id>` at `/opt/bezisync/config`, Secret `bz-<id>-files` at
+  `/opt/bezisync/secrets`. Each pod copies the helper in with an `install-helper` init container (a
+  streamed copy; 512Mi limit because the page cache counts), runs as uid 9999 with a read-only rootfs,
+  a memory emptyDir `/state` and, behind a bastion, its own tunnel sidecar reached as `bz-tunnel`
+  (hostAliases). Stopping or changing the cluster scales the JobManager to zero alone and touches the
+  TaskManagers only once its pod is gone (worked out from the cluster on every Apply, no state).
+  The runtime's Role needs `services` (both charts); `Test` reports `details.flink_cdc`.
+- Flink CDC compile (`compiler/flinkcdc.go`, `compiler/flinktransforms.go`, pure): `CompileFlink` renders
+  `pipeline.yaml` (sources and destinations implement `connectors.FlinkSource` / `FlinkSink`; every value
+  is a JSON-quoted YAML scalar and secrets are bare `${BZ_…}` placeholders the helper fills as quoted
+  scalars), `flink-conf.yaml` (BeziSync's keys first, then `engine.FlinkDefaults` and the pipeline's
+  catalogue keys, `engine.FlinkSettings`, which never include anything BeziSync depends on) and
+  `settings.json`. Internal TLS uses the pipeline's ECDSA keystore, so the ECDHE-ECDSA suites are set;
+  its passwords go in the secret file `flink-secrets.conf`, which the helper appends to its private
+  `config.yaml` (never a `-D`: the JVM logs its arguments). Sizes (`engine.FlinkSizes`): parallelism
+  = TaskManagers × 2 slots; managed memory defaults to 5% (the heap state backend never uses it, and
+  Flink's 40% ran a 2 GB TaskManager out of heap on a 2.6M-row copy). Tables are written column by
+  column (exact projection) when new columns are held back, columns are left out or renamed; their
+  columns are read at deploy into `artifacts.flink_columns` (`RefreshFlinkColumns`, in
+  `prepareIfNeeded`) and live only for tables the artifact lacks (previews). Hash masks, scripted
+  filters, outbox, flatten, custom steps, Debezium value formats, advanced properties, copy delays
+  and "copy on every start" are refused with the reason. MySQL server ids: `MyServerIDRange`, blocks
+  of 8 below 2^31 (Flink CDC reads them as signed 32-bit). SQL Server reads one database (the connection's) and names
+  events `database.schema.table`; options a source lacks are never set (Flink CDC rejects unknown
+  options: `heartbeat.interval` is MySQL's and PostgreSQL's). Table names are letters, digits and `_`
+  only (Flink CDC splits names at dots and reads them as regular expressions).
+- Flink CDC in the controller (`controller/flinkcdc.go`): evidence comes from the helper, `/q/health`
+  (UP once the job runs on every TaskManager) and `/bz/status`, mapped onto `domain.Metrics`
+  (connected while the job runs; copying until the source's log split, `binlog-split` or
+  `stream-split`, exists: `Status.Streaming`; lag from the readers' emit lag) and onto
+  `DeriveInput.EngineDown` (why it is down, replacing Debezium's log diagnosis; "health_down" while a
+  young pipeline starts, or within `DeployGrace` of the workload's start: a resume takes a minute). `status.flink` keeps the job, its saves, copy chunks per table and the
+  cluster's components. Delete also drops the saved positions; PostgreSQL cleanup drops inactive
+  `<slot>_<n>` copy slots. `ExpireSavedPositions` (retention tick) removes set-aside positions and
+  savepoints beyond the newest ten after a week unless kept.
+- Flink CDC preflight (`services/flinkchecks.go`, section "engine"): `flink_primary_key` (a key per
+  table, or picked key columns), `flink_replica_identity` (PostgreSQL REPLICA IDENTITY FULL: Flink CDC
+  fails on an update without the old row), `flink_server_ids` (MySQL: no other pipeline on the source
+  uses the block), `flink_agent_version`, `flink_kubernetes_services` (direct runtimes run `Test`;
+  agents send `local_test.flink_cdc`), and `runtime_capacity` counts the whole cluster
+  (`FlinkCapacityCheck`). The helper's `config_error` phase (an image without a connector or driver)
+  is reported with the helper's own fix.
+- Flink-only destinations (`engine.FlinkOnlySink`: StarRocks, Doris, Fluss) carry `engines:
+  ["flink-cdc"]` in their descriptor; `connector-types` adds `available`/`unavailable_reason` and
+  creating such a connection is refused (`engine_unavailable`) until Flink CDC is available. Their
+  `CompileSink` refuses Debezium. StarRocks and Doris (`connectors/olap.go` shares the check,
+  Rows view and cleanup; `starrocks.go`, `doris.go` hold what differs): checked and read over the
+  FE's MySQL protocol, written by Stream Load over HTTP (no TLS upstream: the forms say so). Doris
+  can load straight into listed BE nodes (`be_nodes`) when the FE's redirects are unreachable. Fluss
+  (`connectors/fluss.go`): BeziSync has no Fluss client, so its check is reachability, it is not
+  readable, and delete reports its tables as `retained` with the statement to drop them; SASL/PLAIN
+  sign-in only (no TLS documented upstream). A Flink CDC
+  pipeline resolves its image with `ResolvePipelineImage` (deploy) and is left out of the Debezium
+  versions usage and upgrades; the sink spec's event format is checked for Debezium only.
+- Iceberg on Flink CDC (`connectors/iceberg_flink.go`): the same REST/Glue connections; Iceberg 1.10
+  comes with the Flink CDC connector, its AWS SDK from `iceberg-aws-bundle` (reference image,
+  `settings.json` connector `iceberg-aws` via `FlinkBlock.Extra`). Storage and signing keys are
+  catalog properties with placeholders (the TaskManagers write the files and get no environment
+  secrets); Glue signs in with the runtime's role, so static keys are refused there. "Keep deleted
+  rows" (`upsert_keep_deletes`) is Flink CDC's `SOFT_DELETE` with `__op` = its change type
+  (`FlinkBlock.Projection`/`Converter` reach every table's transform); append and bucket partitions
+  are refused. Debezium's sizes, row-identity and partitioning checks are skipped
+  (`PipelineFacts.FlinkCDC`); the controller's latency target allows the commit interval. iceberg-go
+  applies the equality deletes Flink writes, so the Rows view is right.
+- Flink CDC for agents and scripts: MCP tools `list_engines`, `list_saved_positions`,
+  `restore_saved_position` (destructive, off by default), `engine` on `create_pipeline` /
+  `update_pipeline` / `add_debezium_catalog_image` / `get_debezium_catalog`, `from_time` on
+  `reset_pipeline_offsets`, `component` on `get_pipeline_logs`. Manifests carry `spec.engine` (written
+  only for Flink CDC, so Debezium manifests never change) and `flinkCdcImage`. The CLI adds
+  `remote pipelines positions|restore|start-over` (the last two need `--yes`) and an ENGINE column.
+- Agents and Flink CDC: agents advertise the `flink_cdc` feature (`runtime.FeatureFlinkCDC`). The poll
+  never hands a Flink CDC workload to an agent without it (an older agent would start it as a
+  Debezium container), and `AgentDriver.Apply` refuses it with the release to upgrade to
+  (`FlinkCDCAgentVersion`). For Flink CDC workloads agents report `/bz/status` as `status` (instead
+  of `metrics`) and the runtime's `details` (components); `logs` takes a `component`
+  (`runtime.ComponentLogs`).
+- The helper writes its own `log4j-console.properties` (console only): the image's would also write
+  rolling files, which a read-only rootfs refuses and tmpfs would hold in memory.
+- Control-plane side (`services/flinkcdc.go`): each Flink CDC pipeline's own secrets (state key,
+  TLS keystore shared by its JobManager and TaskManagers, PKCS#12 via `go-pkcs12`) are generated once
+  and sealed in `pipelines.engine_secrets_enc` (re-encrypted by `rotate-master-key`). Saved positions
+  are listed from the state database (`GET …/positions`); the helper resumes from the newest one above
+  `artifacts.flink_restore_after`. Restore (`POST …/positions/{id}/restore`, name typed, paused and
+  stopped) copies the chosen one above that floor; Start over (`offsets/reset`, also `from_time` for
+  MySQL/SQL Server) raises the floor and sets `artifacts.flink_startup` until the next deploy, moving a
+  PostgreSQL slot like Debezium's skip-to-now. Earlier positions stay listed (`current: false`).
 - `domain.PipelineSpec` is the contract (API body, YAML, wizard); it serialises in declaration order.
   One change is one `PipelineVersion`: while the current version is unsealed (`sealed_at` null) and
   the caller made it, `UpdatePipeline` updates it in place (wizard steps and autosave never pile up

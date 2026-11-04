@@ -16,6 +16,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 )
@@ -130,6 +131,9 @@ func Usage(ctx context.Context, q db.Querier, projectID uuid.UUID) ([]ImageUsage
 	}
 	for i := range pipelines {
 		p := &pipelines[i]
+		if EngineOf(p) != engine.Debezium {
+			continue // Debezium Server images only; Flink CDC images are listed by their engine
+		}
 		var rt *models.Runtime
 		if p.RuntimeID != nil {
 			if rt, err = GetRuntime(ctx, q, *p.RuntimeID); err != nil {
@@ -242,6 +246,10 @@ func ChangeImage(ctx context.Context, q db.Querier, a *auth.ProjectAccess, ids [
 				return nil, err
 			}
 			results = append(results, UpgradeResult{PipelineID: pid, Name: "?", Message: detail})
+			continue
+		}
+		if EngineOf(p) != engine.Debezium {
+			results = append(results, UpgradeResult{PipelineID: pid, Name: p.Name, Message: "It runs on Flink CDC, which has its own image."})
 			continue
 		}
 		current, err := SpecOf(ctx, q, p.CurrentVersionID)

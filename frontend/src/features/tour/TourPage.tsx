@@ -256,7 +256,7 @@ const TRY: { title: string; body: string; to: ProjectPath; cta: string; demo: Re
 ];
 
 const SOURCES = ['PostgreSQL', 'MySQL / MariaDB', 'SQL Server', 'MongoDB', 'Oracle', 'CockroachDB', 'Vitess', 'Google Cloud Spanner'];
-const DESTINATIONS = ['Kafka', 'Apache Iceberg', 'PostgreSQL, MySQL, SQL Server (JDBC)', 'Google Pub/Sub', 'Amazon Kinesis', 'Amazon SQS', 'Amazon SNS', 'Azure Event Hubs', 'Apache Pulsar', 'Redis Streams', 'NATS JetStream', 'HTTP'];
+const DESTINATIONS = ['Kafka', 'Apache Iceberg', 'PostgreSQL, MySQL, SQL Server (JDBC)', 'Google Pub/Sub', 'Amazon Kinesis', 'Amazon SQS', 'Amazon SNS', 'Azure Event Hubs', 'Apache Pulsar', 'Redis Streams', 'NATS JetStream', 'HTTP', 'StarRocks (Flink CDC)', 'Apache Doris (Flink CDC)', 'Apache Fluss (Flink CDC)'];
 
 const RUNTIMES = [
   {
@@ -409,9 +409,9 @@ const ADMIN: { id: string; title: string; line: string; body: string; demo: Reac
   },
   {
     id: 'versions',
-    title: 'Debezium upgrades',
+    title: 'Engine versions',
     line: 'See who runs what; move pipelines safely',
-    body: 'A catalog of approved Debezium versions shows which pipelines run which. Move them in bulk as ordinary, reversible versions; changing a default never silently restarts anything.',
+    body: 'A catalog of approved Debezium versions shows which pipelines run which. Move them in bulk as ordinary, reversible versions; changing a default never silently restarts anything. Register a Flink CDC image to turn on Flink CDC for StarRocks, Doris, Fluss and Iceberg.',
     demo: (
       <div className="flex flex-col gap-2.5">
         <span className="flex justify-between gap-2 rounded-lg border border-line px-3 py-2.5">

@@ -6,7 +6,7 @@ import { Card, Page, PageHeader } from '@/components/ui/layout';
 import { Select } from '@/components/ui/select';
 import { ProjectProvider, useProject } from '@/lib/session';
 import { AuditSection } from './AuditSection';
-import { DebeziumVersionsSection } from './DebeziumVersionsSection';
+import { EngineVersionsSection } from './EngineVersionsSection';
 import { FeedbackSection, useOpenFeedbackCount } from './FeedbackSection';
 import { PeopleSection } from './PeopleSection';
 import { PoliciesSection } from './PoliciesSection';
@@ -37,16 +37,16 @@ export const SETTINGS_SECTIONS: Section[] = [
   { id: 'mcp', label: 'MCP', group: 'Access', perProject: false, render: () => <McpSection /> },
   { id: 'runtimes', label: 'Runtimes', group: 'Running pipelines', perProject: true, render: () => <RuntimesSection /> },
   { id: 'secret-stores', label: 'Secret stores', group: 'Running pipelines', perProject: true, render: () => <SecretStoresSection /> },
-  { id: 'debezium', label: 'Debezium versions', group: 'Running pipelines', perProject: false, render: () => <DebeziumVersionsSection /> },
+  { id: 'engines', label: 'Engine versions', group: 'Running pipelines', perProject: false, render: () => <EngineVersionsSection /> },
   { id: 'policies', label: 'Policies', group: 'Guardrails', perProject: true, render: () => <PoliciesSection /> },
   { id: 'templates', label: 'Templates', group: 'Guardrails', perProject: true, render: () => <TemplatesSection /> },
   { id: 'audit', label: 'Audit log', group: 'Guardrails', perProject: true, render: () => <AuditSection /> },
 ];
 
-/** Section ids that moved, so old links still land: Members, Users & access → People; images → Debezium versions. */
-export const LEGACY_SECTIONS: Record<string, string> = { members: 'people', users: 'people', images: 'debezium', 'debezium-catalog': 'debezium' };
+/** Section ids that moved, so old links still land: Members, Users & access → People; images and Debezium versions → Engine versions. */
+export const LEGACY_SECTIONS: Record<string, string> = { members: 'people', users: 'people', images: 'engines', 'debezium-catalog': 'engines', debezium: 'engines' };
 /** The former /admin/$section pages. */
-export const LEGACY_ADMIN_SECTIONS: Record<string, string> = { users: 'people', projects: 'projects', debezium: 'debezium' };
+export const LEGACY_ADMIN_SECTIONS: Record<string, string> = { users: 'people', projects: 'projects', debezium: 'engines' };
 
 /** Settings are for Admins only (account-wide); project roles never manage the project itself. */
 export function canOpenSettings(ctx: Ctx): boolean {

@@ -1518,6 +1518,166 @@ Choose "Every change appended" in the Destination step.
 
 - Why: The connector creates tables and writes Parquet files with these credentials: BeziSync creates a one-row table, reads it back and drops it.
 
+## StarRocks
+
+<a id="starrocks-config"></a>
+### `starrocks_config`
+
+**Settings**
+
+<a id="starrocks-create-table"></a>
+### `starrocks_create_table`
+
+**Create tables**
+
+Fix:
+
+```
+GRANT CREATE DATABASE ON CATALOG default_catalog TO USER '{user}';
+GRANT ALL ON DATABASE {database} TO USER '{user}';
+GRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';
+```
+
+<a id="starrocks-http-blocked"></a>
+### `starrocks_http_blocked`
+
+**Reach the StarRocks FE (HTTP, Stream Load)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="starrocks-http-reachable"></a>
+### `starrocks_http_reachable`
+
+**Reach the StarRocks FE (HTTP, Stream Load)**
+
+- Why: The host answered on the port.
+
+<a id="starrocks-http-unreachable"></a>
+### `starrocks_http_unreachable`
+
+**Reach the StarRocks FE (HTTP, Stream Load)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
+<a id="starrocks-login"></a>
+### `starrocks_login`
+
+**Sign in**
+
+<a id="starrocks-network-blocked"></a>
+### `starrocks_network_blocked`
+
+**Reach the StarRocks FE (MySQL protocol)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="starrocks-network-reachable"></a>
+### `starrocks_network_reachable`
+
+**Reach the StarRocks FE (MySQL protocol)**
+
+- Why: The host answered on the port.
+
+<a id="starrocks-network-unreachable"></a>
+### `starrocks_network_unreachable`
+
+**Reach the StarRocks FE (MySQL protocol)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
+## Apache Doris
+
+<a id="doris-config"></a>
+### `doris_config`
+
+**Settings**
+
+<a id="doris-create-table"></a>
+### `doris_create_table`
+
+**Create tables**
+
+Fix:
+
+```
+GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{database}.* TO '{user}'@'%';
+```
+
+<a id="doris-http-blocked"></a>
+### `doris_http_blocked`
+
+**Reach the Doris FE (HTTP, Stream Load)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="doris-http-reachable"></a>
+### `doris_http_reachable`
+
+**Reach the Doris FE (HTTP, Stream Load)**
+
+- Why: The host answered on the port.
+
+<a id="doris-http-unreachable"></a>
+### `doris_http_unreachable`
+
+**Reach the Doris FE (HTTP, Stream Load)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
+<a id="doris-login"></a>
+### `doris_login`
+
+**Sign in**
+
+<a id="doris-network-blocked"></a>
+### `doris_network_blocked`
+
+**Reach the Doris FE (MySQL protocol)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="doris-network-reachable"></a>
+### `doris_network_reachable`
+
+**Reach the Doris FE (MySQL protocol)**
+
+- Why: The host answered on the port.
+
+<a id="doris-network-unreachable"></a>
+### `doris_network_unreachable`
+
+**Reach the Doris FE (MySQL protocol)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
+## Apache Fluss
+
+<a id="fluss-config"></a>
+### `fluss_config`
+
+**Settings**
+
+<a id="fluss-network-blocked"></a>
+### `fluss_network_blocked`
+
+**Reach the Fluss coordinator**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="fluss-network-reachable"></a>
+### `fluss_network_reachable`
+
+**Reach the Fluss coordinator**
+
+- Why: The host answered on the port.
+
+<a id="fluss-network-unreachable"></a>
+### `fluss_network_unreachable`
+
+**Reach the Fluss coordinator**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
 ## Database (JDBC)
 
 <a id="jdbc-config"></a>
@@ -2041,6 +2201,73 @@ Fix:
 Compare the column with a value of its type, or pick another column.
 ```
 
+## Flink CDC
+
+<a id="flink-agent-version"></a>
+### `flink_agent_version`
+
+**Agent version**
+
+Fix:
+
+```
+Upgrade the agent to BeziSync 0.3.0 or later (Settings → Runtimes shows the install command).
+```
+
+<a id="flink-kubernetes-services"></a>
+### `flink_kubernetes_services`
+
+**Kubernetes Services**
+
+Fix:
+
+```
+# The runtime's Role (both BeziSync charts from 0.2.0 grant it)
+- apiGroups: [""]
+  resources: [configmaps, secrets, services]
+  verbs: [get, list, create, update, patch, delete]
+```
+
+<a id="flink-primary-key"></a>
+### `flink_primary_key`
+
+**Primary keys**
+
+Fix:
+
+```
+Pick key columns for these tables in the Tables step, or add a primary key in the database.
+```
+
+<a id="flink-replica-identity"></a>
+### `flink_replica_identity`
+
+**Whole-row changes**
+
+- Why: PostgreSQL logs the old row of an update only with REPLICA IDENTITY FULL. It makes the WAL larger for these tables.
+
+Fix:
+
+```
+ALTER TABLE "{schema}"."{table}" REPLICA IDENTITY FULL;
+```
+
+<a id="flink-server-ids"></a>
+### `flink_server_ids`
+
+**MySQL server ids**
+
+Fix:
+
+```
+Create this pipeline again: a new pipeline gets other server ids.
+```
+
+<a id="flink-tables-unknown"></a>
+### `flink_tables_unknown`
+
+**Tables for Flink CDC**
+
 ## Secret stores
 
 <a id="secret-missing"></a>
@@ -2071,6 +2298,13 @@ Fix:
 ```
 Ask an Admin to change the policy under Settings → Policies.
 ```
+
+<a id="policy-engine"></a>
+### `policy_engine`
+
+**Engine**
+
+- Why: This project does not allow pipelines on {engine}.
 
 <a id="policy-ok"></a>
 ### `policy_ok`

@@ -49,7 +49,8 @@ type Tool struct {
 func (t *Tool) Group() string {
 	for _, g := range []struct{ prefix, name string }{
 		{"pipeline", "Pipelines"}, {"connection", "Connections"}, {"runtime", "Runtimes"}, {"alert", "Alerts"},
-		{"change_request", "Approvals"}, {"template", "Templates"}, {"debezium", "Debezium versions"},
+		{"change_request", "Approvals"}, {"template", "Templates"}, {"saved_position", "Pipelines"},
+		{"debezium", "Engine versions"}, {"engine", "Engine versions"},
 		{"member", "People"}, {"user", "People"}, {"project", "Projects"}, {"secret", "Secret stores"},
 	} {
 		if strings.Contains(t.Name, g.prefix) {

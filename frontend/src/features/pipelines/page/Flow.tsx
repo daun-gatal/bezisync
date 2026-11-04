@@ -7,7 +7,7 @@ import { imageByPipeline, shortImage, SOURCE_LABEL, useDebeziumImages } from '@/
 import { formatBytes, formatDuration } from '@/lib/format';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { HEALTH, isStale, LIFECYCLE, statusOf } from '@/lib/status';
+import { HEALTH, isStale, LIFECYCLE, statusOf, type FlinkStatus } from '@/lib/status';
 import { ChangeDebeziumDialog } from '../ChangeDebeziumDialog';
 import { formatWindow } from './overview';
 
@@ -120,6 +120,7 @@ export function Flow({ pipeline: p }: { pipeline: Pipeline }) {
                   ) : null}
                 </span>
               ) : null}
+              {p.engine === 'flink-cdc' ? <span>{flinkLine(statusOf(p).flink)}</span> : null}
             </>
           ) : null}
           {p.runtime ? <span className="min-w-0 truncate">Runtime {p.runtime.name}</span> : <span>No runtime chosen yet</span>}
@@ -144,4 +145,10 @@ export function Flow({ pipeline: p }: { pipeline: Pipeline }) {
       <ChangeDebeziumDialog pipelines={[{ id: p.id, name: p.name }]} open={changing} onOpenChange={setChanging} />
     </section>
   );
+}
+
+/** "Flink CDC · 2 of 2 TaskManagers": the engine, and how much of its cluster is up. */
+export function flinkLine(f: FlinkStatus | undefined): string {
+  const tms = f?.taskmanagers_wanted ? ` · ${f.taskmanagers ?? 0} of ${f.taskmanagers_wanted} TaskManager${f.taskmanagers_wanted === 1 ? '' : 's'}` : '';
+  return `Flink CDC${tms}`;
 }

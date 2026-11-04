@@ -25,6 +25,8 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
+	"github.com/daun-gatal/bezisync/backend/internal/flinkhelper"
 	"github.com/daun-gatal/bezisync/backend/internal/logging"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
@@ -73,7 +75,7 @@ func EnsureStateSchema(ctx context.Context) error {
 }
 
 func compileCtx(p *models.Pipeline, spec domain.PipelineSpec) connectors.CompileContext {
-	return connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec}
+	return connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec, Engine: p.Engine}
 }
 
 // ParseHealth reads Quarkus SmallRye health: 200 + UP is up, 503 is down, else unknown.
@@ -115,9 +117,12 @@ type observed struct {
 	metrics      *domain.Metrics
 	logs         string
 	runtimeError string
+	// Flink CDC: the helper's status, and why it reports DOWN.
+	flink      *flinkhelper.Status
+	engineDown *domain.Reason
 }
 
-func observeWorkload(ctx context.Context, d runtime.Driver, derr error, p *models.Pipeline, healthPort int) observed {
+func observeWorkload(ctx context.Context, d runtime.Driver, derr error, p *models.Pipeline, healthPort int, flink bool) observed {
 	if derr != nil {
 		return observed{runtimeError: domain.Truncate(derr.Error(), 300)}
 	}
@@ -126,7 +131,9 @@ func observeWorkload(ctx context.Context, d runtime.Driver, derr error, p *model
 		return observed{runtimeError: domain.Truncate(err.Error(), 300)}
 	}
 	o := observed{obs: &obs}
-	if obs.Phase == runtime.PhaseRunning {
+	if obs.Phase == runtime.PhaseRunning && flink {
+		observeFlink(ctx, d, p.ShortID(), healthPort, &o)
+	} else if obs.Phase == runtime.PhaseRunning {
 		code, body, err := d.HTTPGet(ctx, p.ShortID(), healthPort, "/q/health", 4*time.Second)
 		switch {
 		case err != nil:
@@ -268,6 +275,9 @@ func (c *Controller) TickOnce(ctx context.Context) {
 		}); err != nil {
 			log.Error("telemetry failed", "exc", err.Error())
 		}
+		if _, err := services.ExpireSavedPositions(ctx, db.MustPool(ctx), db.Now()); err != nil {
+			log.Error("saved position retention failed", "exc", err.Error())
+		}
 	}
 }
 
@@ -391,11 +401,12 @@ func (c *Controller) Reconcile(ctx context.Context, id uuid.UUID) error {
 		if applyError != "" {
 			log.Warn(fmt.Sprintf("apply failed for %s: %s", p.Name, applyError))
 		}
+		flink := services.EngineOf(p) == engine.FlinkCDC
 		healthPort := connectors.DefaultHealthPort
-		if sinkType, err := services.SinkTypeOf(ctx, tx, p); err == nil && p.DeployedImage != nil {
+		if sinkType, err := services.SinkTypeOf(ctx, tx, p); err == nil && p.DeployedImage != nil && !flink {
 			healthPort = connectors.HealthPort(sinkType, *p.DeployedImage)
 		}
-		seen := observeWorkload(ctx, d, derr, p, healthPort)
+		seen := observeWorkload(ctx, d, derr, p, healthPort, flink)
 		obs, healthUp, metrics, logs, runtimeError := seen.obs, seen.healthUp, seen.metrics, seen.logs, seen.runtimeError
 		if metrics != nil {
 			metrics.OnlyChosenTables(len(spec.Source.Tables.Include))
@@ -415,15 +426,19 @@ func (c *Controller) Reconcile(ctx context.Context, id uuid.UUID) error {
 			risk = &domain.Reason{Code: "source_at_risk", Message: fmt.Sprint(impact["risk"]), Fix: strOf(impact["risk_fix"]), Severity: sev}
 		}
 		latencyTarget := float64(spec.Policies.LatencyTargetSeconds * 1000)
-		if sinkType, err := services.SinkTypeOf(ctx, tx, p); err == nil {
+		if flink {
+			// Changes wait for the next save (Iceberg commits then) or load on purpose.
+			fc := spec.FlinkCDC.Effective()
+			latencyTarget = max(latencyTarget, 1.5*float64(max(fc.CommitSeconds, fc.FreshnessSeconds)*1000))
+		} else if sinkType, err := services.SinkTypeOf(ctx, tx, p); err == nil {
 			// A sink that commits at an interval (Iceberg) holds changes back on purpose.
 			latencyTarget = max(latencyTarget, 1.5*float64(connectors.DeliveryDelay(sinkType, spec).Milliseconds()))
 		}
 		in := domain.DeriveInput{Now: db.Now(), Deployed: true, Desired: p.DesiredState, DeployedAt: p.DeployedAt, HealthUp: healthUp, HealthError: seen.healthError,
 			Metrics: metrics, Logs: logs, LatencyTargetMS: latencyTarget, RuntimeError: runtimeError,
-			SourceRisk: risk, LastLifecycle: p.Lifecycle}
+			SourceRisk: risk, LastLifecycle: p.Lifecycle, EngineDown: seen.engineDown}
 		if obs != nil {
-			in.Phase, in.Restarts, in.WorkloadReason, in.ImagePull = obs.Phase, obs.Restarts, obs.Reason, obs.ImagePull
+			in.Phase, in.Restarts, in.WorkloadReason, in.ImagePull, in.StartedAt = obs.Phase, obs.Restarts, obs.Reason, obs.ImagePull, obs.StartedAt
 		}
 		verdict := domain.Derive(in)
 		if applyError != "" && verdict.Lifecycle != domain.LifecycleStreaming {
@@ -438,6 +453,11 @@ func (c *Controller) Reconcile(ctx context.Context, id uuid.UUID) error {
 		if impact != nil {
 			st := statusCopy(p)
 			st["source_impact"] = impact
+			p.Status = st
+		}
+		if seen.flink != nil {
+			st := statusCopy(p)
+			st["flink"] = flinkStatus(seen.flink, obs, spec.Source.Tables.Include)
 			p.Status = st
 		}
 		if positionNote != nil {
@@ -899,6 +919,12 @@ func (c *Controller) prepareIfNeeded(ctx context.Context, tx pgx.Tx, p *models.P
 	sourceResults, err := src.Prepare(ctx, resolvedSrc, cctx)
 	if err != nil {
 		return err
+	}
+	if services.EngineOf(p) == engine.FlinkCDC {
+		// The deployed version writes the columns its tables have now.
+		if err := services.RefreshFlinkColumns(ctx, tx, p, spec); err != nil {
+			return err
+		}
 	}
 	compiled, err := services.CompileFor(ctx, tx, p, spec, "")
 	if err != nil {

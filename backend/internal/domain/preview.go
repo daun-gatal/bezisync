@@ -23,6 +23,8 @@ type PreviewColumn struct {
 	Type     string `json:"type"`
 	Nullable bool   `json:"nullable"`
 	PII      bool   `json:"pii"`
+	// HasDefault: the column has a default in the source (connectors.Column). Not sent.
+	HasDefault bool `json:"-"`
 }
 
 // PreviewInput is what to preview.

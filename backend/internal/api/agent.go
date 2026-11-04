@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
+	"github.com/daun-gatal/bezisync/backend/internal/runtime"
 	"github.com/daun-gatal/bezisync/backend/internal/security"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
@@ -87,6 +89,13 @@ func workloadReport(v *val.V, loc val.Loc, raw any) *om.Map {
 	}
 	out.Set("health", optPair(v, o, "health"))
 	out.Set("metrics", optPair(v, o, "metrics"))
+	// A Flink CDC pipeline's helper status and its components; older agents never send them.
+	if status := optPair(v, o, "status"); status != nil {
+		out.Set("status", status)
+	}
+	if details, ok := optDict(v, o, "details"); ok && details != nil {
+		out.Set("details", details)
+	}
 	return out
 }
 
@@ -204,11 +213,15 @@ func agentRoutes(r chi.Router) {
 			if err != nil {
 				return err
 			}
+			flink := slices.Contains(b.Features, any(runtime.FeatureFlinkCDC))
 			desired := make([]any, 0, len(workloads))
 			for _, wl := range workloads {
 				spec, err := security.DecryptSecret(wl.SpecEnc)
 				if err != nil {
 					return err
+				}
+				if spec["engine"] == "flink-cdc" && !flink {
+					continue // an older agent would run it as a Debezium container; Apply says to upgrade
 				}
 				desired = append(desired, spec)
 			}

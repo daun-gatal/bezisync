@@ -505,15 +505,16 @@ func (s *mysqlSource) Discover(ctx context.Context, conn Resolved) (Discovery, e
 		return Discovery{}, err
 	}
 	cols := map[[2]string][]Column{}
-	if err := eachRow(ctx, c, fmt.Sprintf("SELECT table_schema, table_name, column_name, data_type, is_nullable='YES' FROM information_schema.columns "+
+	if err := eachRow(ctx, c, fmt.Sprintf("SELECT table_schema, table_name, column_name, data_type, is_nullable='YES', column_default IS NOT NULL FROM information_schema.columns "+
 		"WHERE table_schema NOT IN (%s) ORDER BY table_schema, table_name, ordinal_position LIMIT 200000", ph), mySystemDBs, func(rows *sql.Rows) error {
 		var schema, table, column, dtype string
-		var nullable sql.NullInt64
-		if err := rows.Scan(&schema, &table, &column, &dtype, &nullable); err != nil {
+		var nullable, hasDefault sql.NullInt64
+		if err := rows.Scan(&schema, &table, &column, &dtype, &nullable, &hasDefault); err != nil {
 			return err
 		}
 		k := [2]string{schema, table}
-		cols[k] = append(cols[k], Column{Name: column, Type: dtype, Nullable: nullable.Valid && nullable.Int64 != 0, PII: LooksLikePII(column)})
+		cols[k] = append(cols[k], Column{Name: column, Type: dtype, Nullable: nullable.Valid && nullable.Int64 != 0, PII: LooksLikePII(column),
+			HasDefault: hasDefault.Valid && hasDefault.Int64 != 0})
 		return nil
 	}); err != nil {
 		return Discovery{}, err
@@ -705,7 +706,7 @@ func (s *mysqlSource) Probe(ctx context.Context, conn Resolved, c CompileContext
 	if err != nil {
 		return nil, err
 	}
-	return mysqlImpact(logs, positionFile, limit), nil
+	return mysqlImpact(logs, positionFile, limit, c.Engine == "flink-cdc"), nil
 }
 
 // binlogFile is one row of SHOW BINARY LOGS, oldest first.
@@ -715,9 +716,13 @@ type binlogFile struct {
 }
 
 // mysqlImpact places the pipeline's stored binlog position among the server's binlog files.
-func mysqlImpact(logs []binlogFile, positionFile *string, limit int64) *SourceImpact {
+func mysqlImpact(logs []binlogFile, positionFile *string, limit int64, flink bool) *SourceImpact {
 	if len(logs) == 0 {
 		return &SourceImpact{Summary: "No binary logs reported."}
+	}
+	if positionFile == nil && flink {
+		// Its position is inside its encrypted saved state: BeziSync can't place it among the files.
+		return &SourceImpact{Summary: fmt.Sprintf("%d binlog files on the server; Flink CDC keeps its position in its saved state, so how much of them it still needs isn't measured.", len(logs))}
 	}
 	if positionFile == nil {
 		return &SourceImpact{Summary: fmt.Sprintf("%d binlog files on the server; position not stored yet.", len(logs))}

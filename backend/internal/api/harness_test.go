@@ -309,14 +309,26 @@ func (d *fakeDriver) Observe(_ context.Context, shortID string) (runtime.Observa
 	if !w.Running {
 		return runtime.Observation{Phase: "stopped", ConfigHash: &h}, nil
 	}
-	return runtime.Observation{Phase: d.Phase, Ready: d.Phase == "running", ConfigHash: &h, ImagePull: d.ImagePull}, nil
+	obs := runtime.Observation{Phase: d.Phase, Ready: d.Phase == "running", ConfigHash: &h, ImagePull: d.ImagePull}
+	if w.IsFlink() {
+		obs.Details = map[string]any{"components": []any{map[string]any{"name": "bz-" + shortID, "role": "jobmanager"}}}
+	}
+	return obs, nil
 }
 
 func (d *fakeDriver) Logs(context.Context, string, int, bool) (string, error) { return d.LogsText, nil }
 
-func (d *fakeDriver) HTTPGet(_ context.Context, _ string, port int, _ string, _ time.Duration) (int, string, error) {
+// LogsOf reads one component of a Flink CDC pipeline.
+func (d *fakeDriver) LogsOf(_ context.Context, _, component string, _ int, _ bool) (string, error) {
+	return "logs of " + component, nil
+}
+
+func (d *fakeDriver) HTTPGet(_ context.Context, _ string, port int, path string, _ time.Duration) (int, string, error) {
 	if port == 9404 {
 		return 200, d.Metrics, nil
+	}
+	if path == "/bz/status" {
+		return 200, `{"phase": "running"}`, nil
 	}
 	return d.Health[0].(int), d.Health[1].(string), nil
 }

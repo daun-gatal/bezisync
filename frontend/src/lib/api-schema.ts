@@ -247,6 +247,23 @@ export interface paths {
         patch: operations["update_image_api_v1_debezium_catalog__image_id__patch"];
         trace?: never;
     };
+    "/api/v1/engines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Engines */
+        get: operations["list_engines_api_v1_engines_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/feedback": {
         parameters: {
             query?: never;
@@ -1309,6 +1326,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List saved positions (Flink CDC) */
+        get: operations["list_positions_api_v1_projects__project_id__pipelines__pipeline_id__positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/positions/{position_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a paused Flink CDC pipeline from a saved position */
+        post: operations["restore_position_api_v1_projects__project_id__pipelines__pipeline_id__positions__position_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/preflight": {
         parameters: {
             query?: never;
@@ -2173,6 +2224,11 @@ export interface components {
         };
         /** CatalogCreate */
         CatalogCreate: {
+            /**
+             * Engine
+             * @description The engine the image runs (default debezium).
+             */
+            engine?: ("debezium" | "flink-cdc") | null;
             /** Image */
             image: string;
             /**
@@ -2232,8 +2288,16 @@ export interface components {
         };
         /** CatalogRead */
         CatalogRead: {
-            /** Default Image */
-            default_image: string;
+            /**
+             * Default Image
+             * @description The engine's default image (null while the engine has none).
+             */
+            default_image: string | null;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
             /** Entries */
             entries: components["schemas"]["CatalogEntryRead"][];
         };
@@ -2620,6 +2684,11 @@ export interface components {
         };
         /** ConnectorType */
         ConnectorType: {
+            /**
+             * Available
+             * @description False while no engine that writes it is available (Flink CDC needs a registered image).
+             */
+            available?: boolean;
             capture?: components["schemas"]["CaptureCaps"];
             /** Config Schema */
             config_schema: {
@@ -2627,6 +2696,11 @@ export interface components {
             };
             /** Description */
             description: string;
+            /**
+             * Engines
+             * @description Engines that can write this destination, when only some can (Flink CDC for StarRocks, Doris and Fluss).
+             */
+            engines?: ("debezium" | "flink-cdc")[];
             /**
              * Kind
              * @enum {string}
@@ -2651,6 +2725,11 @@ export interface components {
             transforms?: components["schemas"]["TransformCaps"];
             /** Type */
             type: string;
+            /**
+             * Unavailable Reason
+             * @description Why it can't be used yet, and who can change that.
+             */
+            unavailable_reason?: string;
         };
         /** CopyConnection */
         CopyConnection: {
@@ -2836,6 +2915,90 @@ export interface components {
             tables?: string[] | null;
             /** Type */
             type: string;
+        };
+        /**
+         * EngineCaps
+         * @description What the pipeline's engine can do. Actions it can't do carry a reason in why (action → text).
+         */
+        EngineCaps: {
+            /** Add Tables */
+            add_tables: boolean;
+            /** Edit Position */
+            edit_position: boolean;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
+            /** Event Formats */
+            event_formats: boolean;
+            /** Hash Mask */
+            hash_mask: boolean;
+            /** Parallel Copy */
+            parallel_copy: boolean;
+            /** Recopy Table */
+            recopy_table: boolean;
+            /** Resize Parallelism */
+            resize_parallelism: boolean;
+            /** Saved Positions */
+            saved_positions: boolean;
+            /** Schema Changes */
+            schema_changes: boolean;
+            /** Start From Time */
+            start_from_time: boolean;
+            /** Why */
+            why: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * EngineRead
+         * @description An engine and whether this install can run it. Flink CDC is available once an Admin registers a Flink CDC image.
+         */
+        EngineRead: {
+            /** Available */
+            available: boolean;
+            /** Default Image */
+            default_image: string | null;
+            /**
+             * Except Sinks
+             * @description Destination types it never writes.
+             */
+            except_sinks: string[] | null;
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "debezium" | "flink-cdc";
+            /**
+             * Reason
+             * @description Why the engine is unavailable and how to turn it on.
+             */
+            reason: string | null;
+            /**
+             * Settings
+             * @description Flink CDC: the Flink settings a pipeline may choose.
+             */
+            settings?: components["schemas"]["FlinkSetting"][];
+            /**
+             * Sinks
+             * @description Destination types it writes (null: every one except except_sinks).
+             */
+            sinks: string[] | null;
+            /**
+             * Sizes
+             * @description Flink CDC: each size preset's cluster.
+             */
+            sizes?: {
+                [key: string]: components["schemas"]["FlinkSize"];
+            };
+            /**
+             * Sources
+             * @description Source types it reads (null: every one).
+             */
+            sources: string[] | null;
+            /** Title */
+            title: string;
         };
         /** ErrorPolicy */
         ErrorPolicy: {
@@ -3031,6 +3194,78 @@ export interface components {
              * @default DBA
              */
             who: string;
+        };
+        /**
+         * FlinkCDCSpec
+         * @description Choices of a pipeline that runs on Flink CDC. Unset fields take their default; returned only when something is set.
+         */
+        FlinkCDCSpec: {
+            /**
+             * Commit Seconds
+             * @description How often the position is saved and, for Iceberg, new data becomes visible (default 60).
+             */
+            commit_seconds?: (30 | 60 | 300) | null;
+            /**
+             * Flink Conf
+             * @description Flink settings chosen from the catalogue (key → value).
+             */
+            flink_conf?: {
+                [key: string]: string;
+            };
+            /**
+             * Freshness Seconds
+             * @description How long a change may wait in a load batch (StarRocks, Doris; default 5).
+             */
+            freshness_seconds?: (2 | 5 | 30) | null;
+            /**
+             * New Columns
+             * @description hold: a new source column is left out until someone reviews it (default); send: it is sent as it is.
+             */
+            new_columns?: ("hold" | "send") | null;
+            /**
+             * Schema Changes
+             * @description What happens when a source table changes shape (default apply).
+             */
+            schema_changes?: ("apply" | "ignore" | "stop") | null;
+        };
+        /** FlinkSetting */
+        FlinkSetting: {
+            /** Choices */
+            choices?: string[];
+            /** Default */
+            default: string;
+            /** Key */
+            key: string;
+            /** Max */
+            max?: string;
+            /** Min */
+            min?: string;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "duration" | "int" | "fraction" | "enum";
+            /** Why */
+            why: string;
+        };
+        /** FlinkSize */
+        FlinkSize: {
+            /** Jobmanager Cpu */
+            jobmanager_cpu: string;
+            /** Jobmanager Memory */
+            jobmanager_memory: string;
+            /** Parallelism */
+            parallelism: number;
+            /** Taskmanager Cpu */
+            taskmanager_cpu: string;
+            /** Taskmanager Memory */
+            taskmanager_memory: string;
+            /** Taskmanagers */
+            taskmanagers: number;
+            /** Total Memory Mib */
+            total_memory_mib: number;
         };
         /** FormatSpec */
         FormatSpec: {
@@ -3557,10 +3792,16 @@ export interface components {
              */
             confirm: string;
             /**
+             * From Time
+             * @description Where mode from_time starts.
+             */
+            from_time?: string | null;
+            /**
              * Mode
+             * @description resnapshot: copy every table again; skip_to_now: changes from now; from_time: changes since from_time (Flink CDC on MySQL or SQL Server).
              * @enum {string}
              */
-            mode: "resnapshot" | "skip_to_now";
+            mode: "resnapshot" | "skip_to_now" | "from_time";
         };
         /** OffsetsRead */
         OffsetsRead: {
@@ -3590,6 +3831,11 @@ export interface components {
              * @default
              */
             description: string;
+            /**
+             * Engine
+             * @description The engine (default: Debezium wherever it can run the source and destination, else Flink CDC). Fixed once deployed.
+             */
+            engine?: ("debezium" | "flink-cdc") | null;
             /** Labels */
             labels?: {
                 [key: string]: string;
@@ -3650,6 +3896,7 @@ export interface components {
             artifacts: {
                 [key: string]: unknown;
             };
+            caps: components["schemas"]["EngineCaps"];
             /**
              * Created At
              * Format: date-time
@@ -3665,6 +3912,11 @@ export interface components {
             description: string;
             /** Desired State */
             desired_state: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
             /** Has Undeployed Changes */
             has_undeployed_changes: boolean;
             /** Health */
@@ -3709,9 +3961,15 @@ export interface components {
             };
             /** Debezium Image */
             debezium_image?: string | null;
+            flink_cdc?: components["schemas"]["FlinkCDCSpec"];
+            /**
+             * Flink Cdc Image
+             * @description Flink CDC image pinned for this pipeline. Returned only when set.
+             */
+            flink_cdc_image?: string | null;
             /**
              * Keys
-             * @description Message key columns per captured table (overrides the primary key). Returned only when set.
+             * @description Key columns per captured table. Debezium: message key (overrides the primary key). Flink CDC: the destination primary key of a table without one. Returned only when set.
              */
             keys?: {
                 [key: string]: string[];
@@ -3728,6 +3986,11 @@ export interface components {
         PipelineUpdate: {
             /** Description */
             description?: string | null;
+            /**
+             * Engine
+             * @description The engine (default: Debezium wherever it can run the source and destination, else Flink CDC). Fixed once deployed.
+             */
+            engine?: ("debezium" | "flink-cdc") | null;
             /** Labels */
             labels?: {
                 [key: string]: string;
@@ -3914,6 +4177,11 @@ export interface components {
              * @description Lets pipelines run filter scripts their authors wrote. Scripts run inside the connector, next to its credentials. Returned only when true.
              */
             allow_scripted_transforms?: boolean;
+            /**
+             * Allowed Engines
+             * @description Engines pipelines may run on (null = every engine). Returned only when set.
+             */
+            allowed_engines?: ("debezium" | "flink-cdc")[] | null;
             /** Allowed Runtime Ids */
             allowed_runtime_ids?: string[] | null;
             /** Allowed Sink Types */
@@ -4568,6 +4836,35 @@ export interface components {
             project: string | null;
             /** Role */
             role: ("viewer" | "operator" | "editor") | null;
+        };
+        /**
+         * SavedPositionRead
+         * @description A stored checkpoint or savepoint of a Flink CDC pipeline.
+         */
+        SavedPositionRead: {
+            /**
+             * Current
+             * @description After the last Start over: the pipeline resumes from the newest current position.
+             */
+            current: boolean;
+            /** Flink Id */
+            flink_id: number;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "checkpoint" | "savepoint";
+            /** Reason */
+            reason: string;
+            /** Size */
+            size: number;
+            /**
+             * Taken At
+             * Format: date-time
+             */
+            taken_at: string;
         };
         /** SchemaChangeRead */
         SchemaChangeRead: {
@@ -5455,6 +5752,13 @@ export interface components {
         WorkloadReport: {
             /** Config Hash */
             config_hash?: string | null;
+            /**
+             * Details
+             * @description What the runtime reports about the workload, such as a Flink CDC pipeline's components. Older agents never send it.
+             */
+            details?: {
+                [key: string]: unknown;
+            } | null;
             /** Exit Code */
             exit_code?: number | null;
             /** Health */
@@ -5493,6 +5797,14 @@ export interface components {
             restarts: number;
             /** Started At */
             started_at?: string | null;
+            /**
+             * Status
+             * @description A Flink CDC pipeline's helper status (/bz/status): HTTP status and body. Older agents never send it.
+             */
+            status?: [
+                number,
+                string
+            ] | null;
         };
     };
     responses: never;
@@ -5912,7 +6224,10 @@ export interface operations {
     };
     read_catalog_api_v1_debezium_catalog_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The engine whose images to list (default debezium). */
+                engine?: "debezium" | "flink-cdc";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6025,6 +6340,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_engines_api_v1_engines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngineRead"][];
                 };
             };
         };
@@ -8320,6 +8655,8 @@ export interface operations {
         parameters: {
             query?: {
                 tail?: number;
+                /** @description A Flink CDC pipeline's component: jobmanager (default), taskmanager-<n> or tunnel. */
+                component?: string;
             };
             header?: never;
             path: {
@@ -8514,6 +8851,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_positions_api_v1_projects__project_id__pipelines__pipeline_id__positions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Positions */
+                        positions: components["schemas"]["SavedPositionRead"][];
+                    };
+                };
+            };
+        };
+    };
+    restore_position_api_v1_projects__project_id__pipelines__pipeline_id__positions__position_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+                position_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Confirm
+                     * @description The pipeline name, typed by the user.
+                     */
+                    confirm: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        position: components["schemas"]["SavedPositionRead"];
+                    };
                 };
             };
         };

@@ -81,7 +81,11 @@ src/
   header. **People** is the only screen that edits access (filter `?in=<project id>` for one
   project). Work on pipelines stays with pipelines: the Debezium version is changed from the
   Pipelines list (column, `?debezium=` filter, bulk select) and the pipeline page with
-  `ChangeDebeziumDialog`; `lib/debezium.ts` holds `useCatalog`/`useDebeziumImages`. Never add a
+  `ChangeDebeziumDialog`; `lib/debezium.ts` holds `useCatalog`/`useDebeziumImages`. Settings →
+  **Engine versions** (`EngineVersionsSection`, `?engine=flink-cdc`) curates each engine's images;
+  registering the first Flink CDC image turns that engine on (`lib/engines.ts`: `useEngines`,
+  `useEngineCatalog`, `engineGate`). Destinations only Flink CDC writes carry a "Flink CDC" pill
+  in the connection type picker and are disabled, with the reason, while it is off. Never add a
   second screen for the same job; renamed or merged section ids go in `LEGACY_SECTIONS` (old
   `/admin/$section` links redirect via `LEGACY_ADMIN_SECTIONS`).
   Checkboxes whose value comes from the server keep row-level local state set in the change
@@ -147,6 +151,24 @@ src/
   are typed, validated like the server (`nameError`, `textError`, no `${`). A new step type adds a
   model case, an editor, a picker card and a test. Steps referring to removed tables are pruned
   on the Tables step (`pruneToTables`).
+- Engines in the wizard: the Destination step works out the engines that can run the pair from
+  `GET /engines` (`engineChoices`, `pickEngine`: never a copy of the backend's tables), shows a choice
+  where both fit (Iceberg; Debezium is the default) or a "Runs on Flink CDC" line, sends `engine` only
+  when the person picks one, and saves `specForEngine` (each engine refuses the other's settings). On
+  Flink CDC there is no event format, the Tables step can't mask (hash) and says why
+  (`caps.why.hash_mask`), and Review swaps the canary, re-copy window and advanced properties for
+  `FlinkRunSettings` (schema changes, new columns, commit interval, Freshness for StarRocks/Doris,
+  and in Expert the catalogue's Flink settings); sizes describe the cluster (`flinkSizeHelp`) and stay
+  fixed once deployed.
+- Flink CDC on the pipeline page: the Snapshots tab is **Positions** (`page/FlinkPositions.tsx`: saved
+  positions newest first, Restore, and Start over as copy again / from now / since a time, the last
+  gated by `caps.start_from_time` with its `why`; all need a pause and the typed name), Overview adds
+  the cluster card (`flinkView`: job, TaskManagers, last save, first-copy chunks, components) and
+  `transformView(spec, { sinkType })` describes tables kept in sync (never Debezium's event shape),
+  Logs picks a component (`logComponents`, `?component=` on the API), the list has an Engine column,
+  and Debezium-only actions (Change Debezium version, offsets) are not offered. Iceberg on Flink CDC
+  shows only its options (`optionsSchemaFor`: no commit interval or buckets, no append) and records
+  no partitions.
 - Pipeline Overview (`features/pipelines/page/`): the flow strip, then a full-width chart, then
   Since start + Source protection beside Transforms + delivery. Side by side, the left column sets
   the row's height (at least 320 px): the right column is absolutely positioned inside its cell

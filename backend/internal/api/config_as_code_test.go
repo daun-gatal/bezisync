@@ -241,3 +241,37 @@ func TestAPITokens(t *testing.T) {
 	admin.del("/api/v1/auth/tokens/" + created.Str("id")).expect(204)
 	anon.get("/api/v1/projects/"+pid+"/pipelines", bearer...).expect(401)
 }
+
+// A manifest chooses the engine; a Flink CDC pipeline exports with it and applies back unchanged.
+func TestManifestCarriesTheEngine(t *testing.T) {
+	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
+	icebergSink(t, e)
+	manifest := `apiVersion: bezisync.io/v1
+kind: Pipeline
+metadata: {name: lake-yaml}
+spec:
+  engine: flink-cdc
+  runtime: k8s
+  source: {connection: shop-pg, tables: {include: [shop.orders]}}
+  sink: {connection: lake, naming: "{table}"}
+  flink_cdc: {new_columns: send}
+`
+	r := apply(e.admin, e.pid, manifest, nil).expect(200)
+	if r.Str(0, "action") != "created" {
+		t.Fatal(string(r.Raw))
+	}
+	p := e.admin.get("/api/v1/projects/" + e.pid + "/pipelines/" + r.Str(0, "pipeline_id")).expect(200)
+	if p.Str("engine") != "flink-cdc" {
+		t.Fatal(string(p.Raw))
+	}
+	exported := e.admin.get("/api/v1/projects/" + e.pid + "/pipelines/" + r.Str(0, "pipeline_id") + "/manifest").expect(200)
+	if at(t, exported.At("documents", 0), "spec", "engine") != "flink-cdc" || at(t, exported.At("documents", 0), "spec", "flink_cdc", "new_columns") != "send" {
+		t.Fatal(exported.Str("yaml"))
+	}
+	if same := apply(e.admin, e.pid, exported.Str("yaml"), nil).expect(200); same.Str(0, "action") != "unchanged" {
+		t.Fatal(string(same.Raw))
+	}
+	bad := strings.Replace(manifest, "engine: flink-cdc", "engine: spark", 1)
+	apply(e.admin, e.pid, bad, nil).expect(422)
+}
