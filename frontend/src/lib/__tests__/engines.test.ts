@@ -1,4 +1,4 @@
-import { engineChoices, engineGate, flinkChoices, pickEngine, runs, type Engine } from '../engines';
+import { engineChoices, engineGate, flinkChoices, pickEngine, runs, type Engine, flinkSpecBlock } from '../engines';
 import type { Schemas } from '../api';
 
 const base = { kind: 'sink', type: 'x', title: 'X', description: '', presets: [], config_schema: {}, secret_schema: {}, supports_masking: false } as const;
@@ -45,5 +45,23 @@ describe('engine choices (the backend engine.Supports and ChooseEngine)', () => 
   it('fills Flink CDC choices with the backend defaults', () => {
     expect(flinkChoices(undefined)).toEqual({ schema_changes: 'apply', new_columns: 'hold', freshness_seconds: 5, commit_seconds: 60, flink_conf: {} });
     expect(flinkChoices({ new_columns: 'send' }).new_columns).toBe('send');
+  });
+});
+
+describe('flinkSpecBlock', () => {
+  // What the server stores and returns (domain dumpFlinkCDC): no empty flink_conf, its keys in
+  // JSONB order (shorter first, then bytewise), which differs from alphabetical order.
+  it('writes the block back exactly as the server returns it, so autosave settles', () => {
+    const stored = { schema_changes: 'apply', new_columns: 'hold', freshness_seconds: 5, commit_seconds: 60 } as const;
+    expect(JSON.stringify(flinkSpecBlock(flinkChoices(stored)))).toBe(JSON.stringify(stored));
+    expect(JSON.stringify(flinkSpecBlock(flinkChoices(undefined)))).toBe(JSON.stringify(stored));
+    const withConf = { ...stored, flink_conf: { 'heartbeat.timeout': '60 s', 'restart-strategy.type': 'fixed-delay', 'pekko.ask.timeout': '30 s' } };
+    expect(JSON.stringify(flinkSpecBlock(flinkChoices(withConf)))).toBe(
+      JSON.stringify({ ...stored, flink_conf: { 'heartbeat.timeout': '60 s', 'pekko.ask.timeout': '30 s', 'restart-strategy.type': 'fixed-delay' } }),
+    );
+    const jsonb = { ...stored, flink_conf: { 'taskmanager.memory.managed.fraction': '0.1', 'pekko.ask.timeout': '30 s' } };
+    expect(Object.keys(flinkSpecBlock(flinkChoices(jsonb)).flink_conf!)).toEqual(['pekko.ask.timeout', 'taskmanager.memory.managed.fraction']);
+    const sameLength = { ...stored, flink_conf: { 'b.x': '1', 'a.y': '2', 'aa': '3' } };
+    expect(Object.keys(flinkSpecBlock(flinkChoices(sameLength)).flink_conf!)).toEqual(['aa', 'a.y', 'b.x']);
   });
 });
