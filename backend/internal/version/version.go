@@ -3,4 +3,4 @@
 package version
 
 // Version is the BeziSync release.
-var Version = "0.2.0"
+var Version = "0.3.0"

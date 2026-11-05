@@ -1,6 +1,6 @@
 # bezisync
 
-![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![AppVersion: 0.3.0](https://img.shields.io/badge/AppVersion-0.3.0-informational?style=flat-square)
 
 BeziSync — self-service control plane for Debezium Server: the API, the controller and the web UI. Agents for remote
 runtimes come with the [`bezisync-agent`](../bezisync-agent) chart.
