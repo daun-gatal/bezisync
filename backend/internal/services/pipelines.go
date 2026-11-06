@@ -1008,12 +1008,17 @@ func runtimeReport(ctx context.Context, q db.Querier, rt *models.Runtime) (check
 // checks, the Flink CDC shape and the compile then all see the same numbers. A direct runtime's
 // is stored too (an agent stores its own with each report), so the deploy that follows packs
 // with it.
-func useFreshCapacity(ctx context.Context, q db.Querier, rt *models.Runtime, fresh map[string]any) error {
+//
+// The write is its own statement on the pool, never part of the caller's transaction: a deploy
+// holds its pipeline's row while the controller holds the runtime's (last_seen_at) and then wants
+// a pipeline's, so a runtime write inside the deploy's transaction could deadlock with it. Alone
+// it holds no other lock; a deploy that reads the runtime afterwards sees it committed.
+func useFreshCapacity(ctx context.Context, _ db.Querier, rt *models.Runtime, fresh map[string]any) error {
 	rt.Capacity = fresh
 	if fresh == nil || rt.Mode == "agent" {
 		return nil
 	}
-	_, err := q.Exec(ctx, `UPDATE runtimes SET capacity = $1 WHERE id = $2`, db.Map(fresh), rt.ID)
+	_, err := db.MustPool(ctx).Exec(ctx, `UPDATE runtimes SET capacity = $1 WHERE id = $2 AND capacity IS DISTINCT FROM $1`, db.Map(fresh), rt.ID)
 	return err
 }
 
