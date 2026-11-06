@@ -219,4 +219,6 @@ src/
   `TimeSeries` hides uPlot's legend and shows a readout (latest or hovered values, peak); its pure
   parts live in `lib/series.ts` because importing uPlot needs a browser.
 - Guided vs Expert mode (`useProject().expert`): Guided uses plain language with the Debezium term
-  as a secondary label; Expert reveals raw properties. Both edit the same spec.
+  as a secondary label; Expert reveals raw properties. Both edit the same spec. Guided never shows
+  the raw editor, but a value that blocks saving is never hidden: Review lists it under "Settings
+  that block saving" with Remove. An error names its field (`wizard/review.ts:reviewProblems`).

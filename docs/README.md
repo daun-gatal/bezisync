@@ -216,6 +216,13 @@ pods), and is *unknown*, never passed, when the runtime doesn't report its capac
 counts only what it adds to what the pipeline runs now. Two deploys checked at the same moment can
 each fit alone; Kubernetes then refuses the pods of the second, and the pipeline shows why.
 
+Review & deploy saves as you change it. When something can't be saved, the badge above the settings
+says which field (**Not saved: fix Memory**, or **Memory and 2 more**); click it to go there, and the
+error sits under that field. In Guided mode, an engine setting or advanced property that blocks the
+save is listed under **Settings that block saving**, with Remove. When the server refuses a save,
+Review shows why and waits until you change something, click Try again (for a network or server
+error) or leave the step.
+
 **Engine settings** (Review, Expert mode) lists the typed settings BeziSync offers for the pipeline's
 engine, source and destination, grouped by when they matter (snapshot, streaming, delivery,
 engine): each has its bounds, default and what changing it does to a running pipeline. Add one from

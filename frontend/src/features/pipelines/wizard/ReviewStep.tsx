@@ -19,10 +19,10 @@ import { CheckList } from '@/components/CheckList';
 import { useRuntimes } from '@/features/settings/RuntimesSection';
 import { ApiError } from '@/lib/api';
 import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
-import { canonicalSetting, jsonbSorted, rawErrors, settingError, tuningSettings, useClassify } from '@/lib/settings';
+import { canonicalSetting, jsonbSorted, rawErrors, tuningSettings, useClassify } from '@/lib/settings';
 import { slugify } from '@/lib/format';
 import { useDeploy, usePipelines, usePreflight, useSavedPositions, type Pipeline, type Preflight } from '@/lib/pipelines';
-import { clusterFromPreset, manualError, streamingError, usePackCluster } from '@/lib/cluster';
+import { clusterFromPreset, manualError, manualErrors, streamingError, streamingErrors, usePackCluster } from '@/lib/cluster';
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
@@ -32,7 +32,8 @@ import { FlinkClusterEditor } from './FlinkClusterEditor';
 import { FlinkRunSettings } from './FlinkSettings';
 import { OwnerPicker } from './OwnerPicker';
 import { personalSummary } from './personal';
-import { rawLabel, useAutosave } from './review';
+import { BlockingSettings } from './BlockingSettings';
+import { customErrors, focusReviewField, problemsSummary, rawLabel, reviewProblems, useAutosave, type ReviewProblem } from './review';
 import { StepHeader } from './shared';
 
 /** Changes save on their own this long after the last edit; the final checks then re-run. */
@@ -83,14 +84,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const customAmount = { cpu: Number(custom.cpu), mem: memoryMiB(custom.memory) };
   const max = policies?.max_resources ? PRESET_AMOUNTS[policies.max_resources] : null;
   const minSize = sinkCaps.min_resources ? PRESET_AMOUNTS[sinkCaps.min_resources as keyof typeof PRESET_AMOUNTS] : null;
-  const customError =
-    resources !== 'custom'
-      ? null
-      : max && (customAmount.cpu > max.cpu || customAmount.mem > max.mem)
-        ? `This project allows at most ${max.cpu} CPU and ${max.mem} MiB.`
-        : minSize && (customAmount.cpu < minSize.cpu || customAmount.mem < minSize.mem)
-          ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${minSize.cpu} CPU and ${minSize.mem} MiB.`
-          : null;
+  // Each amount is checked on its own, so each error sits under its own field.
+  const customErr = resources === 'custom' && !flink ? customErrors(customAmount, max, minSize, TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination') : {};
   const [latency, setLatency] = useState(spec.policies.latency_target_seconds);
   const [snapshotWindow, setSnapshotWindow] = useState<string | null>(spec.snapshot.window ?? null);
   const [canary, setCanary] = useState(spec.policies.delivery_canary);
@@ -116,16 +111,9 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   // Classified in both modes: Guided hides the rows but they still block saving.
   const verdicts = useClassify(project.id, pipeline.id, rawRows, rawRows.some((r) => r.key.trim() !== ''));
   // Compared with the stored spec (pipeline.spec), as the server compares with the current version.
-  // Each row says why it blocks (RawProperties); the section only points at them.
-  const rawError = rawErrors(rawRows, verdicts, spec.advanced).size ? 'Fix or remove the highlighted properties.' : null;
+  const raw = rawErrors(rawRows, verdicts, spec.advanced);
   // Stored maps come back in JSONB order: build them the same way, or the draft never matches.
   const advancedValues = jsonbSorted(Object.fromEntries(rawRows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value])));
-  const tuningError = Object.entries(tuning).some(([k, v]) => {
-    const s = tunable.find((t) => t.key === k);
-    return !s || settingError(s, v) !== null;
-  })
-    ? 'Fix or remove the highlighted engine settings.'
-    : null;
   const useTypedSetting = (row: RawRow) => {
     const s = tunable.find((t) => t.key === row.key.trim());
     if (!s) return;
@@ -189,8 +177,35 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     owner !== pipeline.owner ||
     runtimeId !== pipeline.runtime?.id ||
     JSON.stringify(nextSpec) !== JSON.stringify(spec);
-  const clusterError = clusterOn && fc.cluster ? (manualError(fc.cluster) ?? streamingError(fc.cluster)) : null;
-  const invalid = nameErr ?? rawError ?? tuningError ?? customError ?? clusterError;
+  // Every client-side reason the draft can't be saved, in page order: the badge, the Deploy
+  // reason and each field's error read this one list.
+  const problems = reviewProblems({
+    nameErr,
+    custom: customErr,
+    streaming: clusterOn && fc.cluster ? streamingErrors(fc.cluster) : {},
+    manual: clusterOn && fc.cluster ? manualErrors(fc.cluster) : {},
+    tuning,
+    tunable,
+    raw,
+    flink,
+  });
+  const invalid = problems.length > 0;
+  const problemOf = (field: ReviewProblem['field']) => problems.find((p) => p.field === field)?.message ?? null;
+  const tuningError = problems.some((p) => p.field === 'tuning') ? 'Fix or remove the highlighted engine settings.' : null;
+  // Each row says why it blocks (RawProperties); the section only points at them.
+  const rawError = problems.some((p) => p.field === 'advanced') ? 'Fix or remove the highlighted properties.' : null;
+  const blockingSettings = problems.filter((p) => p.field === 'tuning' || p.field === 'advanced');
+  const removeBlocking = (p: ReviewProblem) => {
+    if (p.field === 'tuning' && p.key !== undefined) {
+      const next = { ...tuning };
+      delete next[p.key];
+      setTuning(next);
+    } else if (p.field === 'advanced' && p.key !== undefined) {
+      // A key set twice loses its last row; a refused one goes.
+      const at = rawRows.map((r) => r.key.trim()).lastIndexOf(p.key);
+      if (at >= 0) setRawRows(rawRows.filter((_, i) => i !== at));
+    }
+  };
 
   // Save shortly after the last change, one save at a time, so versions never conflict. A save
   // the server refused is not repeated until the draft changes, Try again, or the step is left.
@@ -239,7 +254,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const deployWhy = !can('pipeline.deploy')
     ? 'You can save this draft; someone with deploy permission deploys it.'
     : invalid
-      ? 'Fix the highlighted settings first.'
+      ? `Fix ${problems[0]!.label} first.`
       : paused
         ? `Not saved: ${saveError instanceof Error ? saveError.message : 'the server refused the change.'}`
         : dirty || saving
@@ -279,8 +294,12 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               <>
                 <Loader2 className="size-3.5 animate-spin" aria-hidden /> Saving…
               </>
-            ) : dirty && invalid ? (
-              <span className="text-warn">Not saved: fix the highlighted field</span>
+            ) : invalid ? (
+              // Saved values can block too (a setting the project hid since): then nothing is
+              // unsaved, but the deploy waits for the fix.
+              <button type="button" className="cursor-pointer text-warn underline decoration-dotted underline-offset-2" onClick={() => focusReviewField(problems[0]!.field)}>
+                {dirty ? `Not saved: fix ${problemsSummary(problems)}` : `Fix ${problemsSummary(problems)} before deploying`}
+              </button>
             ) : saveError ? (
               <span className="text-bad">Not saved</span>
             ) : dirty ? (
@@ -300,9 +319,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
           fix={saveError instanceof ApiError && saveError.code === 'managed_property' ? `Remove those lines from ${rawLabel(flink)}, or set each one where its message says.` : undefined}
         />
         <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
-          <Field label="Name" error={nameErr} hint={deployed ? 'Deployed pipelines keep their name.' : 'Used in URLs, YAML and the {pipeline} placeholder.'}>
-            {(id) => <SlugInput id={id} value={name} onChange={setName} disabled={deployed} taken={others} />}
-          </Field>
+          <div data-review-field="name" className="min-w-0">
+            <Field label="Name" error={nameErr} hint={deployed ? 'Deployed pipelines keep their name.' : 'Used in URLs, YAML and the {pipeline} placeholder.'}>
+              {(id) => <SlugInput id={id} value={name} onChange={setName} disabled={deployed} taken={others} />}
+            </Field>
+          </div>
           <Field label="Owner" optional hint="The team or on-call alias shown on alerts.">
             {(id) => <OwnerPicker id={id} value={owner} onChange={setOwner} />}
           </Field>
@@ -390,21 +411,25 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
         </Field>
         {resources === 'custom' && !flink ? (
           <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-4">
-            <Field label="CPU" error={customError}>
-              {(id) => (
-                <Select id={id} value={custom.cpu} onChange={(cpu) => setCustom({ ...custom, cpu })} options={CUSTOM_CPUS.map((c) => ({ value: c, label: `${c} CPU` }))} />
-              )}
-            </Field>
-            <Field label="Memory" hint="Requested and the limit, so the connector is never squeezed.">
-              {(id) => (
-                <Select
-                  id={id}
-                  value={custom.memory}
-                  onChange={(memory) => setCustom({ ...custom, memory })}
-                  options={CUSTOM_MEMORIES.map((m) => ({ value: m, label: m.endsWith('Gi') ? `${m.slice(0, -2)} GiB` : `${m.slice(0, -2)} MiB` }))}
-                />
-              )}
-            </Field>
+            <div data-review-field="cpu" className="min-w-0">
+              <Field label="CPU" error={customErr.cpu}>
+                {(id) => (
+                  <Select id={id} value={custom.cpu} onChange={(cpu) => setCustom({ ...custom, cpu })} options={CUSTOM_CPUS.map((c) => ({ value: c, label: `${c} CPU` }))} />
+                )}
+              </Field>
+            </div>
+            <div data-review-field="memory" className="min-w-0">
+              <Field label="Memory" error={customErr.memory} hint="Requested and the limit, so the connector is never squeezed.">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={custom.memory}
+                    onChange={(memory) => setCustom({ ...custom, memory })}
+                    options={CUSTOM_MEMORIES.map((m) => ({ value: m, label: m.endsWith('Gi') ? `${m.slice(0, -2)} GiB` : `${m.slice(0, -2)} MiB` }))}
+                  />
+                )}
+              </Field>
+            </div>
             <Field label="Java heap" hint="Worked out from memory, so the JVM always keeps room.">
               {() => <Meta className="pt-2 text-sm text-ink">{heapMiB(memoryMiB(custom.memory))} MiB</Meta>}
             </Field>
@@ -418,6 +443,12 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             packing={pack.isFetching}
             readersLocked={readersLocked}
             rows={tableRows}
+            errors={{
+              streamingCpu: problemOf('streaming-cpu') ?? undefined,
+              streamingMemory: problemOf('streaming-memory') ?? undefined,
+              taskManagers: problemOf('task-managers') ?? undefined,
+              tmMemory: problemOf('tm-memory') ?? undefined,
+            }}
           />
         ) : null}
         {capture.snapshot_modes.length === 0 ? (
@@ -497,42 +528,53 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       {expert ? (
         <Card title="Engine settings">
           <div className="flex min-w-0 flex-col gap-6">
-            <Field label={flink ? 'Flink CDC source, destination and pipeline options' : 'Debezium options'} optional group error={tuningError}>
-              {() =>
-                tunable.length ? (
-                  <SettingsEditor idBase="tuning" value={tuning} onChange={setTuning} settings={tunable} caps={caps} pinned={pinned} />
-                ) : (
-                  <Meta>BeziSync offers no typed settings for this source and destination yet.</Meta>
-                )
-              }
-            </Field>
-            <Field
-              label={rawLabel(flink)}
-              optional
-              group
-              error={rawError}
-              hint={
-                !policies?.allow_advanced_properties
-                  ? 'This project doesn’t allow advanced properties: a pipeline with any can’t deploy. An Admin can allow them in Settings → Policies.'
-                  : flink
-                    ? 'Pass-through options BeziSync doesn’t offer: source.jdbc.properties.*, source.debezium.*, and the destination’s sink.properties.*, table.create.properties.* or table.properties.*. The rest show in preflight as not verified.'
-                    : 'For options BeziSync doesn’t offer, passed to Debezium as typed. Keys BeziSync sets, credentials and unsafe options are refused; the rest show in preflight as not verified.'
-              }
-            >
-              {() => (
-                <RawProperties
-                  idBase="raw"
-                  rows={rawRows}
-                  onChange={setRawRows}
-                  verdicts={verdicts}
-                  onUseSetting={useTypedSetting}
-                  keyPlaceholder={flink ? 'source.jdbc.properties.…' : 'debezium.source.…'}
-                />
-              )}
-            </Field>
+            <div data-review-field="tuning" className="min-w-0">
+              <Field label={flink ? 'Flink CDC source, destination and pipeline options' : 'Debezium options'} optional group error={tuningError}>
+                {() =>
+                  tunable.length ? (
+                    <SettingsEditor idBase="tuning" value={tuning} onChange={setTuning} settings={tunable} caps={caps} pinned={pinned} />
+                  ) : (
+                    <div className="flex min-w-0 flex-col gap-3">
+                      <Meta>BeziSync offers no typed settings for this source and destination yet.</Meta>
+                      {/* A saved setting nothing here offers still blocks: it can be removed. */}
+                      <BlockingSettings problems={blockingSettings.filter((p) => p.field === 'tuning')} onRemove={removeBlocking} expert card={false} />
+                    </div>
+                  )
+                }
+              </Field>
+            </div>
+            <div data-review-field="advanced" className="min-w-0">
+              <Field
+                label={rawLabel(flink)}
+                optional
+                group
+                error={rawError}
+                hint={
+                  !policies?.allow_advanced_properties
+                    ? 'This project doesn’t allow advanced properties: a pipeline with any can’t deploy. An Admin can allow them in Settings → Policies.'
+                    : flink
+                      ? 'Pass-through options BeziSync doesn’t offer: source.jdbc.properties.*, source.debezium.*, and the destination’s sink.properties.*, table.create.properties.* or table.properties.*. The rest show in preflight as not verified.'
+                      : 'For options BeziSync doesn’t offer, passed to Debezium as typed. Keys BeziSync sets, credentials and unsafe options are refused; the rest show in preflight as not verified.'
+                }
+              >
+                {() => (
+                  <RawProperties
+                    idBase="raw"
+                    rows={rawRows}
+                    onChange={setRawRows}
+                    verdicts={verdicts}
+                    onUseSetting={useTypedSetting}
+                    keyPlaceholder={flink ? 'source.jdbc.properties.…' : 'debezium.source.…'}
+                  />
+                )}
+              </Field>
+            </div>
           </div>
         </Card>
-      ) : null}
+      ) : (
+        // Guided mode doesn't draw the editor, but what blocks saving is still shown, with Remove.
+        <BlockingSettings problems={blockingSettings} onRemove={removeBlocking} expert={false} />
+      )}
 
       <Card
         title={flink ? "What reaches the destination" : "Events"}

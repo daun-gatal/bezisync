@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { autosaveDecision, isPaused, rawLabel, useAutosave } from '../review';
+import type { Setting } from '@/lib/settings';
+import { autosaveDecision, customErrors, focusReviewField, isPaused, problemsSummary, rawLabel, reviewProblems, useAutosave } from '../review';
 
 describe('autosaveDecision', () => {
   const base = { dirty: true, saving: false, invalid: false, paused: false };
@@ -97,5 +98,82 @@ describe('useAutosave', () => {
     h.rerender({ signature: 'a', dirty: false, invalid: false, saving: false, save });
     await tick(5_000);
     expect(save).not.toHaveBeenCalled();
+  });
+});
+
+describe('reviewProblems', () => {
+  const none = { nameErr: null, custom: {}, streaming: {}, manual: {}, tuning: {}, tunable: [] as Setting[], raw: new Map<string, string>(), flink: false };
+  const threads = { engine: 'debezium', scope: 'source', stage: 'snapshot', impact: 'restart', why: 'w', title: 'Snapshot threads', key: 'debezium.source.snapshot.max.threads', type: 'int', default: '1', min: '1', max: '16' } as Setting;
+
+  it('is empty for a valid draft', () => {
+    expect(reviewProblems(none)).toEqual([]);
+  });
+
+  it('lists every problem in page order, each on its own field', () => {
+    const got = reviewProblems({
+      ...none,
+      nameErr: 'Give the pipeline a name.',
+      custom: { memory: 'This project allows at most 768 MiB.' },
+      streaming: { cpu: 'a', memory: 'b' },
+      manual: { taskManagers: 'c', memory: 'd' },
+      tuning: { 'debezium.source.snapshot.max.threads': '99', 'x.unknown': '1' },
+      tunable: [threads],
+      raw: new Map([['debezium.format.value', 'The event format is chosen on the Destination step.']]),
+    });
+    expect(got.map((p) => [p.field, p.label])).toEqual([
+      ['name', 'Name'],
+      ['memory', 'Memory'],
+      ['streaming-cpu', 'Streaming reader CPU'],
+      ['streaming-memory', 'Streaming reader memory'],
+      ['task-managers', 'TaskManagers'],
+      ['tm-memory', 'TaskManager memory'],
+      ['tuning', 'Snapshot threads'],
+      ['tuning', 'x.unknown'],
+      ['advanced', 'Advanced Debezium properties'],
+    ]);
+    expect(got.find((p) => p.key === 'x.unknown')?.message).toBe('Not a setting this pipeline can use: remove it.');
+    expect(got.find((p) => p.field === 'advanced')?.key).toBe('debezium.format.value');
+  });
+
+  it('labels raw properties by the engine section', () => {
+    expect(reviewProblems({ ...none, flink: true, raw: new Map([['k', 'm']]) })[0]?.label).toBe('Advanced Flink CDC options');
+  });
+
+  it('checks each custom amount on its own (max before min)', () => {
+    const max = { cpu: 0.5, mem: 768 };
+    const min = { cpu: 1, mem: 1024 };
+    expect(customErrors({ cpu: 0.5, mem: 1024 }, max, null, 'Kafka')).toEqual({ memory: 'This project allows at most 768 MiB.' });
+    expect(customErrors({ cpu: 2, mem: 2048 }, max, null, 'Kafka')).toEqual({ cpu: 'This project allows at most 0.5 CPU.', memory: 'This project allows at most 768 MiB.' });
+    expect(customErrors({ cpu: 0.5, mem: 512 }, null, min, 'Kafka')).toEqual({ cpu: 'Kafka needs at least 1 CPU.', memory: 'Kafka needs at least 1024 MiB.' });
+    expect(customErrors({ cpu: 1, mem: 1024 }, null, min, 'Kafka')).toEqual({});
+  });
+
+  it('names the first problem and counts the rest', () => {
+    const p = (label: string) => ({ field: 'cpu' as const, label, message: 'm' });
+    expect(problemsSummary([])).toBe('');
+    expect(problemsSummary([p('Memory')])).toBe('Memory');
+    expect(problemsSummary([p('CPU'), p('Memory'), p('Name')])).toBe('CPU and 2 more');
+  });
+});
+
+describe('focusReviewField', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('focuses the invalid control inside the field, without scrollIntoView (jsdom)', () => {
+    document.body.innerHTML = '<div data-review-field="advanced"><input id="ok"><input id="bad" aria-invalid="true"></div>';
+    expect(focusReviewField('advanced')).toBe(true);
+    expect(document.activeElement?.id).toBe('bad');
+  });
+
+  it('falls back to the first focusable control, and matches space-separated fields', () => {
+    document.body.innerHTML = '<div data-review-field="tuning advanced"><button id="remove">Remove</button></div>';
+    expect(focusReviewField('tuning')).toBe(true);
+    expect(document.activeElement?.id).toBe('remove');
+  });
+
+  it('says so when the field is not on the page', () => {
+    expect(focusReviewField('memory')).toBe(false);
   });
 });

@@ -226,6 +226,16 @@ test('Flink CDC: an Expert sizes a custom cluster in Review, automatic then manu
     expect(saved.spec.policies.resources).toBe('custom');
     expect(saved.spec.flink_cdc.cluster).toEqual({ parallelism: 3, slot: { cpu: '0.5', memory: '768Mi' }, job_manager: { cpu: '0.5', memory: '1Gi' }, shape: 'auto' });
 
+    // A streaming size no smaller than the copy size: each field says so, and the badge names them.
+    await card.getByRole('switch', { name: /Shrink after the first copy/ }).click();
+    await choose(card.getByLabel('Streaming reader CPU', { exact: true }), '0.5 CPU');
+    await choose(card.getByLabel('Streaming reader memory', { exact: true }), '768 MiB');
+    await expect(card.locator('[data-review-field="streaming-cpu"]').getByText('nothing to shrink to')).toBeVisible();
+    await expect(card.locator('[data-review-field="streaming-memory"]').getByText('nothing to shrink to')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Not saved: fix Streaming reader CPU and 1 more' })).toBeVisible();
+    await card.getByRole('switch', { name: /Shrink after the first copy/ }).click();
+    await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+
     // Manual: seeded from the packed shape (rounded up to a choice), then two TaskManagers.
     await card.getByRole('button', { name: 'Manual' }).click();
     await card.getByLabel('TaskManagers', { exact: true }).fill('2');

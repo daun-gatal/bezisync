@@ -1,6 +1,8 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { Api, choose, signIn, unique } from './helpers';
 import { KAFKA, SOURCE_PG } from './fixtures';
+import { layoutProblems } from './layout';
 import { walkWizard } from './walk';
 
 /*
@@ -249,4 +251,92 @@ test('Guided mode still checks the raw properties a pipeline holds', async ({ pa
   await page.goto(`/p/${d.project.slug}/pipelines/new?draft=${d.pipelineId}&step=review`);
   await classified;
   await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+});
+
+test('Try again saves once more after a network error', async ({ page }) => {
+  test.setTimeout(120_000);
+  const api = await Api.signIn();
+  const d = await draftPipeline(api, 'retry');
+  await signIn(page);
+  await page.goto(`/p/${d.project.slug}/pipelines/new?draft=${d.pipelineId}&step=review`);
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  // The next save never reaches the server.
+  let failNext = true;
+  await page.route(`**${d.url}`, (route) => {
+    if (route.request().method() === 'PATCH' && failNext) {
+      failNext = false;
+      return route.abort('connectionreset');
+    }
+    return route.continue();
+  });
+  const saves = countSaves(page, d.url);
+  await page.getByRole('radio', { name: /Medium/ }).click();
+  await expect(page.getByText('Couldn’t save your changes')).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(3_000);
+  expect(saves.count(), 'a failed save was repeated by itself').toBe(1);
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  expect(saves.count()).toBe(2);
+  saves.stop();
+});
+
+test('the badge names the field to fix and goes there', async ({ page }) => {
+  test.setTimeout(180_000);
+  const api = await Api.signIn();
+  await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'expert' });
+  try {
+    const d = await draftPipeline(api, 'badge', {}, { max_resources: 'small' });
+    await signIn(page);
+    await page.goto(`/p/${d.project.slug}/pipelines/new?draft=${d.pipelineId}&step=review`);
+    await page.getByRole('radio', { name: /Custom/ }).click();
+    // Small allows 0.5 CPU and 768 MiB: the CPU fits, the memory doesn't.
+    await choose(page.getByLabel('CPU', { exact: true }), '0.5 CPU');
+    await choose(page.getByLabel('Memory', { exact: true }), '1 GiB');
+    const memory = page.locator('[data-review-field="memory"]');
+    const cpu = page.locator('[data-review-field="cpu"]');
+    await expect(memory.getByText('This project allows at most 768 MiB.')).toBeVisible();
+    await expect(cpu.getByRole('alert')).toHaveCount(0);
+    const badge = page.getByRole('button', { name: 'Not saved: fix Memory' });
+    await expect(badge).toBeVisible();
+    await expect(page.getByText('Fix Memory first.').first()).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await badge.click();
+    await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-review-field]')?.getAttribute('data-review-field'))).toBe('memory');
+    // Narrow screens: the badge and its card fit; and they are accessible.
+    await page.setViewportSize({ width: 390, height: 900 });
+    expect(await layoutProblems(page)).toEqual([]);
+    const axe = await new AxeBuilder({ page }).include('[aria-live="polite"]').include('[data-review-field="memory"]').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+    expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([]);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // Fixing it saves.
+    await choose(page.getByLabel('Memory', { exact: true }), '768 MiB');
+    await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  } finally {
+    await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'guided' });
+  }
+});
+
+test('Guided mode lists the settings that block saving, with Remove', async ({ page }) => {
+  test.setTimeout(120_000);
+  const api = await Api.signIn();
+  const key = 'debezium.source.snapshot.max.threads';
+  const d = await draftPipeline(api, 'guidedblock', { tuning: { [key]: '2' } });
+  // The project hides that setting afterwards: the saved value is one this pipeline can't use.
+  await api.send('PUT', `${d.base}/policies`, { allow_advanced_properties: true, setting_limits: { [key]: { hide: true } } });
+  await signIn(page);
+  await page.goto(`/p/${d.project.slug}/pipelines/new?draft=${d.pipelineId}&step=review`);
+  const card = page.getByRole('region', { name: 'Settings that block saving' });
+  await expect(card).toBeVisible();
+  await expect(card.getByText(key)).toBeVisible();
+  await expect(card.getByText('Switch to Expert mode (account menu) to edit these.')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Engine settings' })).toHaveCount(0);
+  // Nothing is unsaved (the value is stored), but it must go before a deploy.
+  const badge = page.getByRole('button', { name: `Fix ${key} before deploying` });
+  await expect(badge).toBeVisible();
+  await badge.click();
+  await expect(card.getByRole('button', { name: `Remove ${key}` })).toBeFocused();
+  await card.getByRole('button', { name: `Remove ${key}` }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  await expect(card).toHaveCount(0);
+  expect((await api.get<{ spec: { tuning?: Record<string, string> } }>(d.url)).spec.tuning ?? {}).toEqual({});
 });
