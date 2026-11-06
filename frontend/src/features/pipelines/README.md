@@ -7,8 +7,8 @@ Everything about pipelines in the browser: the list (`/p/$projectSlug/pipelines`
 - `[PipelinesPage.tsx:PipelinesPage]` — the list with fleet-health filter (`[FleetHealth.tsx:FleetHealth]`), search/paging in the URL, multi-select Change Debezium version, Apply YAML and Adopt.
 - `[NewPipelinePage.tsx:NewPipelinePage]` — the wizard shell: picks the step from `?step=`/`?draft=`, saves the current step before moving, asks before leaving with unsaved changes, and offers to keep or delete a draft created in this tab.
 - `[PipelinePage.tsx:PipelinePage]` — header with health/lifecycle, one primary action by state, operate menu (pause/resume/restart), Delete, approval banner, and the tabs from [page](./page/README.md).
-- `[ImportDialogs.tsx:ApplyYamlDialog]` / `[ImportDialogs.tsx:AdoptDialog]` — apply `kind: Pipeline` YAML (preview, then apply, optionally deploy) and adopt an existing Debezium Server's properties as a draft; `DiffLines`, `ApplyResults` render results.
-- `[ChangeDebeziumDialog.tsx:ChangeDebeziumDialog]` — set the Debezium image (or the default) for one or more pipelines, optionally deploying.
+- `[ImportDialogs.tsx:ApplyYamlDialog]` / `[ImportDialogs.tsx:AdoptDialog]` — apply `kind: Pipeline` YAML (preview, then apply, optionally deploy) and adopt an existing Debezium Server's properties (the draft is created from the server's import `plan`: typed settings in `tuning`, masked and excluded columns mapped) as a draft; `DiffLines`, `ApplyResults` render results.
+- `[ChangeDebeziumDialog.tsx:ChangeDebeziumDialog]` — set the Debezium image (or the default) for one or more pipelines, optionally deploying, after showing what the move changes in their settings (`debezium-images:effects`; a blocking effect is shown red).
 - `[spec.ts:fullSpec]` / `[spec.ts:FullSpec]` / `[spec.ts:specForEngine]` — the spec with every default filled, and stripped to one engine's settings; `TransformStep` and related types; `stageOf`, `withShape`, `pruneToTables`; naming (`destinationFor`, `namingError`, `sinkDestinationFor`, `sinkNamingError`), `parseAdvanced`, `deriveSinkOptions`, `optionsSchemaFor`, `SNAPSHOT_MODES`, `RESOURCES`.
 - `[useSaveSpec.ts:useSaveSpec]` / `[useSaveSpec.ts:StepHandle]` / `[useSaveSpec.ts:SaveBody]` — the save every wizard step uses and the contract a step gives the wizard.
 - Subdirectories: [page](./page/README.md) — the pipeline page's tabs; [transforms](./transforms/README.md) — the Transform step and its model; [wizard](./wizard/README.md) — the other wizard steps.
@@ -27,7 +27,7 @@ Everything about pipelines in the browser: the list (`/p/$projectSlug/pipelines`
 
 ## Side Effects
 - HTTP via `[../../lib/pipelines.ts:usePipelines]` and siblings: `GET/POST …/pipelines`, `GET/PATCH/DELETE …/pipelines/{pipeline_id}` (delete with `drop_destinations`), `POST …/pause|resume|restart`, `POST …/change-requests/{request_id}/approve|reject|cancel`.
-- `POST …/pipelines:apply`, `POST …/pipelines:adopt`, `POST …/debezium-images:apply`; reads `GET /api/v1/debezium-catalog` and `GET …/debezium-images`.
+- `POST …/pipelines:apply`, `POST …/pipelines:adopt`, `POST …/debezium-images:apply`, `POST …/debezium-images:effects`; reads `GET /api/v1/debezium-catalog` and `GET …/debezium-images`.
 - Polling: the list refetches every 5 s and one pipeline every 5 s (2 s while `deploying`, `deleting` or `snapshotting`), defined in `[../../lib/pipelines.ts:usePipeline]`.
 
 ## Verification

@@ -8,8 +8,10 @@ The steps of the pipeline wizard (`/p/$projectSlug/pipelines/new?draft=&step=`),
 - `[SourceStep.tsx:SourceStep]` — pick a source connection (and optionally a template), run its readiness check (automatically when the source was never checked or its last check is over 5 minutes old, otherwise on Re-check), create the draft pipeline.
 - `[TablesStep.tsx:TablesStep]` — choose captured tables from discovery and the personal-data choice per column (`[PersonalDataCard.tsx:PersonalDataCard]`).
 - `[SinkStep.tsx:SinkStep]` — destination connection, engine (Debezium or Flink CDC), naming template, event format and destination options.
-- `[ReviewStep.tsx:ReviewStep]` — name, owner (`[OwnerPicker.tsx:OwnerPicker]`), runtime, snapshot, size, policies, advanced/Flink settings, final checks (preflight) and deploy; `[ReviewStep.tsx:flinkSizeHelp]` describes the Flink cluster size.
+- `[ReviewStep.tsx:ReviewStep]` — name, owner (`[OwnerPicker.tsx:OwnerPicker]`), runtime, snapshot, size, policies, placement profile, engine settings (`SettingsEditor`, with recommendations and the project's limits), raw properties (`RawProperties`), advanced/Flink settings, final checks (preflight) and deploy; `[ReviewStep.tsx:flinkSizeHelp]` describes the Flink cluster size.
 - `[FlinkSettings.tsx:FlinkRunSettings]` / `[FlinkSettings.tsx:FlinkConfEditor]` / `[FlinkSettings.tsx:BATCH_LOAD_SINKS]` — Flink CDC run settings and the Expert catalogue editor.
+- `[FlinkClusterEditor.tsx:FlinkClusterEditor]` — a custom Flink CDC cluster (readers and per-slot size, or manual TaskManagers), previewed with the server's packing; `[FlinkClusterEditor.tsx:copyMinutes]` estimates the first copy.
+- `[PartitionBy.tsx:PartitionByEditor]` — Iceberg `partition_by` on Flink CDC (`[PartitionBy.tsx:partitionError]`, `[PartitionBy.tsx:cleanPartitionBy]`).
 - `[personal.ts:defaultsFor]` / `[personal.ts:setChoice]` / `[personal.ts:normalize]` / `[personal.ts:personalRows]` / `[personal.ts:personalProblem]` / `[personal.ts:rulesToSave]` / `[personal.ts:personalSummary]` — mask / remove / keep rules per column.
 
 ## Invariants
@@ -22,7 +24,7 @@ The steps of the pipeline wizard (`/p/$projectSlug/pipelines/new?draft=&step=`),
 - Deploy needs `pipeline.deploy`, valid and saved settings, a runtime and passing final checks (`deployWhy`); forcing past failed checks is offered only when the policy does not set `allow_force_deploy: false`, every failure is a source or destination check, the settings are saved, and a reason of at least 10 characters is given. With approvals required the deploy becomes an approval request.
 
 ## Side Effects
-- HTTP: `POST …/pipelines` (create draft), `PATCH …/pipelines/{pipeline_id}` with `if-match` (via `useSaveSpec`), `POST …/connections/{connection_id}/check`, `POST …/connections/{connection_id}/discover`, `POST …/pipelines/{pipeline_id}/preflight`, `POST …/pipelines/{pipeline_id}/deploy`; reads connections, connector types, engines, templates, policies, runtimes, pipelines.
+- HTTP: `POST …/pipelines` (create draft), `GET …/pipelines/{pipeline_id}/settings`, `POST …/settings:classify` and `POST …/cluster:pack` (Review), `PATCH …/pipelines/{pipeline_id}` with `if-match` (via `useSaveSpec`), `POST …/connections/{connection_id}/check`, `POST …/connections/{connection_id}/discover`, `POST …/pipelines/{pipeline_id}/preflight`, `POST …/pipelines/{pipeline_id}/deploy`; reads connections, connector types, engines, templates, policies, runtimes, pipelines.
 - Timers: the Review autosave `window.setTimeout`, cleared on each change and on unmount.
 - Module state: `[shared.tsx:createdHere]` is a process-wide `Set` of draft ids created in this browser tab.
 

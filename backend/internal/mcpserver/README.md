@@ -10,7 +10,7 @@ approvals and audit apply exactly as for the UI and CLI. No tool takes or return
 ## Interface
 - `[server.go:Handler]` — the MCP HTTP handler; takes the REST router that tools call.
 - `[server.go:Path]` — `/api/v1/mcp`; `[server.go:ResourceURL]` / `[server.go:ResourceMetadataURL]` — the OAuth resource indicator and its RFC 9728 metadata URL.
-- `[catalog.go:Catalog]` — every tool in a stable order (built once); `[catalog.go:Find]` — a tool by name.
+- `[catalog.go:Catalog]` — every tool in a stable order (built once); `[catalog.go:Find]` — a tool by name. `list_engine_settings` (`pipeline.view`) reads `GET …/pipelines/{id}/settings`; settings are changed with `update_pipeline` (`spec.tuning`, or `spec.flink_cdc.flink_conf`), so the same checks, limits and approvals apply.
 - `[tools.go:Tool]` — name, kind, required `Perm`, `Admin` flag, `Project` argument, params and the `Call` that makes REST calls; `[tools.go:Tool.Group]` — its Settings → MCP group.
 - `[tools.go:Kind]` — `[tools.go:Read]`, `[tools.go:Write]`, `[tools.go:Destructive]`; `[tools.go:Param]` — one argument schema.
 - `[server.go:Enabled]` — whether an Admin left a tool on (default: read and write on, destructive off).

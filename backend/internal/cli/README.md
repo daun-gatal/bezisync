@@ -22,6 +22,7 @@ calls `Execute`.
 - `rotate-master-key` and `enable-password-login` run in one database transaction (`[cli.go:rotateKeyCmd]`, `[cli.go:passwordLoginCmd]`).
 - `pipelines restore` and `start-over` refuse to run without `--yes` and send the pipeline name as the API's typed `confirm` (`[positions.go:restoreCmd]`, `[positions.go:startOverCmd]`).
 - `remote login` reads the token from `--token`, else from the terminal without echo, else one line of stdin; it verifies the token against `/api/v1/auth/me` before storing it in `[remote.go:ConfigPath]` with mode 0600 in a 0700 directory; `BEZISYNC_URL`/`BEZISYNC_TOKEN`/`BEZISYNC_PROJECT` override the stored values (`[remote.go:loadSettings]`).
+- `remote diff` exits 3 when deploying the manifest would break running pipelines (unless `--confirm`), and `remote apply --deploy` reads a dry-run plan first and stops with exit 3 on a breaking change unless `--confirm` is given; applied settings changes are printed with their impact (`[remote.go:printApply]`, `[remote.go:breaking]`).
 - `tunnel` reads the SSH key only from `BZ_SSH_KEY`, never from a flag (`[cli.go:tunnelCmd]`).
 - `frontend/openapi.json` must equal `OpenAPIDocument()` (`[cli_test.go:TestOpenAPIDocumentMatchesTheFrontend]`; regenerate with `make openapi`).
 

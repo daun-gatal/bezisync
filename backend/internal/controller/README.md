@@ -16,6 +16,7 @@
 - `[jobs.go:RunJob]` — dispatches `restart`, `cleanup`, `snapshot`, `notify`; `[jobs.go:RunJobs]` claims and runs due jobs; `[jobs.go:Defer]` reschedules without counting an attempt.
 - `[uninstall.go:Plan]` / `[uninstall.go:Uninstall]` with `[uninstall.go:PlanItem]`, `[uninstall.go:UninstallEntry]` — list, then remove, every live pipeline's workload, source artifacts and offsets.
 - `[flinkcdc.go:observeFlink]` — Flink CDC evidence from the helper's `/q/health` and `/bz/status`, mapped onto `domain.Metrics` (`flinkMetrics`), a DOWN reason (`flinkDown`) and `status.flink` (`flinkStatus`).
+- `[flinkcdc.go:Controller.flinkPhase]` — each tick of a running custom Flink CDC cluster, applies `services.FlinkPhaseStep` (shrink after the first copy, or revert a failed streaming shape) and audits the resize with actor `controller`; the new shape takes effect on the next tick through its config hash.
 
 ## Invariants
 - One leader: the lock is held on a dedicated connection pinged with `SELECT 1` every tick (`[controller.go:Controller.lead]`); losing it ends leadership.

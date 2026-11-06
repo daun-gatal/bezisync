@@ -15,6 +15,8 @@ later file is a forward change on top of it.
 - `[00005_pipeline_version_sealed.sql:sealed_at]` — `pipeline_versions.sealed_at`; a data step seals every existing version except the current one of a never-deployed, never-submitted pipeline.
 - `[00006_secret_store_credentials_replaced_at.sql:secrets_updated_at]` — `secret_stores.secrets_updated_at`, backfilled from `updated_at` where credentials exist.
 - `[00007_engines.sql:engine_secrets_enc]` — `pipelines.engine` (`debezium` | `flink-cdc`, CHECK-constrained), `pipelines.engine_secrets_enc`, and `debezium_images.engine`.
+- `[00008_allow_advanced_properties.sql:allow_advanced_properties]` — data only: projects whose working or deployed pipeline versions already use `advanced` properties get the new policy `allow_advanced_properties`, with one `project.policies_updated` audit event each, so the upgrade blocks nothing that deploys today.
+- `[00009_runtime_placement.sql:placement_profiles]` — `runtimes.placement_profiles` (jsonb, default `[]`): named node selectors, tolerations, priority class and labels of a Kubernetes runtime.
 
 ## Invariants
 - Files are numbered `NNNNN_name.sql` and never edited once released; a schema change is a new file written by `make migration m="…"` (`.rules/backend.md`).
@@ -23,7 +25,7 @@ later file is a forward change on top of it.
 - `00001_baseline.sql` must stay identical to Alembic revision 0018's schema (`[../migrate.go:AlembicHead]`).
 
 ## Side Effects
-- DDL and data updates on the BeziSync PostgreSQL database when goose applies them (tables above; `00005` and `00006` rewrite existing rows).
+- DDL and data updates on the BeziSync PostgreSQL database when goose applies them (tables above; `00005`, `00006` and `00008` rewrite existing rows; `00008` also writes `events`).
 
 ## Verification
 - Run: `make verify-quick GO_PKGS="./internal/migrate/"`

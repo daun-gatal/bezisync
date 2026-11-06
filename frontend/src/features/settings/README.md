@@ -15,6 +15,7 @@ The Admin-only Settings page and its sections: people and projects, feedback inb
 - `[SecretStoresSection.tsx:SecretStoresSection]` — secret stores: add/edit (tested first), test, try a reference, copy to another project, delete.
 - `[EngineVersionsSection.tsx:EngineVersionsSection]` — Debezium and Flink CDC image catalogue per engine (`?engine=`): add, label, default, deprecate, remove.
 - `[PoliciesSection.tsx:PoliciesSection]` / `[PoliciesSection.tsx:blockedBy]` — project policies (allow-lists, approvals, force deploy, size cap, pipelines-per-source limit, transform switches) and which deployed pipelines a draft would block on their next deploy.
+- `[SettingLimits.tsx:SettingLimits]` (`[SettingLimits.tsx:limitText]`, `[SettingLimits.tsx:newLimitError]`) — per-setting project limits (range, choices, pin, hide) in Policies, with the impact on existing pipelines before saving; `[PlacementProfiles.tsx:PlacementProfiles]` / `[PlacementProfiles.tsx:profileError]` — a Kubernetes runtime's placement profiles in Runtimes.
 - `[TemplatesSection.tsx:TemplatesSection]` — published templates: "Use template" (with `pipeline.edit`, opens the wizard with `?template=`), delete (with `project.manage`); publishing happens from a pipeline's History tab.
 - `[AuditSection.tsx:AuditSection]` — the project's audit log (cursor-paged) with CSV / JSON Lines export links.
 
@@ -40,7 +41,7 @@ The Admin-only Settings page and its sections: people and projects, feedback inb
 - HTTP, runtimes: `GET …/runtime-kinds`, `GET/POST …/runtimes`, `PATCH/DELETE …/runtimes/{runtime_id}`, `POST …/runtimes/{runtime_id}/test`, `POST …/runtimes/{runtime_id}/agent-token`.
 - HTTP, secret stores: `GET …/secret-store-kinds`, `GET/POST …/secret-stores`, `PATCH/DELETE …/secret-stores/{store_id}`, `POST …/test`, `POST …/check-ref`, `POST …/copy`.
 - HTTP, engines: `GET /api/v1/engines`, `GET /api/v1/debezium-catalog?engine=` (and without `engine` for the runtime image picker), `POST /api/v1/debezium-catalog`, `PATCH/DELETE /api/v1/debezium-catalog/{image_id}`.
-- HTTP, guardrails: `GET/PUT …/policies` (plus connector types, runtimes and pipelines for the blocked-pipelines list), `GET …/templates`, `DELETE …/templates/{template_id}`, `GET …/events?audit_only=true`; export links download `…/audit:export?format=csv|jsonl`.
+- HTTP, guardrails: `GET/PUT …/policies`, `POST …/policies/setting-limits:impact` (plus connector types, runtimes and pipelines for the blocked-pipelines list), `GET …/templates`, `DELETE …/templates/{template_id}`, `GET …/events?audit_only=true`; export links download `…/audit:export?format=csv|jsonl`.
 
 ## Verification
 - Run: `cd frontend && bun run test src/features/settings`

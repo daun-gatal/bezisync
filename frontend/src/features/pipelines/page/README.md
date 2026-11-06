@@ -4,14 +4,14 @@
 The tabs of one pipeline's page (`/p/$projectSlug/pipelines/$pipelineId?tab=`), rendered by `../PipelinePage.tsx`: Overview, Data, Events, Logs, Snapshots (Positions on Flink CDC) and History. Card wording is decided by the pure functions in `overview.ts` so it can be tested without rendering; server state comes from the hooks in `lib/pipelines.ts`.
 
 ## Interface
-- `[Overview.tsx:Overview]` — flow strip, stale-status and reason notices, Flink cluster card, metrics chart (`TimeSeries`), Since start, Source protection, Transforms and delivery cards.
+- `[Overview.tsx:Overview]` — flow strip, stale-status and reason notices, Flink cluster card (with "shrink now" for a custom cluster after its copy, `pipeline.operate`), metrics chart (`TimeSeries`), Since start, Source protection, Transforms and delivery cards.
 - `[overview.ts:protectionView]` / `[overview.ts:transformView]` / `[overview.ts:flinkView]` — what Source protection, Transforms (output vs steps; Flink CDC describes tables kept in sync) and the Flink cluster card say; helpers `formatWindow`, `formatLatency`, `latest`.
 - `[Flow.tsx:Flow]` / `[Flow.tsx:flinkLine]` — source → engine → destination strip with link states and the engine line.
 - `[DataTab.tsx:DataTab]` — captured tables with their destinations and column rules (masked / removed / kept), and the tracked schema with "Mark as reviewed" for breaking changes (`SchemaSection`, offered with `pipeline.operate` while `pending_breaking > 0`).
 - `[StreamTabs.tsx:EventsTab]` / `[StreamTabs.tsx:LogsTab]` — sample events per table, and connector logs with level/search filtering (`[StreamTabs.tsx:filterLogs]`); on Flink CDC a component picker (`[StreamTabs.tsx:logComponents]`).
 - `[SnapshotsTab.tsx:SnapshotsTab]` / `[SnapshotsTab.tsx:copyEstimate]` — Debezium: re-copy chosen tables (`Recopy`) and reset the stored position (`Position`); Flink CDC: `FlinkPositions` plus an explanation. `LARGE_TABLES`/`LARGE_ROWS` mark a large copy.
 - `[FlinkPositions.tsx:FlinkPositions]` / `[FlinkPositions.tsx:startOverEffects]` / `[FlinkPositions.tsx:positionLabel]` — saved positions newest first, Restore, and Start over (copy again / from now / since a time).
-- `[HistoryTab.tsx:HistoryTab]` / `[HistoryTab.tsx:DiffView]` — versions with rendered config, deploy/roll back (`DeployConfirm`), activity, diff, Export YAML, Promote to another project, Save as template.
+- `[HistoryTab.tsx:HistoryTab]` / `[HistoryTab.tsx:DiffView]` — versions with rendered config, what each version changes in the settings (`settings_change`, with impacts), deploy/roll back (`DeployConfirm`), activity, diff, Export YAML, Promote to another project, Save as template.
 
 ## Invariants
 - Source protection never turns a missing value into a reassuring one: an error or unmeasured probe is an `Unknown` grey pill (`[overview.ts:protectionView]`).

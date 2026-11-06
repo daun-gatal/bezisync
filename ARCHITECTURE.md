@@ -91,6 +91,7 @@ These hold across directory boundaries. Breaking one is a design change and need
   drifted, so the compiler and its JSON/YAML encoders stay byte-stable
   ([compiler](backend/internal/compiler/README.md), [pyjson](backend/internal/pyjson/README.md),
   [pyyaml](backend/internal/pyyaml/README.md)).
+- **One settings registry.** Every option a pipeline may tune, for both engines, is an `engine.Setting` ([engine](backend/internal/engine/README.md)); the compiler, preflight, wizard, policies and MCP read it, and `compiler.ClassifyAdvanced` is the only judge of a raw key ([compiler](backend/internal/compiler/README.md)). A check BeziSync can't verify is `unknown`, never a pass ([checks](backend/internal/checks/README.md)).
 - **The API is spec-first.** `backend/internal/api/openapi.json` is the contract the frontend
   client is generated from. `TestRoutesMatchOpenAPI` and `make openapi-check` keep the two in step.
 - **Migrations are goose SQL, forward-only,** with `internal/migrate/testdata/schema.txt` updated

@@ -14,6 +14,8 @@ The web UI's data and domain layer: the typed API client, the session and projec
 - Pipeline status: `[status.tsx:statusOf]`, `[status.tsx:isStale]`, `[status.tsx:HealthBadge]`, `[status.tsx:LifecycleBadge]`, `[status.tsx:needsAttention]`, `[status.tsx:pipelineTone]`, `[status.tsx:fleetGroup]` (`[status.tsx:FLEET]`), `[status.tsx:snapshotProgress]`, the label tables `[status.tsx:LIFECYCLE]` / `[status.tsx:HEALTH]`.
 - Errors: `[errors.ts:describeError]` (what happened, why, what to do, request ID), `[errors.ts:isRetryable]`, `[errors.ts:wrongPassword]`.
 - Engines: `[engines.ts:engineGate]`, `[engines.ts:runs]`, `[engines.ts:engineChoices]`, `[engines.ts:pickEngine]`, `[engines.ts:flinkChoices]`, `[engines.ts:flinkSpecBlock]`, `[engines.ts:ENGINE_TITLE]`, `[engines.ts:ENGINE_PITCH]`.
+- Settings: `[settings.ts:Setting]` and `[settings.ts:Impact]` (the server registry's types), `[settings.ts:IMPACT]` / `[settings.ts:IMPACT_ORDER]` / `[settings.ts:heaviest]`, `[settings.ts:STAGES]`, `[settings.ts:tuningSettings]`, `[settings.ts:settingError]` / `[settings.ts:canonicalSetting]` (mirror `engine.CheckSetting` / `CanonicalSetting`), `[settings.ts:jsonbSorted]`, `[settings.ts:useClassify]`.
+- Flink CDC clusters: `[cluster.ts:usePackCluster]` (the server's `cluster:pack`), `[cluster.ts:clusterFromPreset]`, `[cluster.ts:streamingFrom]`, `[cluster.ts:streamingError]`, `[cluster.ts:manualError]`, bounds (`[cluster.ts:SLOT_CPUS]`, `[cluster.ts:MAX_PARALLELISM]`, `[cluster.ts:MAX_TASK_MANAGERS]`, `[cluster.ts:MAX_SLOTS]` …), `[cluster.ts:mib]`, `[cluster.ts:memoryLabel]`.
 - Secret references: `[secretRefs.ts:parseRef]`, `[secretRefs.ts:formatRef]`, `[secretRefs.ts:guessKey]`.
 - Policies: `[policies.ts:allows]`, `[policies.ts:sizeAllowed]`, `[policies.ts:SIZES]`.
 - Preferences: `[theme.ts:useTheme]` / `[theme.ts:setTheme]` / `[theme.ts:readTheme]` / `[theme.ts:applyTheme]` (`[theme.ts:THEMES]`), `[tour.ts:readTourSeen]` / `[tour.ts:writeTourSeen]`.
@@ -28,6 +30,8 @@ The web UI's data and domain layer: the typed API client, the session and projec
 - `[secretRefs.ts:parseRef]` uses the same `ref+<store>://<path>#<key>` grammar as the backend's `internal/secrets` ParseRef; keep them in step.
 - `[feedback.ts:FEEDBACK_KINDS]` mirrors the backend's feedback kinds and `[feedback.ts:MAX_FEEDBACK]` is 5000.
 - `[policies.ts:allows]` treats a null or missing list as "everything allowed"; `[policies.ts:sizeAllowed]` compares against `[policies.ts:SIZES]` order.
+- `[settings.ts:settingError]` and `[settings.ts:canonicalSetting]` must agree with the backend's `engine.CheckSetting` and `CanonicalSetting`; the server re-checks every save. Maps the wizard compares with a stored spec are put in JSONB key order first (`[settings.ts:jsonbSorted]`), or a draft looks changed forever and keeps saving.
+- Clusters are packed by the server (`[cluster.ts:usePackCluster]`), never in the browser, so the preview matches what a deploy packs.
 - `[paging.ts:useCursorPages]` restarts from the newest page when its key or page size changes, and only the newest page polls.
 - Local storage access is wrapped so blocked storage never throws (`[tour.ts:readTourSeen]`; `[theme.ts:readTheme]` via `components/ui/hooks`).
 

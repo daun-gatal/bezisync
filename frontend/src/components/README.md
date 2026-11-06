@@ -8,6 +8,8 @@ Shared, domain-aware components used by several feature screens: the descriptor-
 - `[SchemaForm.tsx:fieldsOf]`, `[SchemaForm.tsx:isVisible]`, `[SchemaForm.tsx:defaultsOf]`, `[SchemaForm.tsx:cleanValues]` — the pure schema helpers the form and its callers share.
 - `[CheckList.tsx:CheckList]` — a preflight or connection check report (`[CheckList.tsx:CheckReport]`, `[CheckList.tsx:Check]`) grouped by category, with fixes and a "Send to my DBA" message; `[CheckList.tsx:reportBadge]` is its one-pill summary.
 - `[TimeSeries.tsx:TimeSeries]` — a uPlot chart of at most two series with a hover readout, peak label and a screen-reader `summary`.
+- Engine settings: `[SettingsEditor.tsx:SettingsEditor]` (registry settings grouped by stage, with `[SettingsEditor.tsx:ImpactPill]` and `[SettingsEditor.tsx:settingText]`), `[RawProperties.tsx:RawProperties]` (raw keys judged by the server's classify, `[RawProperties.tsx:FIX_LABEL]`), `[Recommendations.tsx:Recommendations]` / `[Recommendations.tsx:freshRecommendations]` (only within `[Recommendations.tsx:FRESHNESS_MS]` of their evidence), `[SettingsChange.tsx:SettingsChangeList]` / `[SettingsChange.tsx:settingsChangeLines]` (what a deploy changes, with impacts).
+- `[ClusterDiagram.tsx:ClusterDiagram]` — a Flink CDC cluster shape (`[ClusterDiagram.tsx:ClusterShape]`, `[ClusterDiagram.tsx:readersPerTaskManager]`, `[ClusterDiagram.tsx:clusterSummary]`).
 - Subdirectories: [ui](./ui/README.md) — the design system primitives.
 
 ## Invariants
@@ -15,6 +17,8 @@ Shared, domain-aware components used by several feature screens: the descriptor-
 - `[SchemaForm.tsx:cleanValues]` drops fields hidden by `ui.when` (`[SchemaForm.tsx:isVisible]`), empty strings and null nullable values, splits lists on commas and converts numbers; callers submit its output, not the raw form values.
 - `[SchemaForm.tsx:isVisible]` resolves a `ui.when` name from the form's values, then the sibling `context`, then the schema default.
 - Expert-only fields are hidden outside expert mode unless they hold a non-default value, so a saved setting is never invisible.
+- A check with status `unknown` is grey ("Not verified") and sorts after warnings; a report with unknowns but no warnings shows its summary grey, never "Ready" (`[CheckList.tsx:reportBadge]`).
+- Raw properties are never judged in the browser: `[RawProperties.tsx:RawProperties]` shows what the server's `settings:classify` says, so the wizard never copies the classifier.
 - `[CheckList.tsx:reportBadge]` never shows Ready without a report: no report is "Not checked" (grey), a failed report shows its summary in the bad tone.
 
 ## Side Effects
