@@ -3,7 +3,7 @@ import { plural } from '@/components/ui/text';
 import { formatBytes } from '@/lib/format';
 import type { FlinkStatus, SourceImpact } from '@/lib/status';
 import type { FullSpec, TransformType } from '../spec';
-import { effectiveDeletes, METADATA, metadataField, summarize, summarizeValues, TYPE_TITLE, type ShapeCtx } from '../transforms/model';
+import { effectiveDeletes, shapeFields, METADATA, metadataField, summarize, summarizeValues, TYPE_TITLE, type ShapeCtx } from '../transforms/model';
 
 /** One fact in Source protection. `note` is a short second line. */
 export interface Fact {
@@ -199,7 +199,6 @@ export interface Row {
 export function transformView(spec: FullSpec, flink?: { sinkType?: string }, ctx: ShapeCtx = {}): { output: Row[]; steps: Row[] } {
   const output: Row[] = [];
   if (flink) return flinkTransformView(spec, flink.sinkType);
-  const unwrap = spec.transforms.find((t) => t.type === 'unwrap');
   // As the compiler runs it: Keep deleted rows (or the destination) adds the row shape and decides deletes.
   const effective = effectiveDeletes(spec.transforms, spec.sink.options, { ...ctx, flink: false });
   if (spec.transforms.some((t) => t.type === 'outbox')) {
@@ -214,7 +213,7 @@ export function transformView(spec: FullSpec, flink?: { sinkType?: string }, ctx
           ? { icon: 'delete', title: 'Deletes become tombstones', detail: 'An empty message with the row’s key' }
           : { icon: 'delete', title: 'Deletes are dropped', detail: 'Consumers never see them' },
     );
-    const extra = unwrap ? (unwrap.add_fields ?? []) : spec.transforms.some((t) => t.type === 'soft_delete') ? ['op', 'source.ts_ms'] : (ctx.unwrap?.add_fields ?? []);
+    const extra = shapeFields(spec.transforms, ctx);
     if (extra.length) {
       output.push({
         icon: 'fields',

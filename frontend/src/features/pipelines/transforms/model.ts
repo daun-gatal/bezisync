@@ -724,6 +724,19 @@ export function effectiveDeletes(steps: TransformStep[], options: Record<string,
   return { mode: 'envelope', by: 'shape' };
 }
 
+/**
+ * The metadata fields the compiled row shape adds: the spec's unwrap with the destination's
+ * required ones merged in (withSinkUnwrap), the operation and source time on an unwrap the
+ * compiler adds for Keep deleted rows (withSoftDelete), else the destination's own.
+ */
+export function shapeFields(steps: TransformStep[], ctx: ShapeCtx = {}): string[] {
+  const unwrap = steps.find((t) => t.type === 'unwrap');
+  const required = ctx.unwrap?.add_fields ?? [];
+  if (unwrap) return [...(unwrap.add_fields ?? []), ...required.filter((f) => !(unwrap.add_fields ?? []).includes(f))];
+  if (steps.some((t) => t.type === 'soft_delete')) return ['op', 'source.ts_ms'];
+  return required;
+}
+
 const DELETE_TEXT: Partial<Record<DeleteMode, string>> = { rewrite: 'deletes kept with __deleted = true', tombstone: 'deletes become tombstones', drop: 'deletes dropped' };
 
 /**
@@ -734,9 +747,7 @@ export function summarizeShape(steps: TransformStep[], options: Record<string, u
   const d = effectiveDeletes(steps, options, ctx);
   const text = DELETE_TEXT[d.mode];
   if (!text) return null;
-  const unwrap = steps.find((t) => t.type === 'unwrap');
-  // An unwrap the compiler adds for Keep deleted rows carries the operation and source time.
-  const fields = unwrap ? (unwrap.add_fields ?? []) : steps.some((t) => t.type === 'soft_delete') ? ['op', 'source.ts_ms'] : (ctx.unwrap?.add_fields ?? []);
+  const fields = shapeFields(steps, ctx);
   const why = d.by === 'keep_deleted' ? ' (Keep deleted rows)' : d.by === 'destination' ? ' (the destination’s Deletes setting)' : '';
   const meta = fields.map(metadataField);
   return `Row after change · ${text}${why}${meta.length ? ` · adds ${meta.join(', ')}` : ''}`;

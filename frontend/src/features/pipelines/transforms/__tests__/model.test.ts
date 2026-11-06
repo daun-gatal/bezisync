@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, drawOrder, effectiveDeletes, sectionOf, summarizeShape, TYPE_TITLE, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, computedError, defaultArgs, formulaText, kindFits, FLINK_ONLY_STEPS, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, drawOrder, effectiveDeletes, sectionOf, shapeFields, summarizeShape, TYPE_TITLE, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, computedError, defaultArgs, formulaText, kindFits, FLINK_ONLY_STEPS, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -371,5 +371,20 @@ describe('a new keep-events filter', () => {
     expect(f.match).toBeUndefined();
     expect(f.operations?.length).toBeGreaterThan(0);
     expect(stepErrors([f]).size).toBe(0);
+  });
+});
+
+describe('the shape as the compiler builds it', () => {
+  const jdbc = { required: false, add_fields: [], delete_handling: [], delete_handling_from: { option: 'deletes', map: { delete: 'tombstone', ignore: 'drop' } } };
+  it('says the destination decides deletes (JDBC deletes: delete)', () => {
+    expect(summarizeShape([{ type: 'unwrap', id: 'u', delete_handling: 'rewrite', add_fields: [] }], { deletes: 'delete' }, { unwrap: jdbc })).toBe(
+      'Row after change · deletes become tombstones (the destination’s Deletes setting)',
+    );
+  });
+  it('merges the fields a destination requires into the spec\'s unwrap (withSinkUnwrap)', () => {
+    const iceberg = { required: true, add_fields: ['op', 'source.ts_ms'], delete_handling: ['rewrite'], delete_handling_from: null };
+    expect(shapeFields([{ type: 'unwrap', id: 'u', add_fields: ['op'] }], { unwrap: iceberg })).toEqual(['op', 'source.ts_ms']);
+    expect(shapeFields([{ type: 'soft_delete', id: 's' }])).toEqual(['op', 'source.ts_ms']);
+    expect(shapeFields([], { unwrap: iceberg })).toEqual(['op', 'source.ts_ms']);
   });
 });

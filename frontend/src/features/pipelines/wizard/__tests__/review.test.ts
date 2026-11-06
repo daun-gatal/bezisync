@@ -57,12 +57,13 @@ describe('useAutosave', () => {
     expect(save).toHaveBeenCalledTimes(2);
   });
 
-  it('Try again saves the same draft once more', async () => {
+  it('Try again (attempt) saves the same draft once more, then waits again', async () => {
     const save = vi.fn(async () => false);
     const h = run({ signature: 'a', dirty: true, invalid: false, saving: false, save });
     await tick(800);
-    act(() => h.result.current.retry());
-    await tick(800);
+    await act(async () => {
+      await h.result.current.attempt();
+    });
     expect(save).toHaveBeenCalledTimes(2);
     await tick(10_000);
     expect(save).toHaveBeenCalledTimes(2);
@@ -135,6 +136,10 @@ describe('reviewProblems', () => {
     expect(got.find((p) => p.field === 'advanced')?.key).toBe('debezium.format.value');
   });
 
+  it('never names Placement or a manual cluster\'s streaming size (no such input; streamingErrors returns none)', () => {
+    expect(reviewProblems({ ...none, streaming: {} }).map((p) => p.field)).toEqual([]);
+  });
+
   it('labels raw properties by the engine section', () => {
     expect(reviewProblems({ ...none, flink: true, raw: new Map([['k', 'm']]) })[0]?.label).toBe('Advanced Flink CDC options');
   });
@@ -152,6 +157,7 @@ describe('reviewProblems', () => {
     const p = (label: string) => ({ field: 'cpu' as const, label, message: 'm' });
     expect(problemsSummary([])).toBe('');
     expect(problemsSummary([p('Memory')])).toBe('Memory');
+    expect(problemsSummary([p('CPU'), p('Memory')])).toBe('CPU and 1 more');
     expect(problemsSummary([p('CPU'), p('Memory'), p('Name')])).toBe('CPU and 2 more');
   });
 });

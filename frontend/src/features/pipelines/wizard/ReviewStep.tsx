@@ -301,7 +301,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               <button type="button" className="cursor-pointer text-warn underline decoration-dotted underline-offset-2" onClick={() => focusReviewField(problems[0]!.field)}>
                 {dirty ? `Not saved: fix ${problemsSummary(problems)}` : `Fix ${problemsSummary(problems)} before deploying`}
               </button>
-            ) : saveError ? (
+            ) : paused ? (
               <span className="text-bad">Not saved</span>
             ) : dirty ? (
               'Saving soon…'

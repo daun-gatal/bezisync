@@ -35,8 +35,8 @@ export function rawLabel(flink: boolean): string {
 /**
  * The Review autosave: saves `delay` ms after the last change while `autosaveDecision` says
  * `schedule`, one save at a time. A refused save remembers the draft's signature and pauses
- * until the signature changes or `retry` is called. `attempt` saves now (Try again, leaving
- * the step) and records the outcome the same way.
+ * until the signature changes. `attempt` saves now (Try again, leaving the step) and records the
+ * outcome the same way.
  */
 export function useAutosave(o: { signature: string; dirty: boolean; invalid: boolean; saving: boolean; save: () => Promise<boolean>; delay?: number }) {
   const { signature, dirty, invalid, saving, delay = 800 } = o;
@@ -58,8 +58,7 @@ export function useAutosave(o: { signature: string; dirty: boolean; invalid: boo
     }, delay);
     return () => window.clearTimeout(t);
   }, [signature, state, delay, attempt]);
-  const retry = useCallback(() => setFailedSignature(null), []);
-  return { state, paused, attempt, retry };
+  return { state, paused, attempt };
 }
 
 /** A Review control that can hold a problem: its `data-review-field` wrapper. */
