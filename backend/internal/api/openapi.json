@@ -3297,6 +3297,7 @@
         "type": "object"
       },
       "FlinkSetting": {
+        "description": "A tunable setting of the registry (both engines).",
         "properties": {
           "choices": {
             "items": {
@@ -3422,8 +3423,7 @@
           "why"
         ],
         "title": "FlinkSetting",
-        "type": "object",
-        "description": "A tunable setting of the registry (both engines)."
+        "type": "object"
       },
       "FlinkSize": {
         "properties": {
@@ -3596,12 +3596,12 @@
       "ImageChangeResult": {
         "properties": {
           "effects": {
+            "description": "What the release does to the pipeline's settings; omitted when nothing.",
             "items": {
               "$ref": "#/components/schemas/SettingEffect"
             },
             "title": "Effects",
-            "type": "array",
-            "description": "What the release does to the pipeline's settings; omitted when nothing."
+            "type": "array"
           },
           "message": {
             "title": "Message",
@@ -3803,32 +3803,32 @@
         "description": "Every property in one of five buckets, and the spec to create the draft from: typed settings in tuning, excluded and masked columns mapped.",
         "properties": {
           "expert": {
+            "description": "Raw properties kept as advanced.",
             "items": {
               "$ref": "#/components/schemas/ImportKey"
             },
-            "type": "array",
-            "description": "Raw properties kept as advanced."
+            "type": "array"
           },
           "forbidden": {
+            "description": "Refused: BeziSync can't pass them on.",
             "items": {
               "$ref": "#/components/schemas/ImportKey"
             },
-            "type": "array",
-            "description": "Refused: BeziSync can't pass them on."
+            "type": "array"
           },
           "modelled": {
+            "description": "Set by a wizard choice (or replaced by BeziSync's own).",
             "items": {
               "$ref": "#/components/schemas/ImportKey"
             },
-            "type": "array",
-            "description": "Set by a wizard choice (or replaced by BeziSync's own)."
+            "type": "array"
           },
           "owned": {
+            "description": "BeziSync manages these itself (connection, offsets, slot, secrets).",
             "items": {
               "$ref": "#/components/schemas/ImportKey"
             },
-            "type": "array",
-            "description": "BeziSync manages these itself (connection, offsets, slot, secrets)."
+            "type": "array"
           },
           "spec": {
             "additionalProperties": true,
@@ -3836,11 +3836,11 @@
             "type": "object"
           },
           "tunable": {
+            "description": "Typed settings; one with a problem is left out until changed.",
             "items": {
               "$ref": "#/components/schemas/ImportKey"
             },
-            "type": "array",
-            "description": "Typed settings; one with a problem is left out until changed."
+            "type": "array"
           },
           "warnings": {
             "items": {
@@ -5561,6 +5561,7 @@
         "type": "object"
       },
       "PipelineSetting": {
+        "description": "A tunable setting of the registry (both engines).",
         "properties": {
           "choices": {
             "items": {
@@ -5703,11 +5704,21 @@
           "why"
         ],
         "title": "PipelineSetting",
-        "type": "object",
-        "description": "A tunable setting of the registry (both engines)."
+        "type": "object"
       },
       "PipelineSettingsRead": {
         "properties": {
+          "advanced_allowed": {
+            "title": "Advanced Allowed",
+            "type": "boolean"
+          },
+          "advanced_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Advanced Keys",
+            "type": "array"
+          },
           "engine": {
             "enum": [
               "debezium",
@@ -5721,17 +5732,6 @@
               "$ref": "#/components/schemas/PipelineSetting"
             },
             "title": "Settings",
-            "type": "array"
-          },
-          "advanced_allowed": {
-            "title": "Advanced Allowed",
-            "type": "boolean"
-          },
-          "advanced_keys": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Advanced Keys",
             "type": "array"
           }
         },
@@ -6180,12 +6180,12 @@
             "title": "Properties"
           },
           "recommendations": {
+            "description": "Omitted when there are none.",
             "items": {
               "$ref": "#/components/schemas/Recommendation"
             },
             "title": "Recommendations",
-            "type": "array",
-            "description": "Omitted when there are none."
+            "type": "array"
           },
           "sections": {
             "items": {
@@ -14487,6 +14487,7 @@
     },
     "/api/v1/projects/{project_id}/debezium-images:effects": {
       "post": {
+        "description": "What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes.",
         "operationId": "image_effects_api_v1_projects__project_id__debezium_images_effects_post",
         "parameters": [
           {
@@ -14518,8 +14519,8 @@
                   "items": {
                     "$ref": "#/components/schemas/PipelineEffects"
                   },
-                  "type": "array",
-                  "title": "Effects"
+                  "title": "Effects",
+                  "type": "array"
                 }
               }
             },
@@ -14539,8 +14540,7 @@
         "summary": "Preview a Debezium version change",
         "tags": [
           "debezium-images"
-        ],
-        "description": "What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes."
+        ]
       }
     },
     "/api/v1/projects/{project_id}/events": {
@@ -15311,6 +15311,7 @@
     },
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:shrink": {
       "post": {
+        "description": "Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet.",
         "operationId": "shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post",
         "parameters": [
           {
@@ -15359,8 +15360,7 @@
         "summary": "Shrink a Flink CDC cluster now",
         "tags": [
           "pipelines"
-        ],
-        "description": "Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet."
+        ]
       }
     },
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/config": {
@@ -17075,6 +17075,7 @@
     },
     "/api/v1/projects/{project_id}/policies/setting-limits:impact": {
       "post": {
+        "description": "How many of the project's pipelines (their current versions) proposed setting limits would refuse, with a few names; nothing is saved. Admins.",
         "operationId": "setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post",
         "parameters": [
           {
@@ -17123,8 +17124,7 @@
         "summary": "Count what setting limits would refuse",
         "tags": [
           "approvals"
-        ],
-        "description": "How many of the project's pipelines (their current versions) proposed setting limits would refuse, with a few names; nothing is saved. Admins."
+        ]
       }
     },
     "/api/v1/projects/{project_id}/runtime-kinds": {
