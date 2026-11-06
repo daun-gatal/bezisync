@@ -211,7 +211,9 @@ Unsafe options are never passed: SQL on the source (`database.initial.statements
 `heartbeat.action.query`, `replica.identity.autoset.values`), dropping or skipping changes
 (`slot.drop.on.stop`, `offset.mismatch.strategy`, `lsn.flush.*`), weaker TLS
 (`database.sslfactory`), classes loaded into the connector (`converters`, `*.custom.name`,
-`post.processors`, `topic.naming.strategy`), `snapshot.select.statement.overrides`, logging
+`post.processors`, `topic.naming.strategy`), JDBC driver options (`driver.*`, `database.*`) that read
+local files, load classes, call out, log to files or change TLS and sign-in (such as MySQL's
+`allowLoadLocalInfile` and `autoDeserialize`, or a `socketFactory`), `snapshot.select.statement.overrides`, logging
 changes that could reveal secrets, and every `quarkus.*` key. Values can't hold `${…}` (Debezium
 Server would fill it in from the pod's environment) or line breaks. Saving refuses a key it adds or
 changes; one an older pipeline already has still saves, and its deploy is blocked by the

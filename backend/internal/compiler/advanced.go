@@ -102,6 +102,14 @@ var modelledSource = []struct {
 	{regexp.MustCompile(`^(offset\.storage|schema\.history|topic\.|slot\.|publication\.|plugin\.name$|connector\.class$)`), "review", "BeziSync sets it: it owns state, identity and routing."},
 }
 
+// Options Debezium hands to the source's JDBC driver (driver.*, and database.* for the JDBC
+// sources) that read local files, load classes, call out, log to files or weaken TLS. TLS and
+// authentication are set on the connection.
+var (
+	jdbcPassthroughRe = regexp.MustCompile(`^(driver|database)\.(.+)$`)
+	jdbcUnsafeRe      = regexp.MustCompile(`(?i)(localinfile|deserializ|interceptor|factory|class|plugin|callback|provider|transform|logger|log(file|path|level|writer)|file|path|dir|url|wallet|ssl|tls|trust|certificate|cert|keystore|cipher|kerberos|gss|krb|jaas|sspi|authentication|publickey|rsa|ha\.|loadbalance|xml|tns|options$|initsql|init_sql|sessionvariables|propertiestransform|profiler|connectionattributes)`)
+)
+
 // destinationRe are last parts of debezium.sink.* keys that decide where data goes.
 var destinationRe = regexp.MustCompile(`(?i)(url|uri|endpoints?|address(es)?|hosts?|hostname|servers?|brokers?|region|project|account|tenant|namespace|bucket|warehouse|catalog|stream|topic|queue|hub|channel|subject|database|table|keyspace)$`)
 
@@ -146,6 +154,9 @@ func ClassifyAdvanced(key, value string, managed map[string]bool) AdvancedVerdic
 			if m.re.MatchString(opt) {
 				return refuse(AdvancedModelled, m.fix, m.why)
 			}
+		}
+		if m := jdbcPassthroughRe.FindStringSubmatch(opt); m != nil && jdbcUnsafeRe.MatchString(m[2]) {
+			return refuse(AdvancedForbidden, "connection", "This JDBC driver option can read local files, load classes, log to files or change TLS, so it isn't passed through. TLS and sign-in are set on the connection.")
 		}
 	case strings.HasPrefix(key, "debezium.sink."):
 		last := key[strings.LastIndex(key, ".")+1:]
