@@ -1103,6 +1103,15 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 				Why: "Copying existing rows of tables added to a running pipeline needs incremental snapshots, which this source doesn't offer."})
 		}
 	}
+	if flink {
+		c, err := flinkReadersCheck(ctx, q, p, spec, rt.Capacity)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			configChecks = append(configChecks, *c)
+		}
+	}
 	discover := &discoverOnce{src: source, typ: sourceConn.Type}
 	configChecks = append(configChecks, transformChecks(ctx, sourceConn, discover, p.Name, spec)...)
 	configChecks = append(configChecks, personalDataChecks(ctx, srcDesc, discover, spec)...)

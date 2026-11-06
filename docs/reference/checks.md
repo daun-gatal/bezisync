@@ -2278,6 +2278,19 @@ Fix:
 Pick key columns for these tables in the Transform step (Primary key), or add a primary key in the database.
 ```
 
+<a id="flink-readers-changed"></a>
+### `flink_readers_changed`
+
+**Readers**
+
+- Why: A Flink CDC pipeline's saved position holds what each of its readers had read, so it restores only with the same number of readers. After Start over nothing is left to restore and the number can change.
+
+Fix:
+
+```
+Keep the readers it runs, or pause the pipeline and use Positions → Start over, then deploy.
+```
+
 <a id="flink-replica-identity"></a>
 ### `flink_replica_identity`
 

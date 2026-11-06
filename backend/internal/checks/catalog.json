@@ -2889,6 +2889,19 @@
    ]
   },
   {
+   "code": "flink_readers_changed",
+   "section": "Flink CDC",
+   "titles": [
+    "Readers"
+   ],
+   "whys": [
+    "A Flink CDC pipeline's saved position holds what each of its readers had read, so it restores only with the same number of readers. After Start over nothing is left to restore and the number can change."
+   ],
+   "fixes": [
+    "Keep the readers it runs, or pause the pipeline and use Positions → Start over, then deploy."
+   ]
+  },
+  {
    "code": "starrocks_config",
    "section": "StarRocks",
    "titles": [

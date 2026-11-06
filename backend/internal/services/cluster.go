@@ -1,6 +1,10 @@
 package services
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
@@ -73,4 +77,50 @@ func sizeFromArtifact(raw any) (engine.FlinkSize, bool) {
 	s := engine.FlinkSize{JobManagerCPU: str("job_manager_cpu"), JobManagerMemory: str("job_manager_memory"), TaskManagers: num("task_managers"),
 		TaskManagerCPU: str("task_manager_cpu"), TaskManagerMemory: str("task_manager_memory"), Slots: num("slots"), Readers: num("readers")}
 	return s, s.TaskManagers > 0 && s.Readers > 0
+}
+
+// flinkReadersCheck blocks a deploy that changes a running Flink CDC pipeline's readers while it
+// would restore a saved position: the position is split by reader, so it would not restore.
+// After Start over (nothing left to restore) the readers can change. In the config section, so a
+// forced deploy can't skip it.
+func flinkReadersCheck(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec, capacity map[string]any) (*checks.Check, error) {
+	if p.DeployedVersionID == nil {
+		return nil, nil
+	}
+	deployed, err := SpecOf(ctx, q, p.DeployedVersionID)
+	if err != nil {
+		return nil, err
+	}
+	was, now := FlinkSizeOf(p, *deployed, capacity).Size.Parallelism(), FlinkSizeOf(p, spec, capacity).Size.Parallelism()
+	if was == now {
+		return nil, nil
+	}
+	check := &checks.Check{Code: "flink_readers_changed", Title: "Readers", Category: checks.CatResilience, Status: checks.Fail, Blocking: true,
+		Message: fmt.Sprintf("This pipeline runs %d readers and this version asks for %d: its saved position holds what each reader had read, so it can't be restored with another number.", was, now),
+		Fix:     &checks.Fix{Kind: "text", Who: "you", Code: fmt.Sprintf("Keep %d readers, or pause the pipeline and use Positions → Start over, then deploy.", was)}}
+	left, known := positionLeft(ctx, p)
+	if !known {
+		check.Message += " BeziSync couldn't read the saved positions to see whether one is left."
+		return check, nil
+	}
+	if !left {
+		return &checks.Check{Code: "flink_readers_changed", Title: "Readers", Category: checks.CatResilience, Status: checks.Pass,
+			Message: fmt.Sprintf("%d readers instead of %d: no saved position is left to restore, so the pipeline starts without one.", now, was)}, nil
+	}
+	return check, nil
+}
+
+// positionLeft reports whether p has a saved position above its Start over floor (known false
+// when the state database can't be read: then nobody can say).
+func positionLeft(ctx context.Context, p *models.Pipeline) (left, known bool) {
+	conn, err := stateConn(ctx)
+	if err != nil {
+		return false, false
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	latest, err := latestSavedID(ctx, conn, p.ShortID())
+	if err != nil {
+		return false, false
+	}
+	return latest > restoreFloor(p), true
 }

@@ -352,7 +352,10 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   preset, manual, the `flink_shape` artifact Deploy stores for the spec's hash (I3: a running
   pipeline's config hash never follows the nodes), or packed now for a draft. Checks and the
   compiler (`FlinkInput.Cluster`) take that resolved `FlinkSize`; `flink_cluster_fit` lives in
-  the runtime section, so a forced deploy can't skip it. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  the runtime section, so a forced deploy can't skip it. A shape change needs nothing new from the
+  drivers or agents (TaskManager count, CPU and memory are existing `FlinkTopology` fields; slots
+  and parallelism travel in flink-conf); `flink_readers_changed` (config section) refuses another
+  parallelism while a saved position above the Start over floor exists. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

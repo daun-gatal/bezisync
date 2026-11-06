@@ -647,8 +647,12 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   TaskManager) and keeps that shape until the next deploy, so nodes coming and going never restart
   it. `shape: manual` with `task_managers: {count, slots, cpu, memory}` sets the TaskManagers
   yourself. `flink_cluster_fit` blocks a cluster whose slot or TaskManager is bigger than any node,
-  even when forced, and is *unknown* when the runtime doesn't report its nodes. Preflight checks the
-  runtime has room (`runtime_capacity`). Every reader copies in parallel, but streaming reads the binlog or
+  even when forced, and is *unknown* when the runtime doesn't report its nodes. A deployed pipeline
+  can change its TaskManagers, slots, CPU and memory: the deploy saves the position, recreates the
+  cluster and restores it. Its number of readers stays while a saved position is left to restore
+  (the position is kept per reader): `flink_readers_changed` blocks that deploy, even when forced,
+  until you pause it and use Positions → Start over. Preflight checks the runtime has room
+  (`runtime_capacity`). Every reader copies in parallel, but streaming reads the binlog or
   WAL with one. On PostgreSQL each reader opens its own temporary replication slot while it copies,
   so a first copy needs 1 + readers free slots and WAL senders: `flink_replication_slots` blocks a
   deploy that would run out part-way. Kubernetes runtimes need the Role to allow Services
