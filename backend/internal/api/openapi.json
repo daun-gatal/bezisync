@@ -2033,6 +2033,27 @@
         "title": "CopyStoreNeedRead",
         "type": "object"
       },
+      "CustomResources": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu": {
+            "description": "0.25 to 8, in quarters (\"1.5\").",
+            "title": "Cpu",
+            "type": "string"
+          },
+          "memory": {
+            "description": "512Mi to 16Gi in steps of 256Mi; whole GiB written as Gi (\"2Gi\").",
+            "title": "Memory",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory"
+        ],
+        "title": "CustomResources",
+        "type": "object"
+      },
       "Decision": {
         "properties": {
           "comment": {
@@ -5111,6 +5132,17 @@
       "Policies": {
         "additionalProperties": false,
         "properties": {
+          "custom_resources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomResources"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The size when resources is custom (Debezium only); the Java heap is worked out from memory. Returned only when set."
+          },
           "delivery_canary": {
             "default": false,
             "description": "Write a canary row to the source every few minutes and confirm it reaches the destination (PostgreSQL/MySQL sources, destinations BeziSync can read).",
@@ -5139,7 +5171,8 @@
             "enum": [
               "small",
               "medium",
-              "large"
+              "large",
+              "custom"
             ],
             "title": "Resources",
             "type": "string"

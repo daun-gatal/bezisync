@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { Api, signIn, unique } from './helpers';
+import { Api, choose, signIn, unique } from './helpers';
 import { KAFKA, SOURCE_PG } from './fixtures';
 import { walkWizard } from './walk';
 
@@ -65,8 +65,15 @@ test('an Expert tunes a Debezium pipeline: typed settings, raw properties, and a
     await page.getByRole('button', { name: 'Use the typed setting' }).click();
     await expect(page.getByText('Poll interval')).toBeVisible();
 
+    // A custom size: CPU and memory from lists, the heap worked out.
+    await page.getByRole('radio', { name: /Custom/ }).click();
+    await choose(page.getByLabel('CPU', { exact: true }), '1.5 CPU');
+    await choose(page.getByLabel('Memory', { exact: true }), '2 GiB');
+    await expect(page.getByText('1433 MiB')).toBeVisible();
+
     await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
-    const saved = await api.get<{ spec: { tuning?: Record<string, string>; advanced: Record<string, string> } }>(url);
+    const saved = await api.get<{ spec: { tuning?: Record<string, string>; advanced: Record<string, string>; policies: Record<string, unknown> } }>(url);
+    expect(saved.spec.policies.custom_resources).toEqual({ cpu: '1.5', memory: '2Gi' });
     expect(saved.spec.tuning).toEqual({ 'debezium.source.poll.interval.ms': '250', 'debezium.source.snapshot.max.threads': '4' });
     expect(saved.spec.advanced).toEqual({ 'debezium.source.a.b': '1', 'debezium.source.driver.loginTimeout': '30' });
 

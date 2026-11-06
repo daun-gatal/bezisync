@@ -18,7 +18,9 @@ export interface FullSpec {
   transforms: TransformStep[];
   policies: {
     heartbeat_seconds: number;
-    resources: 'small' | 'medium' | 'large';
+    resources: 'small' | 'medium' | 'large' | 'custom';
+    /** The size when resources is 'custom' (Debezium only). */
+    custom_resources?: { cpu: string; memory: string };
     errors: { retries: number; on_poison_event: 'fail' | 'warn' | 'skip' };
     latency_target_seconds: number;
     source_retained_limit_gb: number;
@@ -129,6 +131,19 @@ export const SNAPSHOT_MODES: { value: SnapshotMode; title: string; help: string 
   { value: 'initial_only', title: 'Copy existing rows once, no streaming', help: 'A one-off export. Debezium: initial_only' },
   { value: 'always', title: 'Copy existing rows on every start', help: 'Rarely useful; expensive. Debezium: always' },
 ];
+
+/** Custom size choices, as the spec stores them (domain.ParseCPU, ParseMemory). */
+export const CUSTOM_CPUS = Array.from({ length: 32 }, (_, i) => String(((i + 1) * 250) / 1000));
+export const CUSTOM_MEMORIES = Array.from({ length: 63 }, (_, i) => {
+  const mib = 512 + i * 256;
+  return mib % 1024 === 0 ? `${mib / 1024}Gi` : `${mib}Mi`;
+});
+/** MiB of a memory choice. */
+export const memoryMiB = (m: string) => (m.endsWith('Gi') ? Number(m.slice(0, -2)) * 1024 : Number(m.slice(0, -2)));
+/** The Java heap BeziSync works out from memory (domain.HeapMiB): 70%, at least 256 MiB left to the JVM. */
+export const heapMiB = (mem: number) => Math.min(Math.floor((mem * 7) / 10), mem - 256);
+/** Preset sizes in numbers, for comparing a custom size with a limit. */
+export const PRESET_AMOUNTS = { small: { cpu: 0.5, mem: 768 }, medium: { cpu: 1, mem: 1536 }, large: { cpu: 2, mem: 3072 } } as const;
 
 export const RESOURCES = [
   { value: 'small', title: 'Small', help: '0.5 CPU · 768 MiB · up to ~2k changes/s' },

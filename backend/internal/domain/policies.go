@@ -279,10 +279,18 @@ func EvaluatePoliciesOn(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UU
 			"Pick an allowed snapshot mode in the pipeline settings."))
 	}
 	size := spec.Policies.Resources
-	if p.MaxResources != nil && *p.MaxResources != "" && slices.Index(sizes, size) > slices.Index(sizes, *p.MaxResources) {
-		out = append(out, policyFail("policy_resources", "Resources",
-			fmt.Sprintf("The '%s' preset exceeds this project's limit (%s).", size, *p.MaxResources),
-			fmt.Sprintf("Choose %s or smaller.", *p.MaxResources)))
+	if p.MaxResources != nil && *p.MaxResources != "" {
+		limit := ResourcePresets[*p.MaxResources]
+		switch {
+		case size == "custom" && !spec.Policies.Amount().Within(limit):
+			out = append(out, policyFail("policy_resources", "Resources",
+				fmt.Sprintf("This custom size (%s) exceeds this project's limit (%s: %s).", spec.Policies.Amount(), *p.MaxResources, limit),
+				fmt.Sprintf("Choose at most %s.", limit)))
+		case size != "custom" && slices.Index(sizes, size) > slices.Index(sizes, *p.MaxResources):
+			out = append(out, policyFail("policy_resources", "Resources",
+				fmt.Sprintf("The '%s' preset exceeds this project's limit (%s).", size, *p.MaxResources),
+				fmt.Sprintf("Choose %s or smaller.", *p.MaxResources)))
+		}
 	}
 	out = append(out, transformPolicyChecks(p, spec)...)
 	if !p.AllowAdvancedProperties && len(spec.Advanced) > 0 {

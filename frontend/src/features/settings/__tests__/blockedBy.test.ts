@@ -22,3 +22,12 @@ describe('blockedBy', () => {
     expect(blockedBy(pipeline({}), policies(), () => '')).not.toContain('advanced Debezium properties');
   });
 });
+
+describe('blockedBy custom sizes', () => {
+  it('lists a custom size above the largest size the project allows', () => {
+    const custom = (cpu: string, memory: string) =>
+      ({ ...pipeline({}), spec: { source: { tables: { include: ['shop.orders'] } }, policies: { resources: 'custom', custom_resources: { cpu, memory } } } }) as unknown as Pipeline;
+    expect(blockedBy(custom('2', '1Gi'), policies({ max_resources: 'medium' }), () => '')).toContain('a custom size (2 CPU, 1Gi)');
+    expect(blockedBy(custom('1', '1536Mi'), policies({ max_resources: 'medium' }), () => '')).toEqual([]);
+  });
+});

@@ -152,3 +152,18 @@ describe('specForEngine', () => {
     expect(s.snapshot.window).toBe('01:00-02:00');
   });
 });
+
+describe('custom sizes', () => {
+  it('offers CPU and memory the way the server stores them, and works out the heap like it', async () => {
+    const { CUSTOM_CPUS, CUSTOM_MEMORIES, heapMiB, memoryMiB } = await import('../spec');
+    expect(CUSTOM_CPUS.slice(0, 5)).toEqual(['0.25', '0.5', '0.75', '1', '1.25']);
+    expect(CUSTOM_CPUS.at(-1)).toBe('8');
+    expect(CUSTOM_MEMORIES[0]).toBe('512Mi');
+    expect(CUSTOM_MEMORIES).toContain('2Gi');
+    expect(CUSTOM_MEMORIES).not.toContain('2048Mi');
+    expect(CUSTOM_MEMORIES.at(-1)).toBe('16Gi');
+    expect(memoryMiB('1536Mi')).toBe(1536);
+    expect(heapMiB(2048)).toBe(1433);
+    expect(heapMiB(512)).toBe(256);
+  });
+});

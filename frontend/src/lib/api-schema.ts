@@ -2905,6 +2905,19 @@ export interface components {
             /** Used By */
             used_by: string[];
         };
+        /** CustomResources */
+        CustomResources: {
+            /**
+             * Cpu
+             * @description 0.25 to 8, in quarters ("1.5").
+             */
+            cpu: string;
+            /**
+             * Memory
+             * @description 512Mi to 16Gi in steps of 256Mi; whole GiB written as Gi ("2Gi").
+             */
+            memory: string;
+        };
         /** Decision */
         Decision: {
             /**
@@ -4110,6 +4123,8 @@ export interface components {
         };
         /** Policies */
         Policies: {
+            /** @description The size when resources is custom (Debezium only); the Java heap is worked out from memory. Returned only when set. */
+            custom_resources?: components["schemas"]["CustomResources"] | null;
             /**
              * Delivery Canary
              * @description Write a canary row to the source every few minutes and confirm it reaches the destination (PostgreSQL/MySQL sources, destinations BeziSync can read).
@@ -4132,7 +4147,7 @@ export interface components {
              * @default small
              * @enum {string}
              */
-            resources: "small" | "medium" | "large";
+            resources: "small" | "medium" | "large" | "custom";
             /**
              * Source Retained Limit Gb
              * @description Alert when the source retains more log than this for the pipeline.

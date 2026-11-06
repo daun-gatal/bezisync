@@ -201,6 +201,13 @@ the pipeline's Overview shows it with a **Fix** link and the *Transform needs at
 fires. Every step is in the spec (`transforms`, `values`, `keys`), so YAML, templates, promote and
 rollback carry it; `debezium.transforms*` cannot be set as advanced properties.
 
+**Size** (Review): a Debezium pipeline runs at Small (0.5 CPU · 768 MiB), Medium (1 CPU · 1.5 GiB),
+Large (2 CPU · 3 GiB) or, in Expert mode, a Custom size: CPU from 0.25 to 8 in quarters and memory
+from 512 MiB to 16 GiB in 256 MiB steps (`policies: {resources: custom, custom_resources: {cpu:
+"1.5", memory: 2Gi}}`). BeziSync works out the Java heap (70% of memory, leaving the JVM at least
+256 MiB) and takes the batch and queue sizes of the largest preset the memory reaches. A project's
+largest size limits a custom one by its CPU and memory, and a destination's smallest size too.
+
 **Engine settings** (Review, Expert mode) lists the typed settings BeziSync offers for the pipeline's
 engine, source and destination, grouped by when they matter (snapshot, streaming, delivery,
 engine): each has its bounds, default and what changing it does to a running pipeline. Add one from

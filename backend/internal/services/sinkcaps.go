@@ -88,9 +88,9 @@ func personalDataChecks(ctx context.Context, desc *connectors.Descriptor, discov
 func sinkChecks(ctx context.Context, sink connectors.Resolved, desc *connectors.Descriptor, cctx connectors.CompileContext,
 	destinations map[string]string, discover *discoverOnce, flink bool) []checks.Check {
 	var out []checks.Check
-	if min := desc.Sink.MinResources; min != "" && !flink && connectors.ResourceRank(cctx.Spec.Policies.Resources) < connectors.ResourceRank(min) {
+	if min := desc.Sink.MinResources; min != "" && !flink && !domain.ResourcePresets[min].Within(cctx.Spec.Policies.Amount()) {
 		out = append(out, checks.Check{Code: "sink_resources", Title: "Connector size", Category: checks.CatResilience, Status: checks.Fail,
-			Blocking: true, Message: fmt.Sprintf("%s needs at least the %s connector size.", desc.Title, min),
+			Blocking: true, Message: fmt.Sprintf("%s needs at least the %s connector size (%s).", desc.Title, min, domain.ResourcePresets[min]),
 			Why: "Smaller connectors run out of memory while the destination buffers its writes.",
 			Fix: &checks.Fix{Kind: "text", Who: "you", Code: fmt.Sprintf("Choose the %s size (or larger) in the Review step.", min)}})
 	}

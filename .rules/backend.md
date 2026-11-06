@@ -342,7 +342,10 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `services.ValidateTuning` (engine, connectors, bounds, canonical value), and the compilers apply
   them after BeziSync's own keys and before advanced properties (so advanced can't change a tuned
   key). A registry key BeziSync compiles must be `Derived`; `TestRegistryKeysAreNotCompiledByBeziSync`
-  holds that. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  holds that. Sizes: `domain.ResourcePresets` are the presets in numbers (`ResourceAmount`), and
+  `policies.resources: custom` with `custom_resources` (canonical CPU quarters and 256 MiB memory
+  steps, `ParseCPU`/`ParseMemory`) is a Debezium-only custom size; `compiler.ResourceFor` is the
+  container's request (heap `domain.HeapMiB`), and limits compare amounts (`Within`). `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

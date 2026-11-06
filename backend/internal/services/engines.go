@@ -84,6 +84,8 @@ func ValidateEngineSpec(id engine.ID, spec domain.PipelineSpec) error {
 			return problem.New(422, "engine_settings", "Value formats are Debezium options; Flink CDC writes each column with its own type.")
 		case len(spec.Advanced) > 0:
 			return problem.New(422, "engine_settings", "Advanced Debezium properties apply only to pipelines that run on Debezium.")
+		case spec.Policies.Resources == "custom":
+			return problem.New(422, "engine_settings", "A custom size of CPU and memory is a Debezium option; a Flink CDC pipeline picks a cluster size.")
 		case spec.Snapshot.DelaySeconds != 0 || spec.Snapshot.Window != nil:
 			return problem.New(422, "engine_settings", "A copy delay or window is a Debezium option; Flink CDC copies as soon as it starts.")
 		}

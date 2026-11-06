@@ -1,6 +1,7 @@
 type: minor
 
 ### Added
+- **Custom sizes for Debezium pipelines** - in Expert mode a pipeline can run at its own CPU (0.25 to 8) and memory (512 MiB to 16 GiB); BeziSync works out the Java heap so the JVM always keeps room. A project's largest size and a destination's smallest size apply to it by CPU and memory.
 - **What a deploy changes in the settings** - Review's final checks, a deploy or rollback confirmation, the version diff and an approval request list each setting a deploy changes, from what to what, grouped by what it does to the running pipeline (restart, first copy, next copy, starts over), heaviest first.
 - **Engine settings in Review** - Expert mode gets an Engine settings card: typed settings grouped by when they matter, each with its bounds, default and what changing it does, and advanced Debezium properties as one row per key, each checked by the server as you type (with the reason and where to set it instead when refused, or the offer to use the typed setting).
 - **Typed engine settings** - a pipeline spec takes `tuning`: settings from BeziSync's registry, each checked against the pipeline's engine, source and destination and its bounds, and carried by YAML, the API and MCP. The first ones: snapshot threads and the poll interval (Debezium), the connection pool (Flink CDC). `GET /engines` lists every setting with what changing it does to a running pipeline, and preflight and the version diff list the settings a deploy changes with that impact (`settings_change`).

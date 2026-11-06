@@ -15,7 +15,7 @@ import { TYPE_LABEL, useConnectorTypes } from '@/lib/connections';
 import { usePipelines, type Pipeline } from '@/lib/pipelines';
 import { allows, usePolicies, type Policies } from '@/lib/policies';
 import { useProject } from '@/lib/session';
-import { fullSpec, SNAPSHOT_MODES } from '@/features/pipelines/spec';
+import { fullSpec, memoryMiB, PRESET_AMOUNTS, SNAPSHOT_MODES } from '@/features/pipelines/spec';
 import { TYPE_TITLE } from '@/features/pipelines/transforms/model';
 import { useRuntimes } from './RuntimesSection';
 
@@ -80,7 +80,15 @@ export function blockedBy(p: Pipeline, policy: Policies, runtimeName: (id: strin
   if (!allows(policy.allowed_source_types, p.source.type)) out.push(`source type ${TYPE_LABEL[p.source.type] ?? p.source.type}`);
   if (p.sink && !allows(policy.allowed_sink_types, p.sink.type)) out.push(`destination type ${TYPE_LABEL[p.sink.type] ?? p.sink.type}`);
   if (p.runtime && !allows(policy.allowed_runtime_ids, p.runtime.id)) out.push(`runtime ${runtimeName(p.runtime.id)}`);
-  if (policy.max_resources && SIZES.indexOf(spec.policies.resources) > SIZES.indexOf(policy.max_resources)) out.push(`size ${spec.policies.resources}`);
+  if (policy.max_resources) {
+    const limit = PRESET_AMOUNTS[policy.max_resources];
+    const custom = spec.policies.custom_resources;
+    if (spec.policies.resources === 'custom' && custom) {
+      if (Number(custom.cpu) > limit.cpu || memoryMiB(custom.memory) > limit.mem) out.push(`a custom size (${custom.cpu} CPU, ${custom.memory})`);
+    } else if (spec.policies.resources !== 'custom' && SIZES.indexOf(spec.policies.resources) > SIZES.indexOf(policy.max_resources)) {
+      out.push(`size ${spec.policies.resources}`);
+    }
+  }
   if (!allows(policy.allowed_snapshot_modes, spec.snapshot.mode)) out.push(`snapshot mode ${spec.snapshot.mode}`);
   for (const t of spec.transforms) {
     if (t.type === 'custom') {

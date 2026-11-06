@@ -83,3 +83,33 @@ func TestSettingsChangeInPreflightAndDiff(t *testing.T) {
 		t.Fatal(string(diff.Raw))
 	}
 }
+
+func TestCustomSizeReachesTheWorkload(t *testing.T) {
+	e := newPipelineEnv(t)
+	admin := e.admin
+	body := e.ids.body()
+	body["name"], body["owner"] = "custom-size", "payments"
+	body["spec"] = map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}},
+		"policies": map[string]any{"resources": "custom", "custom_resources": map[string]any{"cpu": "1.5", "memory": "2Gi"}}}
+	p := admin.post("/api/v1/projects/"+e.pid+"/pipelines", body).expect(201)
+	u := "/api/v1/projects/" + e.pid + "/pipelines/" + p.Str("id")
+	if p.Str("spec", "policies", "custom_resources", "memory") != "2Gi" {
+		t.Fatal(string(p.Raw))
+	}
+	admin.post(u+"/deploy", map[string]any{}).expect(200)
+	e.tick()
+	var found bool
+	for _, w := range e.driver.Workloads {
+		found = found || (w.CPU == "1.5" && w.Memory == "2Gi" && w.Heap == "1433m")
+	}
+	if !found {
+		t.Fatal(e.driver.Workloads)
+	}
+	// A non-canonical size is refused, saying how to write it.
+	bad := admin.patch(u, map[string]any{"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}},
+		"policies": map[string]any{"resources": "custom", "custom_resources": map[string]any{"cpu": "1.5", "memory": "2048Mi"}}}},
+		ifMatch(admin.get(u).At("version"))...).expect(422)
+	if !strings.Contains(string(bad.Raw), "whole GiB written as Gi") {
+		t.Fatal(string(bad.Raw))
+	}
+}

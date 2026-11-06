@@ -7,8 +7,10 @@ import (
 
 	"github.com/daun-gatal/bezisync/backend/internal/compiler"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
+	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
+	"github.com/daun-gatal/bezisync/backend/internal/runtime"
 )
 
 func debeziumCompile(t *testing.T, src, snk string, tuning map[string]string, advanced map[string]string) (*compiler.Compiled, error) {
@@ -121,5 +123,26 @@ func TestRegistryKeysAreNotCompiledByBeziSync(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestResourceFor(t *testing.T) {
+	// The numbers the domain checks limits with are the presets the containers ask for.
+	for name, a := range domain.ResourcePresets {
+		r := compiler.Resources[name]
+		if runtime.QuantityCPU(r.CPU)*1000 != float64(a.CPUMilli) || runtime.MemBytes(r.Memory) != int64(a.MemoryMiB)<<20 {
+			t.Errorf("%s: %v vs %v", name, r, a)
+		}
+	}
+	got := compiler.ResourceFor(domain.Policies{Resources: "custom", Custom: &domain.CustomResources{CPU: "1.5", Memory: "2Gi"}})
+	if got.CPU != "1.5" || got.Memory != "2Gi" || got.Heap != "1433m" || got.Batch != compiler.Resources["medium"].Batch || got.Queue != compiler.Resources["medium"].Queue {
+		t.Fatal(got)
+	}
+	if compiler.ResourceFor(domain.Policies{Resources: "large"}) != compiler.Resources["large"] {
+		t.Fatal("presets are unchanged")
+	}
+	// R6: both drivers read quarter CPUs.
+	if runtime.CPUNano("1.5") != 1_500_000_000 || runtime.CPUNano("0.25") != 250_000_000 || runtime.QuantityCPU("0.75") != 0.75 {
+		t.Fatal("fractional CPU")
 	}
 }

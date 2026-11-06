@@ -853,8 +853,8 @@ func toFloat(v any) float64 {
 }
 
 // CapacityCheck warns when a runtime has no room for the pipeline's size.
-func CapacityCheck(capacity map[string]any, resources string) *checks.Check {
-	return capacityCheck(capacity, cpuOf(compiler.Resources[resources].CPU), "")
+func CapacityCheck(capacity map[string]any, policies domain.Policies) *checks.Check {
+	return capacityCheck(capacity, cpuOf(compiler.ResourceFor(policies).CPU), "")
 }
 
 func capacityCheck(capacity map[string]any, need float64, what string) *checks.Check {
@@ -985,7 +985,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		{Key: "sink", Title: "Destination · " + sinkConn.Name + agentNote(sinkAgent), Report: sinkReport},
 		{Key: "runtime", Title: "Runtime · " + rt.Name, Report: rtReport},
 	}
-	capacity := CapacityCheck(rt.Capacity, spec.Policies.Resources)
+	capacity := CapacityCheck(rt.Capacity, spec.Policies)
 	if EngineOf(p) == engine.FlinkCDC {
 		capacity = FlinkCapacityCheck(rt.Capacity, spec.Policies.Resources)
 	}

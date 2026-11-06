@@ -18,6 +18,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
+	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
@@ -47,6 +48,24 @@ var ManagedPatterns = []*regexp.Regexp{
 	// The transform chain carries BeziSync's own filter (bzmeta) and routing (bzroute); steps
 	// live in spec.transforms, where they are validated, previewed and policy-checked.
 	regexp.MustCompile(`^debezium\.(transforms|predicates)(\..*)?$`),
+}
+
+// ResourceFor is what a Debezium Server container asks for: a preset, or a custom size with its
+// heap worked out from its memory (domain.HeapMiB) and the batch and queue of the preset its
+// memory reaches.
+func ResourceFor(p domain.Policies) Resource {
+	if p.Resources != "custom" || p.Custom == nil {
+		return Resources[p.Resources]
+	}
+	a := p.Amount()
+	band := Resources["small"]
+	switch {
+	case a.MemoryMiB >= domain.ResourcePresets["large"].MemoryMiB:
+		band = Resources["large"]
+	case a.MemoryMiB >= domain.ResourcePresets["medium"].MemoryMiB:
+		band = Resources["medium"]
+	}
+	return Resource{CPU: p.Custom.CPU, Memory: p.Custom.Memory, Heap: fmt.Sprintf("%dm", domain.HeapMiB(a.MemoryMiB)), Batch: band.Batch, Queue: band.Queue}
 }
 
 // Constants shared with the runtime drivers.
@@ -256,7 +275,7 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 	}
 	c.Spec.Transforms = withSinkUnwrap(c.Spec.Transforms, caps.Unwrap, sinkOptions)
 	spec := c.Spec
-	res := Resources[spec.Policies.Resources]
+	res := ResourceFor(spec.Policies)
 	props := map[string]string{
 		"quarkus.http.port":                                      strconv.Itoa(HTTPPort),
 		"quarkus.log.console.json":                               "false",

@@ -106,6 +106,8 @@ type Policies struct {
 	LatencyTargetSeconds  int          `json:"latency_target_seconds"`
 	SourceRetainedLimitGB pyjson.Float `json:"source_retained_limit_gb"`
 	DeliveryCanary        bool         `json:"delivery_canary"`
+	// Custom is the size when Resources is "custom" (Debezium only). Dumped only when set.
+	Custom *CustomResources `json:"custom_resources"`
 }
 
 // tuningKeyRe is a setting name: lower-case ASCII parts separated by dots (registry keys only;
@@ -173,6 +175,10 @@ func (s PipelineSpec) Clone() PipelineSpec {
 		out.Source.Columns[k] = ColumnRules{Mask: append([]string{}, v.Mask...), Exclude: append([]string{}, v.Exclude...), Keep: cloneKeep(v.Keep)}
 	}
 	out.Sink.Options = cloneAny(s.Sink.Options).(map[string]any)
+	if s.Policies.Custom != nil {
+		c := *s.Policies.Custom
+		out.Policies.Custom = &c
+	}
 	out.Transforms = make([]Transform, len(s.Transforms))
 	for i, t := range s.Transforms {
 		out.Transforms[i] = cloneTransform(t)
@@ -272,6 +278,11 @@ func (s PipelineSpec) Dump() *om.Map {
 			Set("delivery_canary", s.Policies.DeliveryCanary)).
 		Set("debezium_image", strPtr(s.DebeziumImage)).
 		Set("advanced", advanced)
+	if s.Policies.Custom != nil {
+		if p, ok := out.Get("policies"); ok {
+			p.(*om.Map).Set("custom_resources", om.New().Set("cpu", s.Policies.Custom.CPU).Set("memory", s.Policies.Custom.Memory))
+		}
+	}
 	if !s.Values.Empty() {
 		out.Set("values", dumpValues(s.Values))
 	}
@@ -699,9 +710,36 @@ func decodePolicies(v *val.V, loc val.Loc, raw any) Policies {
 		}
 	}
 	if f := o.Get("resources"); f.Present {
-		if s, ok := v.Literal(f.Loc, f.Raw, "small", "medium", "large"); ok {
+		if s, ok := v.Literal(f.Loc, f.Raw, "small", "medium", "large", "custom"); ok {
 			out.Resources = s
 		}
+	}
+	if f := o.Get("custom_resources"); f.Present && !f.IsNull() {
+		c := v.Model(f.Loc, f.Raw, "CustomResources")
+		if !c.Failed {
+			custom := CustomResources{}
+			if g := c.Get("cpu"); !g.Present {
+				v.Fail(g.Loc, "missing", "Field required")
+			} else if s, ok := v.Str(g.Loc, g.Raw); ok {
+				if _, good := ParseCPU(s); !good {
+					v.Fail(g.Loc, "value_error", "Value error, CPU is 0.25 to 8 in quarters, like 1.5")
+				}
+				custom.CPU = s
+			}
+			if g := c.Get("memory"); !g.Present {
+				v.Fail(g.Loc, "missing", "Field required")
+			} else if s, ok := v.Str(g.Loc, g.Raw); ok {
+				if _, good := ParseMemory(s); !good {
+					v.Fail(g.Loc, "value_error", "Value error, memory is 512Mi to 16Gi in steps of 256Mi, whole GiB written as Gi (2Gi)")
+				}
+				custom.Memory = s
+			}
+			c.Forbid()
+			out.Custom = &custom
+		}
+	}
+	if (out.Resources == "custom") != (out.Custom != nil) {
+		v.Fail(o.Loc().Add("custom_resources"), "value_error", "Value error, a custom size (resources: custom) needs custom_resources, and only it")
 	}
 	if f := o.Get("errors"); f.Present {
 		e := v.Model(f.Loc, f.Raw, "ErrorPolicy")

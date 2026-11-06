@@ -24,7 +24,7 @@ import { useDeploy, usePipelines, usePreflight, type Pipeline, type Preflight } 
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
-import { deriveSinkOptions, fullSpec, optionsSchemaFor, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
+import { CUSTOM_CPUS, CUSTOM_MEMORIES, deriveSinkOptions, fullSpec, heapMiB, memoryMiB, optionsSchemaFor, PRESET_AMOUNTS, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
 import { FlinkRunSettings } from './FlinkSettings';
 import { OwnerPicker } from './OwnerPicker';
@@ -75,6 +75,18 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const [runtimeId, setRuntimeId] = useState<string | undefined>(pipeline.runtime?.id);
   const [mode, setMode] = useState(spec.snapshot.mode);
   const [resources, setResources] = useState(spec.policies.resources);
+  const [custom, setCustom] = useState(spec.policies.custom_resources ?? { cpu: '1', memory: '1536Mi' });
+  const customAmount = { cpu: Number(custom.cpu), mem: memoryMiB(custom.memory) };
+  const max = policies?.max_resources ? PRESET_AMOUNTS[policies.max_resources] : null;
+  const minSize = sinkCaps.min_resources ? PRESET_AMOUNTS[sinkCaps.min_resources as keyof typeof PRESET_AMOUNTS] : null;
+  const customError =
+    resources !== 'custom'
+      ? null
+      : max && (customAmount.cpu > max.cpu || customAmount.mem > max.mem)
+        ? `This project allows at most ${max.cpu} CPU and ${max.mem} MiB.`
+        : minSize && (customAmount.cpu < minSize.cpu || customAmount.mem < minSize.mem)
+          ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${minSize.cpu} CPU and ${minSize.mem} MiB.`
+          : null;
   const [latency, setLatency] = useState(spec.policies.latency_target_seconds);
   const [snapshotWindow, setSnapshotWindow] = useState<string | null>(spec.snapshot.window ?? null);
   const [canary, setCanary] = useState(spec.policies.delivery_canary);
@@ -124,7 +136,13 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     ...spec,
     sink: { ...spec.sink, options: sinkOptions },
     snapshot: { ...spec.snapshot, mode, window: flink ? null : snapshotWindow || null },
-    policies: { ...spec.policies, resources, latency_target_seconds: latency, delivery_canary: flink ? false : canary },
+    policies: {
+      ...withoutCustom(spec.policies),
+      resources,
+      latency_target_seconds: latency,
+      delivery_canary: flink ? false : canary,
+      ...(resources === 'custom' && !flink ? { custom_resources: custom } : {}),
+    },
     advanced: flink ? {} : advancedValues,
     ...(flink ? { flink_cdc: flinkSpecBlock(fc) } : {}),
   };
@@ -142,7 +160,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     owner !== pipeline.owner ||
     runtimeId !== pipeline.runtime?.id ||
     JSON.stringify(nextSpec) !== JSON.stringify(spec);
-  const invalid = nameErr ?? rawError ?? tuningError;
+  const invalid = nameErr ?? rawError ?? tuningError ?? customError;
 
   // Save shortly after the last change; one save at a time, so versions never conflict.
   const latest = useRef({ body, dirty, invalid, saving });
@@ -291,20 +309,47 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               label="Size"
               value={resources}
               onChange={(v) => setResources(v as FullSpec['policies']['resources'])}
-              options={RESOURCES.map((r) => ({
-                value: r.value,
-                label: r.title,
-                description: flink ? flinkSizeHelp(flinkEngine?.sizes?.[r.value]) : r.help,
-                disabled: (!sizeAllowed(policies, r.value) || (!flink && tooSmall(r.value)) || (flink && deployed)) && r.value !== resources,
-                why: flink && deployed
-                  ? 'A Flink CDC pipeline keeps the readers it was deployed with: Start over to change its size.'
-                  : tooSmall(r.value)
-                  ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${sinkCaps.min_resources}.`
-                  : `This project allows up to ${policies?.max_resources ?? 'a smaller size'}.`,
-              }))}
+              options={[
+                ...RESOURCES.map((r) => ({
+                  value: r.value as FullSpec['policies']['resources'],
+                  label: r.title,
+                  description: flink ? flinkSizeHelp(flinkEngine?.sizes?.[r.value]) : r.help,
+                  disabled: (!sizeAllowed(policies, r.value) || (!flink && tooSmall(r.value)) || (flink && deployed)) && r.value !== resources,
+                  why: flink && deployed
+                    ? 'A Flink CDC pipeline keeps the readers it was deployed with: Start over to change its size.'
+                    : tooSmall(r.value)
+                    ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${sinkCaps.min_resources}.`
+                    : `This project allows up to ${policies?.max_resources ?? 'a smaller size'}.`,
+                })),
+                ...(expert && !flink
+                  ? [{ value: 'custom' as const, label: 'Custom', description: 'Your own CPU and memory; BeziSync works out the Java heap.' }]
+                  : []),
+              ]}
             />
           )}
         </Field>
+        {resources === 'custom' && !flink ? (
+          <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-4">
+            <Field label="CPU" error={customError}>
+              {(id) => (
+                <Select id={id} value={custom.cpu} onChange={(cpu) => setCustom({ ...custom, cpu })} options={CUSTOM_CPUS.map((c) => ({ value: c, label: `${c} CPU` }))} />
+              )}
+            </Field>
+            <Field label="Memory" hint="Requested and the limit, so the connector is never squeezed.">
+              {(id) => (
+                <Select
+                  id={id}
+                  value={custom.memory}
+                  onChange={(memory) => setCustom({ ...custom, memory })}
+                  options={CUSTOM_MEMORIES.map((m) => ({ value: m, label: m.endsWith('Gi') ? `${m.slice(0, -2)} GiB` : `${m.slice(0, -2)} MiB` }))}
+                />
+              )}
+            </Field>
+            <Field label="Java heap" hint="Worked out from memory, so the JVM always keeps room.">
+              {() => <Meta className="pt-2 text-sm text-ink">{heapMiB(memoryMiB(custom.memory))} MiB</Meta>}
+            </Field>
+          </div>
+        ) : null}
         {capture.snapshot_modes.length === 0 ? (
           <Notice tone="info" title="Existing rows">
             {sourceLabel} can’t copy the rows a table already has: the pipeline streams the changes made from the moment it first starts.
@@ -538,4 +583,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       </Modal>
     </div>
   );
+}
+
+/** Policies without a custom size (it is sent only with resources: custom, as the server dumps it). */
+function withoutCustom(p: FullSpec['policies']): FullSpec['policies'] {
+  const { custom_resources: _c, ...rest } = p;
+  void _c;
+  return rest;
 }
