@@ -1052,7 +1052,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	}
 	sections = append(sections, PreflightSection{Key: "config", Title: "Configuration", Report: checks.Summarize(configChecks, started)})
 	if flink {
-		engineChecks, err := FlinkChecks(ctx, q, p, spec, rt, sourceConn, discover)
+		engineChecks, err := FlinkChecks(ctx, q, p, spec, rt, sourceConn, discover, srcReport)
 		if err != nil {
 			return nil, err
 		}

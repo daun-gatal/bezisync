@@ -270,7 +270,7 @@ func (s *postgresSource) serverChecks(ctx context.Context, pg *pgx.Conn, run *ch
 	if err != nil {
 		return err
 	}
-	detail := fmt.Sprintf("Replication slots %d of %d used · WAL senders %d of %d.", usedSlots, maxSlots, usedSenders, maxSenders)
+	detail := fmt.Sprintf(pgCapacityFormat, usedSlots, maxSlots, usedSenders, maxSenders)
 	switch {
 	case usedSlots >= maxSlots || usedSenders >= maxSenders:
 		run.Add(checks.Check{Code: "pg_capacity", Title: "Replication capacity", Status: checks.Fail, Category: checks.CatCapacity,
@@ -569,7 +569,26 @@ func (s *postgresSource) Discover(ctx context.Context, conn Resolved) (Discovery
 	return NewDiscovery(tables, truncated), nil
 }
 
-func pgSlotName(c CompileContext) string    { return "bz_" + c.ShortID }
+func pgSlotName(c CompileContext) string { return "bz_" + c.ShortID }
+
+// pgCapacityFormat is how pg_capacity reports replication use; ParsePGCapacity reads it back, so a
+// pipeline-level check (Flink CDC's first copy) can use what the source check (maybe the agent's)
+// measured.
+const pgCapacityFormat = "Replication slots %d of %d used · WAL senders %d of %d."
+
+// PGCapacity is a PostgreSQL source's replication slots and WAL senders: used and allowed.
+type PGCapacity struct{ UsedSlots, MaxSlots, UsedSenders, MaxSenders int }
+
+// ParsePGCapacity reads a pg_capacity check's numbers (false when it has none).
+func ParsePGCapacity(c checks.Check) (PGCapacity, bool) {
+	var p PGCapacity
+	for _, text := range []string{c.Message, c.Technical} {
+		if n, err := fmt.Sscanf(text, pgCapacityFormat, &p.UsedSlots, &p.MaxSlots, &p.UsedSenders, &p.MaxSenders); err == nil && n == 4 {
+			return p, true
+		}
+	}
+	return PGCapacity{}, false
+}
 func pgSignalTable(c CompileContext) string { return pgManagedSchema + ".signal_" + c.ShortID }
 func pgCanaryTable(c CompileContext) string { return pgManagedSchema + ".canary_" + c.ShortID }
 func canaryOn(c CompileContext) bool        { return c.Spec.Policies.DeliveryCanary }

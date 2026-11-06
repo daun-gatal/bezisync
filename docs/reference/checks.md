@@ -2272,6 +2272,19 @@ Fix:
 ALTER TABLE "{schema}"."{table}" REPLICA IDENTITY FULL;
 ```
 
+<a id="flink-replication-slots"></a>
+### `flink_replication_slots`
+
+**Replication slots for the copy**
+
+- Why: While a Flink CDC pipeline copies a PostgreSQL source, each of its readers opens its own temporary replication slot (and WAL sender) next to the pipeline's own one, so a copy needs 1 + parallelism of each. Without enough, the copy stops part-way.
+
+Fix:
+
+```
+Drop replication slots nobody uses, or raise max_replication_slots and max_wal_senders (a restart).
+```
+
 <a id="flink-server-ids"></a>
 ### `flink_server_ids`
 

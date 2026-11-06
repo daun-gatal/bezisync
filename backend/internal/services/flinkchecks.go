@@ -20,7 +20,7 @@ import (
 
 // FlinkChecks are a Flink CDC pipeline's own preflight checks.
 func FlinkChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec, rt *models.Runtime,
-	sourceConn *models.Connection, discover *discoverOnce) ([]checks.Check, error) {
+	sourceConn *models.Connection, discover *discoverOnce, sourceReport checks.Report) ([]checks.Check, error) {
 	var out []checks.Check
 	if c := flinkAgentCheck(rt); c != nil {
 		out = append(out, *c)
@@ -34,6 +34,11 @@ func FlinkChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec dom
 			Message: "Could not read the tables to check what Flink CDC needs from them: " + domain.Truncate(pyErrString(err), 200)})
 	} else {
 		out = append(out, flinkTableChecks(sourceConn.Type, spec, found)...)
+	}
+	if sourceConn.Type == "postgresql" {
+		if c := flinkSlotsCheck(p, spec, sourceReport); c != nil {
+			out = append(out, *c)
+		}
 	}
 	if sourceConn.Type == "mysql" {
 		c, err := flinkServerIDCheck(ctx, q, p, spec)
@@ -142,6 +147,58 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// flinkSlotsCheck: during a copy each reader of a Flink CDC PostgreSQL source opens its own
+// temporary replication slot (<slot>_<reader>, each with a WAL sender) next to the pipeline's own
+// one, so a copy needs 1 + parallelism of each. Measured by the source's pg_capacity check; nil when
+// that didn't run, or when this deploy neither creates the slot nor copies.
+func flinkSlotsCheck(p *models.Pipeline, spec domain.PipelineSpec, sourceReport checks.Report) *checks.Check {
+	var capacity connectors.PGCapacity
+	found := false
+	for _, c := range sourceReport.Checks {
+		if c.Code == "pg_capacity" {
+			capacity, found = connectors.ParsePGCapacity(c)
+		}
+	}
+	if !found {
+		return nil
+	}
+	size, ok := engine.FlinkSizes[spec.Policies.Resources]
+	if !ok {
+		size = engine.FlinkSizes["small"]
+	}
+	readers := size.Parallelism()
+	firstDeploy := p.DeployedVersionID == nil
+	copies := firstDeploy && spec.Snapshot.Mode != "no_data"
+	need := 0
+	if firstDeploy {
+		need = 1 // the pipeline's own slot
+	}
+	if copies {
+		need += readers
+	}
+	if need == 0 {
+		return nil
+	}
+	freeSlots, freeSenders := capacity.MaxSlots-capacity.UsedSlots, capacity.MaxSenders-capacity.UsedSenders
+	what := fmt.Sprintf("%d replication slot%s and WAL sender%s", need, plural(need, "", "s"), plural(need, "", "s"))
+	if copies {
+		what += fmt.Sprintf(" (1 for streaming and 1 for each of its %d readers while it copies)", readers)
+	}
+	if freeSlots >= need && freeSenders >= need {
+		return &checks.Check{Code: "flink_replication_slots", Title: "Replication slots for the copy", Category: checks.CatCapacity, Status: checks.Pass,
+			Message: fmt.Sprintf("This deploy needs %s; %d slots and %d WAL senders are free.", what, freeSlots, freeSenders)}
+	}
+	limit := capacity.UsedSlots + need + 4
+	if s := capacity.UsedSenders + need + 4; s > limit {
+		limit = s
+	}
+	return &checks.Check{Code: "flink_replication_slots", Title: "Replication slots for the copy", Category: checks.CatCapacity, Status: checks.Fail,
+		Blocking: true, Message: fmt.Sprintf("This deploy needs %s, but only %d slots and %d WAL senders are free: the copy would stop part-way.",
+			what, max(freeSlots, 0), max(freeSenders, 0)),
+		Fix: &checks.Fix{Kind: "sql", RestartRequired: true, Who: "DBA", Code: "-- drop slots nobody uses:\nSELECT slot_name, active FROM pg_replication_slots;\n" +
+			fmt.Sprintf("-- or raise the limits (restart required):\nALTER SYSTEM SET max_replication_slots = %d;\nALTER SYSTEM SET max_wal_senders = %d;", limit, limit)}}
 }
 
 // flinkServerIDCheck: each reader of a MySQL source uses its own server id; two pipelines with the

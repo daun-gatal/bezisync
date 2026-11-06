@@ -2851,6 +2851,19 @@
    ]
   },
   {
+   "code": "flink_replication_slots",
+   "fixes": [
+    "Drop replication slots nobody uses, or raise max_replication_slots and max_wal_senders (a restart)."
+   ],
+   "section": "Flink CDC",
+   "titles": [
+    "Replication slots for the copy"
+   ],
+   "whys": [
+    "While a Flink CDC pipeline copies a PostgreSQL source, each of its readers opens its own temporary replication slot (and WAL sender) next to the pipeline's own one, so a copy needs 1 + parallelism of each. Without enough, the copy stops part-way."
+   ]
+  },
+  {
    "code": "flink_server_ids",
    "section": "Flink CDC",
    "titles": [

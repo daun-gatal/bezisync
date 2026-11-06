@@ -627,7 +627,10 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   strategy, memory fractions, timeouts), each with its range; BeziSync keeps the rest.
 - **Size**: small runs one TaskManager (2 readers), medium two (4), large four (8); each
   TaskManager asks for 1 CPU and 2 GiB, the JobManager 1 to 1.5 GiB. Preflight checks the runtime
-  has room (`runtime_capacity`). Kubernetes runtimes need the Role to allow Services
+  has room (`runtime_capacity`). Every reader copies in parallel, but streaming reads the binlog or
+  WAL with one. On PostgreSQL each reader opens its own temporary replication slot while it copies,
+  so a first copy needs 1 + readers free slots and WAL senders: `flink_replication_slots` blocks a
+  deploy that would run out part-way. Kubernetes runtimes need the Role to allow Services
   (`flink_kubernetes_services`; both charts grant it from 0.2.0), and agent runtimes an agent of this
   BeziSync version (`flink_agent_version`).
 
