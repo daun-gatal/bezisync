@@ -739,7 +739,11 @@ per-pipeline choices and is accepted but ignored when sent to the API.
 ## Guardrails: policies, approvals, templates
 
 **Settings → Policies** (Admins, per project): allowed runtimes, source/destination types and snapshot
-modes; the largest size; pipelines per source (each
+modes; **Resources** — the largest preset size (a custom size is held to its CPU and memory, a
+custom Flink CDC cluster to the totals of the Flink CDC preset of that name), the most CPU, memory
+and readers one pipeline may ask for at its peak (`resource_limits: {max_cpu, max_memory,
+max_parallelism}`; a Flink CDC cluster's peak is its first copy; no lower than Small, or nothing
+could deploy) and whether clusters shrink after their first copy or only offer Shrink now; pipelines per source (each
 holds a replication slot or log reader); whether "Deploy anyway" exists; whether deploys need
 **approval**; which transform types pipelines may use; and whether **custom transforms** (any SMT
 class in the image) and **scripted transforms** (Groovy/JavaScript filter scripts, which run next to

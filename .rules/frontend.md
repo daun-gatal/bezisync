@@ -133,7 +133,9 @@ src/
   "Shrink after the first copy" sets `streaming_slot` (lists stop at the copy size,
   `streamingError` mirrors decodeCluster) and shows both diagrams with the peak and streaming
   totals. The Overview's cluster card reads `artifacts.flink_shape` (`shapeView`) and offers Shrink
-  now under the `suggest` policy.
+  now under the `suggest` policy. Policies' Resources group edits `max_resources`,
+  `resource_limits` (dropped when empty) and `shrink_after_copy` (left out when `auto`), and
+  `blockedBy` counts each pipeline's server `footprint` (and the Flink presets for a custom cluster).
 - `SchemaForm` renders descriptor JSON Schemas (connections, a sink's pipeline options): `ui.group`,
   `ui.expert`, `ui.labels` / `ui.descriptions` for enum values and `ui.when` (shown only while other
   fields hold listed values; hidden fields are dropped by `cleanValues`; `context` passes the sibling

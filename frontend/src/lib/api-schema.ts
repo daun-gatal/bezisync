@@ -3518,6 +3518,23 @@ export interface components {
             /** Total Memory Mib */
             total_memory_mib: number;
         };
+        /**
+         * FootprintRead
+         * @description What the current version asks for at its peak: what project limits count.
+         */
+        FootprintRead: {
+            /** Cpu */
+            cpu: number;
+            /**
+             * Custom
+             * @description The size is custom.
+             */
+            custom: boolean;
+            /** Memory Mib */
+            memory_mib: number;
+            /** Readers */
+            readers: number;
+        };
         /** FormatSpec */
         FormatSpec: {
             /**
@@ -4188,6 +4205,8 @@ export interface components {
              * @enum {string}
              */
             engine: "debezium" | "flink-cdc";
+            /** @description What the current version asks for at its peak. */
+            footprint?: components["schemas"]["FootprintRead"];
             /** Has Undeployed Changes */
             has_undeployed_changes: boolean;
             /** Health */
@@ -4492,6 +4511,8 @@ export interface components {
              * @default false
              */
             require_approval: boolean;
+            /** @description Limits on each pipeline's peak footprint, beside max_resources. Returned only when set. */
+            resource_limits?: components["schemas"]["ResourceLimits"] | null;
             /**
              * Shrink After Copy
              * @description What happens once a custom Flink CDC cluster with a streaming slot size finishes its first copy: auto (BeziSync shrinks it) or suggest (someone chooses Shrink now). Returned only when suggest.
@@ -4614,6 +4635,27 @@ export interface components {
             result?: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * ResourceLimits
+         * @description The most one pipeline may ask for at its peak (a Flink CDC cluster during its first copy); each optional.
+         */
+        ResourceLimits: {
+            /**
+             * Max Cpu
+             * @description CPU, at least 0.5, in quarters ("6", "1.5").
+             */
+            max_cpu?: string;
+            /**
+             * Max Memory
+             * @description Memory, at least 768Mi, in steps of 256Mi; whole GiB written as Gi ("12Gi").
+             */
+            max_memory?: string;
+            /**
+             * Max Parallelism
+             * @description Readers (Flink CDC), 1 to 128.
+             */
+            max_parallelism?: number;
         };
         /**
          * Role

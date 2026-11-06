@@ -43,7 +43,26 @@ type ProjectPolicies struct {
 	// finishes its first copy: "auto" (default; BeziSync repacks it) or "suggest" (someone
 	// chooses Shrink now). Dumped only when "suggest".
 	ShrinkAfterCopy string `json:"shrink_after_copy"`
+	// ResourceLimits caps what one pipeline asks for at its peak (a Flink CDC cluster's first copy),
+	// on both engines, beside MaxResources. Dumped only when set.
+	ResourceLimits *ResourceLimits `json:"resource_limits"`
 }
+
+// ResourceLimits is a project's most CPU, memory and readers per pipeline (each optional).
+type ResourceLimits struct {
+	MaxCPU         string `json:"max_cpu,omitempty"`    // "6", "1.5"
+	MaxMemory      string `json:"max_memory,omitempty"` // "12Gi"
+	MaxParallelism int    `json:"max_parallelism,omitempty"`
+}
+
+// Resource limit bounds: no lower than the smallest preset (Small: 0.5 CPU, 768 MiB), or no
+// pipeline could deploy.
+const (
+	MinLimitCPU    = 500
+	MaxLimitCPU    = 256000
+	MinLimitMemory = 768
+	MaxLimitMemory = 1 << 20
+)
 
 // ShrinkAuto reports whether BeziSync shrinks custom Flink CDC clusters after their copy itself.
 func (p ProjectPolicies) ShrinkAuto() bool { return p.ShrinkAfterCopy != "suggest" }
@@ -103,6 +122,19 @@ func (p ProjectPolicies) Dump() *om.Map {
 	}
 	if p.ShrinkAfterCopy == "suggest" {
 		out.Set("shrink_after_copy", "suggest")
+	}
+	if l := p.ResourceLimits; l != nil {
+		m := om.New()
+		if l.MaxCPU != "" {
+			m.Set("max_cpu", l.MaxCPU)
+		}
+		if l.MaxMemory != "" {
+			m.Set("max_memory", l.MaxMemory)
+		}
+		if l.MaxParallelism > 0 {
+			m.Set("max_parallelism", l.MaxParallelism)
+		}
+		out.Set("resource_limits", m)
 	}
 	return out
 }
@@ -182,6 +214,9 @@ func ParsePolicies(v *val.V, loc val.Loc, raw any) (ProjectPolicies, bool) {
 		if b, ok := v.Bool(f.Loc, f.Raw); ok {
 			p.AllowAdvancedProperties = b
 		}
+	}
+	if f := o.Get("resource_limits"); f.Present && !f.IsNull() {
+		p.ResourceLimits = decodeLimits(v, f.Loc, f.Raw)
 	}
 	if f := o.Get("shrink_after_copy"); f.Present && !f.IsNull() {
 		if s, ok := v.Literal(f.Loc, f.Raw, "auto", "suggest"); ok && s == "suggest" {
@@ -339,4 +374,48 @@ func EvaluatePoliciesOn(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UU
 		})
 	}
 	return out
+}
+
+func decodeLimits(v *val.V, loc val.Loc, raw any) *ResourceLimits {
+	o := v.Model(loc, raw, "ResourceLimits")
+	if o.Failed {
+		return nil
+	}
+	out := &ResourceLimits{}
+	if f := o.Get("max_cpu"); f.Present && !f.IsNull() {
+		if s, ok := v.Str(f.Loc, f.Raw); ok {
+			if n, good := ParseCPUAny(s); !good || n < MinLimitCPU || n > MaxLimitCPU {
+				v.ValueError(f.Loc, "at least 0.5 CPU (Small, the smallest size: below it no pipeline could deploy), in quarters, like 6 or 1.5")
+			}
+			out.MaxCPU = s
+		}
+	}
+	if f := o.Get("max_memory"); f.Present && !f.IsNull() {
+		if s, ok := v.Str(f.Loc, f.Raw); ok {
+			if n, good := ParseMemoryAny(s); !good || n < MinLimitMemory || n > MaxLimitMemory {
+				v.ValueError(f.Loc, "at least 768Mi (Small, the smallest size: below it no pipeline could deploy), in steps of 256Mi, whole GiB written as Gi")
+			}
+			out.MaxMemory = s
+		}
+	}
+	if f := o.Get("max_parallelism"); f.Present && !f.IsNull() {
+		if n, ok := v.IntIn(f.Loc, f.Raw, val.Num{GE: val.F(1), LE: val.F(MaxParallelism)}); ok {
+			out.MaxParallelism = n
+		}
+	}
+	o.Forbid()
+	if *out == (ResourceLimits{}) {
+		return nil
+	}
+	return out
+}
+
+// Amounts are the limits in numbers (0: no limit).
+func (l *ResourceLimits) Amounts() (cpuMilli, memoryMiB, parallelism int) {
+	if l == nil {
+		return 0, 0, 0
+	}
+	cpuMilli, _ = ParseCPUAny(l.MaxCPU)
+	memoryMiB, _ = ParseMemoryAny(l.MaxMemory)
+	return cpuMilli, memoryMiB, l.MaxParallelism
 }

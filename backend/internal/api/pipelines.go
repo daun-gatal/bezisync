@@ -58,6 +58,17 @@ type PipelineRead struct {
 	// Engine runs the pipeline; Caps is what it can do (actions it can't do carry a reason).
 	Engine string      `json:"engine"`
 	Caps   engine.Caps `json:"caps"`
+	// Footprint is what the current version asks for at its peak (with the spec only).
+	Footprint *FootprintRead `json:"footprint,omitempty"`
+}
+
+// FootprintRead is a pipeline's peak footprint: what project limits are counted against.
+type FootprintRead struct {
+	CPU       float64 `json:"cpu"`
+	MemoryMiB int     `json:"memory_mib"`
+	Readers   int     `json:"readers"`
+	// Custom: the size is custom (a Flink CDC cluster is then held to max_resources by its totals).
+	Custom bool `json:"custom"`
 }
 
 func pipelineRead(ctx context.Context, q db.Querier, p *models.Pipeline, withSpec bool) (*PipelineRead, error) {
@@ -111,10 +122,20 @@ func pipelineRead(ctx context.Context, q db.Querier, p *models.Pipeline, withSpe
 	if current != nil {
 		out.CurrentVersion = &current.Number
 		out.HasUndeployedChanges = deployed == nil || current.ID != deployed.ID
+		spec := domain.MustSpec(map[string]any(current.Spec))
 		if withSpec {
-			spec := domain.MustSpec(map[string]any(current.Spec))
 			out.Spec = &spec
 		}
+		// Lists too: Policies counts each pipeline's peak against proposed limits. A custom Flink CDC
+		// cluster is packed for its runtime's nodes; nothing else needs them.
+		var capacity map[string]any
+		if eng == engine.FlinkCDC && spec.Policies.Resources == "custom" && p.RuntimeID != nil {
+			if full, err := services.GetRuntime(ctx, q, *p.RuntimeID); err == nil && full != nil {
+				capacity = full.Capacity
+			}
+		}
+		f := services.FootprintOf(p, spec, capacity)
+		out.Footprint = &FootprintRead{CPU: f.CPU, MemoryMiB: f.MiB, Readers: f.Readers, Custom: spec.Policies.Resources == "custom"}
 	}
 	if deployed != nil {
 		out.DeployedVersion = &deployed.Number

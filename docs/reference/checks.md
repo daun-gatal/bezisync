@@ -2397,6 +2397,19 @@ Ask an Admin to change the policy under Settings → Policies.
 
 **Project policies**
 
+<a id="policy-resource-limits"></a>
+### `policy_resource_limits`
+
+**Resource limits**
+
+- Why: The project caps the CPU, memory and readers one pipeline may ask for at its peak (a Flink CDC cluster during its first copy). A running pipeline over a new limit keeps running; its next deploy is blocked.
+
+Fix:
+
+```
+Choose a smaller size, fewer readers, or ask an Admin to raise the limits under Settings → Policies.
+```
+
 <a id="policy-resources"></a>
 ### `policy_resources`
 

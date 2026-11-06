@@ -3372,6 +3372,36 @@
         "title": "FlinkSize",
         "type": "object"
       },
+      "FootprintRead": {
+        "description": "What the current version asks for at its peak: what project limits count.",
+        "properties": {
+          "cpu": {
+            "title": "Cpu",
+            "type": "number"
+          },
+          "custom": {
+            "description": "The size is custom.",
+            "title": "Custom",
+            "type": "boolean"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          },
+          "readers": {
+            "title": "Readers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory_mib",
+          "readers",
+          "custom"
+        ],
+        "title": "FootprintRead",
+        "type": "object"
+      },
       "FormatSpec": {
         "additionalProperties": false,
         "properties": {
@@ -5114,6 +5144,10 @@
             "title": "Engine",
             "type": "string"
           },
+          "footprint": {
+            "$ref": "#/components/schemas/FootprintRead",
+            "description": "What the current version asks for at its peak."
+          },
           "has_undeployed_changes": {
             "title": "Has Undeployed Changes",
             "type": "boolean"
@@ -5971,6 +6005,17 @@
             "title": "Require Approval",
             "type": "boolean"
           },
+          "resource_limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceLimits"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Limits on each pipeline's peak footprint, beside max_resources. Returned only when set."
+          },
           "shrink_after_copy": {
             "default": "auto",
             "description": "What happens once a custom Flink CDC cluster with a streaming slot size finishes its first copy: auto (BeziSync shrinks it) or suggest (someone chooses Shrink now). Returned only when suggest.",
@@ -6287,6 +6332,31 @@
           "ok"
         ],
         "title": "RequestResult",
+        "type": "object"
+      },
+      "ResourceLimits": {
+        "additionalProperties": false,
+        "description": "The most one pipeline may ask for at its peak (a Flink CDC cluster during its first copy); each optional.",
+        "properties": {
+          "max_cpu": {
+            "description": "CPU, at least 0.5, in quarters (\"6\", \"1.5\").",
+            "title": "Max Cpu",
+            "type": "string"
+          },
+          "max_memory": {
+            "description": "Memory, at least 768Mi, in steps of 256Mi; whole GiB written as Gi (\"12Gi\").",
+            "title": "Max Memory",
+            "type": "string"
+          },
+          "max_parallelism": {
+            "description": "Readers (Flink CDC), 1 to 128.",
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Parallelism",
+            "type": "integer"
+          }
+        },
+        "title": "ResourceLimits",
         "type": "object"
       },
       "Role": {

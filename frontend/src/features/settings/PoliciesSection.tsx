@@ -5,19 +5,21 @@ import { useBlocker } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { InlineError, Notice } from '@/components/ui/feedback';
-import { Check, Field, Stepper, Switch } from '@/components/ui/form';
+import { Check, Field, Segmented, Stepper, Switch } from '@/components/ui/form';
 import { Card, QueryState } from '@/components/ui/layout';
 import { Modal } from '@/components/ui/overlays';
 import { Select } from '@/components/ui/select';
 import { Meta } from '@/components/ui/text';
-import { client, unwrap } from '@/lib/api';
+import { client, unwrap, type Schemas } from '@/lib/api';
 import { TYPE_LABEL, useConnectorTypes } from '@/lib/connections';
 import { usePipelines, type Pipeline } from '@/lib/pipelines';
+import { useEngines } from '@/lib/engines';
 import { allows, usePolicies, type Policies } from '@/lib/policies';
 import { useProject } from '@/lib/session';
 import { fullSpec, memoryMiB, PRESET_AMOUNTS, SNAPSHOT_MODES } from '@/features/pipelines/spec';
 import { TYPE_TITLE } from '@/features/pipelines/transforms/model';
 import { useRuntimes } from './RuntimesSection';
+import { memoryLabel } from '@/lib/cluster';
 
 const TRANSFORM_OPTIONS = (['unwrap', 'filter', 'rename', 'add_field', 'flatten', 'outbox'] as const).map((t) => ({ value: t, label: TYPE_TITLE[t] }));
 const SIZES = ['small', 'medium', 'large'] as const;
@@ -65,6 +67,14 @@ function AllowList({
   );
 }
 
+/** CPUs of a Kubernetes quantity ("500m", "1.5"). */
+const cpuOf = (q: string) => (q.endsWith('m') ? Number(q.slice(0, -1)) / 1000 : Number(q));
+
+/** Resource limit choices (domain bounds: at least Small, 0.5 CPU and 768 MiB). */
+const LIMIT_CPUS = ['0.5', '1', '1.5', '2', '3', '4', '6', '8', '12', '16', '24', '32', '48', '64'];
+const LIMIT_MEMORIES = ['768Mi', '1Gi', '1536Mi', '2Gi', '3Gi', '4Gi', '6Gi', '8Gi', '12Gi', '16Gi', '24Gi', '32Gi', '48Gi', '64Gi', '96Gi', '128Gi'];
+const LIMIT_READERS = [1, 2, 4, 8, 16, 32, 64, 128];
+
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <Card title={title}>
@@ -74,7 +84,13 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /** Why a deployed pipeline's next deploy would be refused under these policies, if it would. */
-export function blockedBy(p: Pipeline, policy: Policies, runtimeName: (id: string) => string): string[] {
+export function blockedBy(
+  p: Pipeline,
+  policy: Policies,
+  runtimeName: (id: string) => string,
+  /** The Flink CDC presets (GET /engines): a custom cluster is held to the totals of the one max_resources names. */
+  flinkSizes?: Record<string, Schemas['FlinkSize']>,
+): string[] {
   const spec = fullSpec(p.spec);
   const out: string[] = [];
   if (!allows(policy.allowed_source_types, p.source.type)) out.push(`source type ${TYPE_LABEL[p.source.type] ?? p.source.type}`);
@@ -87,6 +103,10 @@ export function blockedBy(p: Pipeline, policy: Policies, runtimeName: (id: strin
       if (Number(custom.cpu) > limit.cpu || memoryMiB(custom.memory) > limit.mem) out.push(`a custom size (${custom.cpu} CPU, ${custom.memory})`);
     } else if (spec.policies.resources !== 'custom' && SIZES.indexOf(spec.policies.resources) > SIZES.indexOf(policy.max_resources)) {
       out.push(`size ${spec.policies.resources}`);
+    } else if ((spec.policies.resources === 'custom' || p.footprint?.custom) && p.engine === 'flink-cdc' && p.footprint && flinkSizes?.[policy.max_resources]) {
+      const s = flinkSizes[policy.max_resources]!;
+      const cpu = cpuOf(s.jobmanager_cpu) + s.taskmanagers * cpuOf(s.taskmanager_cpu);
+      if (p.footprint.cpu > cpu + 1e-9 || p.footprint.memory_mib > s.total_memory_mib) out.push('a custom cluster');
     }
   }
   if (!allows(policy.allowed_snapshot_modes, spec.snapshot.mode)) out.push(`snapshot mode ${spec.snapshot.mode}`);
@@ -97,6 +117,14 @@ export function blockedBy(p: Pipeline, policy: Policies, runtimeName: (id: strin
     if (t.condition && !policy.allow_scripted_transforms) out.push('a filter script');
   }
   if (Object.keys(spec.advanced ?? {}).length > 0 && !policy.allow_advanced_properties) out.push('advanced Debezium properties');
+  // Resource limits count the server's peak footprint (a Flink CDC cluster's first copy).
+  const l = policy.resource_limits;
+  const f = p.footprint;
+  if (l && f) {
+    if (l.max_cpu && f.cpu > Number(l.max_cpu) + 1e-9) out.push(`${Number(f.cpu.toFixed(2))} CPU at its peak`);
+    if (l.max_memory && f.memory_mib > memoryMiB(l.max_memory)) out.push(`${f.memory_mib} MiB at its peak`);
+    if (l.max_parallelism && f.readers > l.max_parallelism) out.push(`${f.readers} readers`);
+  }
   return [...new Set(out)];
 }
 
@@ -107,6 +135,7 @@ export function PoliciesSection() {
   const types = useConnectorTypes(project.id);
   const runtimes = useRuntimes(project.id);
   const pipelines = usePipelines(project.id);
+  const flinkSizes = useEngines().data?.find((e) => e.id === 'flink-cdc')?.sizes ?? undefined;
   const [draft, setDraft] = useState<Policies | null>(null);
   const manage = can('project.manage');
   useEffect(() => {
@@ -146,10 +175,20 @@ export function PoliciesSection() {
         const blocked = dirty
           ? (pipelines.data ?? [])
               .filter((p) => p.deployed_version && !['deleted', 'deleting'].includes(p.lifecycle))
-              .map((p) => ({ p, now: blockedBy(p, draft, runtimeName), before: blockedBy(p, saved, runtimeName) }))
+              .map((p) => ({ p, now: blockedBy(p, draft, runtimeName, flinkSizes), before: blockedBy(p, saved, runtimeName, flinkSizes) }))
               .filter((x) => x.now.length > x.before.length)
           : [];
         const limit = draft.max_pipelines_per_source;
+        const limits = draft.resource_limits ?? {};
+        // Returned only when set: an empty one is dropped, so "dirty" compares like with like.
+        const setLimit = (patch: Partial<NonNullable<Policies['resource_limits']>>) => {
+          const next = { ...limits, ...patch };
+          for (const k of Object.keys(next) as (keyof typeof next)[]) if (next[k] === undefined || next[k] === null || next[k] === '') delete next[k];
+          const rest = { ...draft };
+          if (Object.keys(next).length) rest.resource_limits = next;
+          else delete rest.resource_limits;
+          setDraft(rest);
+        };
         return (
           <div className="flex min-w-0 flex-col gap-4">
             <div className="flex flex-col gap-1">
@@ -186,7 +225,7 @@ export function PoliciesSection() {
                 disabled={!manage}
               />
             </Group>
-            <Group title="How pipelines may run">
+            <Group title="Resources">
               <Field label="Largest size" hint="Pipelines can’t use a bigger resource preset.">
                 {(id) => (
                   <Select
@@ -203,6 +242,58 @@ export function PoliciesSection() {
                   />
                 )}
               </Field>
+              <Field label="Most CPU per pipeline" hint="At its peak: a Flink CDC cluster while it first copies.">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={limits.max_cpu ?? ''}
+                    disabled={!manage}
+                    onChange={(v) => setLimit({ max_cpu: v || undefined })}
+                    options={[{ value: '', label: 'No limit' }, ...LIMIT_CPUS.map((c) => ({ value: c, label: `${c} CPU` }))]}
+                  />
+                )}
+              </Field>
+              <Field label="Most memory per pipeline" hint="At its peak, with a Flink CDC cluster’s JobManager and TaskManagers.">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={limits.max_memory ?? ''}
+                    disabled={!manage}
+                    onChange={(v) => setLimit({ max_memory: v || undefined })}
+                    options={[{ value: '', label: 'No limit' }, ...LIMIT_MEMORIES.map((m) => ({ value: m, label: memoryLabel(m) }))]}
+                  />
+                )}
+              </Field>
+              <Field label="Most readers per pipeline" hint="Flink CDC: how many readers copy at once.">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={limits.max_parallelism ? String(limits.max_parallelism) : ''}
+                    disabled={!manage}
+                    onChange={(v) => setLimit({ max_parallelism: v ? Number(v) : undefined })}
+                    options={[{ value: '', label: 'No limit' }, ...LIMIT_READERS.map((n) => ({ value: String(n), label: `${n} reader${n === 1 ? '' : 's'}` }))]}
+                  />
+                )}
+              </Field>
+              <Field label="After a Flink CDC cluster’s first copy" group hint="Clusters given a smaller size for streaming.">
+                {() => (
+                  <Segmented
+                    label="After a Flink CDC cluster’s first copy"
+                    value={draft.shrink_after_copy === 'suggest' ? 'suggest' : 'auto'}
+                    onChange={(v) => {
+                      // Returned only when "suggest": the default is left out.
+                      const { shrink_after_copy: _was, ...rest } = draft;
+                      if (manage) setDraft((v === 'suggest' ? { ...rest, shrink_after_copy: 'suggest' } : rest) as Policies);
+                    }}
+                    options={[
+                      { value: 'auto', label: 'Shrink it' },
+                      { value: 'suggest', label: 'Offer Shrink now' },
+                    ]}
+                  />
+                )}
+              </Field>
+            </Group>
+            <Group title="How pipelines may run">
               <div className="flex min-w-0 flex-col gap-2">
                 <Switch
                   checked={limit !== null && limit !== undefined}

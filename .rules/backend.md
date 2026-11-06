@@ -367,7 +367,13 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `streaming_since`), reverts a streaming shape that failed before saving (`MaxShrinkFailures`, then
   `shrink_off` and the `cluster_shrink_failed` alert); `GrowBack` runs on Start over with a copy and
   on restoring a position before `copy_done_save`; Deploy keeps a shrunk shape unless tables were
-  added. Audits a person didn't cause set `AuditEvent.Actor` ("controller"). `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  added. Audits a person didn't cause set `AuditEvent.Actor` ("controller"). Project limits count
+  `services.FootprintOf` (the peak: a Flink CDC cluster's copy shape, `PeakSizeOf`), returned on
+  pipeline reads as `footprint` so the Policies preview never packs: `resource_limits`
+  (`policy_resource_limits`) on both engines, and `max_resources` for a custom Flink CDC cluster by
+  the Flink preset's totals (`resourcePolicyChecks`; presets and Debezium sizes stay in
+  `domain.EvaluatePolicies`). `max_resources` is not migrated into numbers: its presets mean other
+  totals on each engine, so any conversion would change which pipelines pass. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

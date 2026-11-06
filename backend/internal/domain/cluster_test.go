@@ -131,3 +131,56 @@ func TestShrinkAfterCopyPolicy(t *testing.T) {
 		t.Fatal("accepted")
 	}
 }
+
+func TestResourceLimitsPolicy(t *testing.T) {
+	parse := func(raw any) (domain.ProjectPolicies, []string) {
+		v := &val.V{}
+		p, _ := domain.ParsePolicies(v, nil, map[string]any{"resource_limits": raw})
+		var msgs []string
+		for _, e := range v.Errors {
+			msgs = append(msgs, strings.Join(e.Loc, ".")+": "+e.Message)
+		}
+		return p, msgs
+	}
+	p, errs := parse(map[string]any{"max_cpu": "6", "max_memory": "12Gi", "max_parallelism": 8})
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if cpu, mem, readers := p.ResourceLimits.Amounts(); cpu != 6000 || mem != 12288 || readers != 8 {
+		t.Fatal(cpu, mem, readers)
+	}
+	if b, _ := json.Marshal(p); !strings.HasSuffix(string(b), `"resource_limits":{"max_cpu":"6","max_memory":"12Gi","max_parallelism":8}}`) {
+		t.Fatal(string(b))
+	}
+	// Each limit is optional; none at all is no limit, and isn't dumped (P5).
+	if p, errs := parse(map[string]any{"max_parallelism": 4}); len(errs) > 0 || p.ResourceLimits.MaxCPU != "" {
+		t.Fatal(errs)
+	}
+	for _, empty := range []any{map[string]any{}, nil} {
+		p, errs := parse(empty)
+		b, _ := json.Marshal(p)
+		if len(errs) > 0 || p.ResourceLimits != nil || strings.Contains(string(b), "resource_limits") {
+			t.Fatal(empty, errs, string(b))
+		}
+	}
+	var none *domain.ResourceLimits
+	if cpu, mem, readers := none.Amounts(); cpu+mem+readers != 0 {
+		t.Fatal("no limits are zero")
+	}
+	// P3: below the smallest size no pipeline could deploy; the message names it.
+	for raw, want := range map[string]string{
+		`{"max_memory": "512Mi"}`:    "Small",
+		`{"max_cpu": "0.25"}`:        "Small",
+		`{"max_cpu": "1.3"}`:         "quarters",
+		`{"max_parallelism": 0}`:     "max_parallelism",
+		`{"max_parallelism": 129}`:   "max_parallelism",
+		`{"max_memory": "2048Mi"}`:   "Gi",
+		`{"max_cpu": "2", "gpu": 1}`: "gpu",
+	} {
+		var m map[string]any
+		_ = json.Unmarshal([]byte(raw), &m)
+		if _, errs := parse(m); !strings.Contains(strings.Join(errs, "|"), want) {
+			t.Errorf("%s: %v", raw, errs)
+		}
+	}
+}

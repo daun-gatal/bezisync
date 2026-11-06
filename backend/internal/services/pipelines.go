@@ -1615,6 +1615,22 @@ func PolicyChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec do
 		}
 	}
 	out := domain.EvaluatePolicies(rules, spec, p.RuntimeID, sourceConn.Type, sinkType, int(others))
+	var capacity map[string]any
+	if p.RuntimeID != nil {
+		if rt, err := GetRuntime(ctx, q, *p.RuntimeID); err == nil && rt != nil {
+			capacity = rt.Capacity
+		}
+	}
+	if extra := resourcePolicyChecks(p, rules, spec, FootprintOf(p, spec, capacity)); len(extra) > 0 {
+		// policy_ok means nothing failed: it goes when a limit does.
+		kept := out[:0]
+		for _, c := range out {
+			if c.Code != "policy_ok" {
+				kept = append(kept, c)
+			}
+		}
+		out = append(kept, extra...)
+	}
 	// A source that copies no existing rows (Spanner) has no snapshot mode a policy could restrict.
 	if d, err := connectors.Describe("source", sourceConn.Type); err == nil && len(d.Capture.SnapshotModes) == 0 {
 		kept := out[:0]
