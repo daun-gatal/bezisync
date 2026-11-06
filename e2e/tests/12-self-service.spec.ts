@@ -158,3 +158,40 @@ test('an admin decides whether pipelines may run scripted transforms', async ({ 
   await expect(page.getByRole('button', { name: 'Save policies' })).toBeDisabled();
   expect((await admin.get<{ allow_scripted_transforms?: boolean }>(`${base}/policies`)).allow_scripted_transforms).toBeUndefined();
 });
+
+test('an admin decides whether pipelines may pass advanced Debezium properties', async ({ page }) => {
+  const admin = await Api.signIn();
+  const tag = unique('raw');
+  const project = await admin.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `Raw ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/settings/policies`);
+  const raw = page.getByRole('switch', { name: 'Allow advanced Debezium properties' });
+  await expect(raw).not.toBeChecked();
+  await expect(page.getByText('can’t verify the rest', { exact: false })).toBeVisible();
+  await raw.click();
+  await page.getByRole('button', { name: 'Save policies' }).click();
+  await expect(page.getByText('Policies saved')).toBeVisible();
+  expect((await admin.get<{ allow_advanced_properties?: boolean }>(`${base}/policies`)).allow_advanced_properties).toBe(true);
+
+  // A raw property BeziSync sets is refused when saved, with where to set it instead.
+  const { password, ...pg } = SOURCE_PG;
+  const src = await admin.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const refused = await admin.raw('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id,
+    spec: { source: { tables: { include: ['shop.orders'] } }, advanced: { 'debezium.source.column.exclude.list': 'shop.orders.total' } },
+  });
+  expect(refused.status()).toBe(422);
+  const problem = (await refused.json()) as { code: string; errors: { loc: string[]; message: string }[] };
+  expect(problem.code).toBe('managed_property');
+  expect(problem.errors[0]!.message).toContain('Tables');
+
+  // Switching it off again is returned without the key. (The saved toast covers the Save button
+  // until it closes, and a pointer resting on it keeps it open.)
+  await page.mouse.move(0, 0);
+  await expect(page.getByText('Policies saved')).toBeHidden();
+  await raw.click();
+  await page.getByRole('button', { name: 'Save policies' }).click();
+  await expect(page.getByRole('button', { name: 'Save policies' })).toBeDisabled();
+  expect((await admin.get<{ allow_advanced_properties?: boolean }>(`${base}/policies`)).allow_advanced_properties).toBeUndefined();
+});

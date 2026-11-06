@@ -13,6 +13,7 @@ import { Select, TimeRange } from '@/components/ui/select';
 import { Meta, plural } from '@/components/ui/text';
 import { CheckList } from '@/components/CheckList';
 import { useRuntimes } from '@/features/settings/RuntimesSection';
+import { ApiError } from '@/lib/api';
 import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
 import { slugify } from '@/lib/format';
 import { useDeploy, usePipelines, usePreflight, type Pipeline, type Preflight } from '@/lib/pipelines';
@@ -219,7 +220,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
           </span>
         }
       >
-        <InlineError error={saveError} doing="Couldn’t save your changes" />
+        <InlineError
+          error={saveError}
+          doing="Couldn’t save your changes"
+          fix={saveError instanceof ApiError && saveError.code === 'managed_property' ? 'Remove those lines from Advanced Debezium properties, or set each one where its message says.' : undefined}
+        />
         <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
           <Field label="Name" error={nameErr} hint={deployed ? 'Deployed pipelines keep their name.' : 'Used in URLs, YAML and the {pipeline} placeholder.'}>
             {(id) => <SlugInput id={id} value={name} onChange={setName} disabled={deployed} taken={others} />}
@@ -341,7 +346,16 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
           />
         )}
         {expert && !flink ? (
-          <Field label="Advanced Debezium properties" optional error={adv.error} hint="One key=value per line. BeziSync-managed keys are rejected.">
+          <Field
+            label="Advanced Debezium properties"
+            optional
+            error={adv.error}
+            hint={
+              policies?.allow_advanced_properties
+                ? 'One key=value per line, for options BeziSync doesn’t offer. Keys BeziSync sets, credentials and unsafe options are refused; the rest show in preflight as not verified.'
+                : 'This project doesn’t allow advanced properties: a pipeline with any can’t deploy. An Admin can allow them in Settings → Policies.'
+            }
+          >
             {(id) => (
               <Textarea
                 id={id}

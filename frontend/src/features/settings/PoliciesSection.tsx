@@ -88,6 +88,7 @@ export function blockedBy(p: Pipeline, policy: Policies, runtimeName: (id: strin
     } else if (policy.allowed_transforms && !policy.allowed_transforms.includes(t.type as never)) out.push(`the ${TYPE_TITLE[t.type]} transform`);
     if (t.condition && !policy.allow_scripted_transforms) out.push('a filter script');
   }
+  if (Object.keys(spec.advanced ?? {}).length > 0 && !policy.allow_advanced_properties) out.push('advanced Debezium properties');
   return [...new Set(out)];
 }
 
@@ -120,10 +121,10 @@ export function PoliciesSection() {
         const set = (patch: Partial<Policies>) => setDraft({ ...draft, ...patch });
         // Newer switches are returned only when on: drop them when off so "dirty" compares like with like.
         const toggle = (
-          key: 'require_approval' | 'allow_force_deploy' | 'allow_scripted_transforms' | 'allow_custom_transforms',
+          key: 'require_approval' | 'allow_force_deploy' | 'allow_scripted_transforms' | 'allow_custom_transforms' | 'allow_advanced_properties',
           on: boolean,
         ) => {
-          if ((key === 'allow_scripted_transforms' || key === 'allow_custom_transforms') && !on) {
+          if ((key === 'allow_scripted_transforms' || key === 'allow_custom_transforms' || key === 'allow_advanced_properties') && !on) {
             const rest = { ...draft };
             delete rest[key];
             setDraft(rest);
@@ -256,6 +257,13 @@ export function PoliciesSection() {
                   onChange={(on) => toggle('allow_scripted_transforms', on)}
                   label="Allow scripted transforms"
                   description="Lets pipelines run filter scripts their authors wrote (Groovy or JavaScript). Scripts run inside the connector, next to its database credentials: allow them only for trusted Editors."
+                />
+                <Switch
+                  checked={Boolean(draft.allow_advanced_properties)}
+                  disabled={!manage}
+                  onChange={(on) => toggle('allow_advanced_properties', on)}
+                  label="Allow advanced Debezium properties"
+                  description="Lets Experts pass raw Debezium properties for options BeziSync doesn’t offer. BeziSync refuses keys it sets, credentials and unsafe options, but can’t verify the rest: preflight shows them as not verified."
                 />
               </div>
             </Group>
