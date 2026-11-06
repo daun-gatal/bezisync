@@ -53,6 +53,10 @@ func stepProps(c connectors.CompileContext, src connectors.Source, desc *connect
 		if t.Type == "route" {
 			continue // compiled after BeziSync's own router (routeProps)
 		}
+		if t.Type == "computed" {
+			// T16: Debezium has no expressions short of scripting, which has its own policy.
+			return nil, nil, nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Step %d: a computed column runs only on Flink CDC.", i+1))
+		}
 		if t.Type == "truncate" {
 			// A source option, not a transform in the chain: exactly the property a raw one
 			// would be, so a pipeline moved to the step keeps its hash (T7).

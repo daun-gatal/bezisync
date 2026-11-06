@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, computedError, defaultArgs, formulaText, kindFits, FLINK_ONLY_STEPS, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -239,5 +239,42 @@ describe('route', () => {
     const before = fullSpec({ source: { tables: { include: tables } } });
     const after = { ...before, transforms: [...before.transforms, { type: 'route' as const, id: 's1', routes: [{ match: 'public.orders_*', to: 'orders' }] }] };
     expect(outputImpact(before, after)).toEqual([{ kind: 'breaking', text: 'New routes — public.orders_* → orders. Matched tables arrive in another destination.' }]);
+  });
+});
+
+describe('computed', () => {
+  const step = (over: Partial<TransformStep>): TransformStep => ({ ...defaultStep('computed', []), table: 'public.orders', name: 'label', ...over });
+  it('runs on Flink CDC only and starts with what its function takes', () => {
+    expect(FLINK_ONLY_STEPS).toContain('computed');
+    expect(defaultArgs('concat')).toEqual([{ column: '' }, { column: '' }]);
+    expect(defaultArgs('substr')).toEqual([{ column: '' }, { number: 1 }, { number: 1 }]);
+    expect(defaultArgs('date_format')).toEqual([{ column: '' }, { text: 'yyyy-MM-dd' }]);
+  });
+  it('offers only columns of the kind a function takes (T15)', () => {
+    expect(kindFits('text', 'text')).toBe(true);
+    expect(kindFits('text', 'int')).toBe(false);
+    expect(kindFits('time', 'timestamp')).toBe(true);
+    expect(kindFits('time', 'timestamptz')).toBe(false);
+    expect(kindFits('any', 'json')).toBe(false);
+    expect(kindFits('any|lit', 'decimal')).toBe(true);
+  });
+  it('says what is missing, as the server would', () => {
+    expect(computedError(step({ table: '' }))).toBe('Choose the table.');
+    expect(computedError(step({ name: '1x' }))).toMatch(/letters, digits/);
+    expect(computedError(step({ args: [{ column: '' }] }))).toBe('Pick a column for every argument.');
+    expect(computedError(step({ function: 'substr', args: [{ column: 'notes' }, { number: 0 }, { number: 2 }] }))).toMatch(/from 1 to 65535/);
+    expect(computedError(step({ function: 'concat', args: [{ column: 'a' }, { text: '${BZ_SRC_PASSWORD}' }] }))).toMatch(/\$\{/);
+    expect(computedError(step({ args: [{ column: 'status' }] }))).toBeNull();
+  });
+  it('reads as a formula, adds its column and is additive', () => {
+    const s = step({ function: 'concat', args: [{ column: 'status' }, { text: '-' }, { column: 'id' }] });
+    expect(formulaText(s)).toBe('Join(status, "-", id)');
+    expect(summarize(s)).toBe('public.orders: label = Join(status, "-", id)');
+    const table: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'integer' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
+    const spec = fullSpec({ source: { tables: { include: ['public.orders'] } } });
+    expect(fieldsBefore([s, defaultStep('rename', [])], 1, table, spec)).toContain('label');
+    expect(flinkColumns(table, spec, [s], 'p').at(-1)).toEqual({ name: 'label', from: { kind: 'computed', formula: 'Join(status, "-", id)' }, key: false });
+    const after = { ...spec, transforms: [...spec.transforms, s] };
+    expect(outputImpact(spec, after)).toEqual([{ kind: 'additive', text: 'New column label (public.orders).' }]);
   });
 });

@@ -1485,6 +1485,32 @@ Fix:
 Choose key columns for them in the Transform step (Message key).
 ```
 
+<a id="iceberg-partition-column"></a>
+### `iceberg_partition_column`
+
+**Partitioning**
+
+- Why: Flink CDC fails creating a table partitioned by a column its rows don't carry, or by a transform the column's type can't take.
+
+Fix:
+
+```
+Change Partition by in the Destination step.
+```
+
+<a id="iceberg-partition-existing"></a>
+### `iceberg_partition_existing`
+
+**Partitioning**
+
+- Why: Flink CDC sets a table's partitioning when it creates the table; Iceberg keeps it, so other partitioning asked for later never applies.
+
+Fix:
+
+```
+Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again.
+```
+
 <a id="iceberg-partitioning"></a>
 ### `iceberg_partitioning`
 
@@ -2253,6 +2279,19 @@ Fix:
 
 ```
 Fix the source connection, then run the checks again.
+```
+
+<a id="transform-computed-input"></a>
+### `transform_computed_input`
+
+**Transforms: computed columns**
+
+- Why: Flink CDC stops the job when a projection reads a column the table lacks, or calls a function on a value of another type.
+
+Fix:
+
+```
+Pick another column for the computed column, under Transform.
 ```
 
 <a id="transform-custom-class-unknown"></a>

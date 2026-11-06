@@ -413,3 +413,25 @@ test('an editor routes tables to one destination; preflight refuses unlike table
   expect(events.destination).toBe(`orders-${tag}`);
   await api.send('DELETE', url);
 });
+
+test('a computed column is offered only on Flink CDC, and says why on Debezium (T16)', async ({ page }) => {
+  const api = await Api.signIn();
+  const tag = unique('tfcc');
+  const { project, base, rt, source, sink } = await setup(api, tag);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: source.id, sink_id: sink.id, runtime_id: rt.id, spec: { source: { tables: { include: ['shop.orders'] } } },
+  }, 201);
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  const card = page.getByRole('button', { name: /^Computed column/ });
+  await expect(card).toBeDisabled();
+  await expect(page.getByText(/Runs only on Flink CDC/)).toBeVisible();
+  // Sent anyway, the deploy is refused before anything runs.
+  const url = `${base}/pipelines/${p.id}`;
+  const cur = await api.get<{ version: number; spec: Record<string, unknown> }>(url);
+  await api.patch(url, { spec: { ...cur.spec, transforms: [{ type: 'computed', id: 'cc01', table: 'shop.orders', name: 'x', function: 'upper', args: [{ column: 'status' }] }] } }, cur.version);
+  const pre = await api.send<{ sections: { report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
+  expect(pre.sections.flatMap((s) => s.report.checks).some((c) => c.status === 'fail' && c.message.includes('runs only on Flink CDC'))).toBe(true);
+  await api.send('DELETE', url);
+});

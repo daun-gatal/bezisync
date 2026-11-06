@@ -11,7 +11,7 @@ import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { fullSpec, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
-import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor } from './editors';
+import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor, ComputedEditor } from './editors';
 import { FlinkPreviewPanel } from './FlinkPreviewPanel';
 import { PreviewPanel } from './PreviewPanel';
 import {
@@ -20,6 +20,7 @@ import {
   columnKind,
   DEBEZIUM_CLASS,
   DEBEZIUM_ONLY_STEPS,
+  FLINK_ONLY_STEPS,
   defaultStep,
   FLINK_TITLE,
   moveStep,
@@ -43,6 +44,7 @@ const CHOICES: { group: string; items: { type: TransformType; help: string }[] }
       { type: 'flatten', help: 'address.city becomes address_city.' },
       { type: 'soft_delete', help: 'A deleted row stays, marked deleted, instead of being removed.' },
       { type: 'truncate', help: 'Cut long text columns to a length.' },
+      { type: 'computed', help: 'A new column from a function of other columns (Flink CDC).' },
     ],
   },
   { group: 'Destinations', items: [{ type: 'route', help: 'Send tables a pattern matches to one destination of your naming.' }] },
@@ -137,6 +139,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
 
   function locked(type: TransformType): string | null {
     if (flink && DEBEZIUM_ONLY_STEPS.includes(type)) return 'Runs only on Debezium: this pipeline runs on Flink CDC.';
+    if (!flink && FLINK_ONLY_STEPS.includes(type)) return 'Runs only on Flink CDC: Debezium has no formulas short of scripting, which stays behind its own policy.';
     if (type === 'custom') {
       if (!policies?.allow_custom_transforms) return 'Turned off by this project’s policy. Ask an Admin under Settings → Policies.';
       if (!expert) return 'Switch to Expert mode (account menu) to add custom transforms.';
@@ -181,6 +184,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
       outbox: <p className="m-0 text-xs text-muted">The outbox router has no settings here yet; edit it through YAML or the API.</p>,
       truncate: <TruncateEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       route: <RouteEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
+      computed: <ComputedEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       soft_delete: (
         <p className="m-0 text-sm text-ink-2">
           {flink

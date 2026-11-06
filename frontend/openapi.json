@@ -1567,6 +1567,29 @@
         "title": "ColumnRules",
         "type": "object"
       },
+      "ComputedArg": {
+        "additionalProperties": false,
+        "description": "Exactly one of column, text or number.",
+        "properties": {
+          "column": {
+            "title": "Column",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Number",
+            "type": "integer"
+          },
+          "text": {
+            "maxLength": 200,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "title": "ComputedArg",
+        "type": "object"
+      },
       "ConfigRead": {
         "properties": {
           "destinations": {
@@ -6241,7 +6264,8 @@
                     "flatten",
                     "soft_delete",
                     "truncate",
-                    "route"
+                    "route",
+                    "computed"
                   ],
                   "type": "string"
                 },
@@ -9768,6 +9792,14 @@
             "title": "Add Fields",
             "type": "array"
           },
+          "args": {
+            "description": "computed: the function's arguments, in order.",
+            "items": {
+              "$ref": "#/components/schemas/ComputedArg"
+            },
+            "title": "Args",
+            "type": "array"
+          },
           "class": {
             "description": "custom: the SMT class (Expert; needs the project policy allow_custom_transforms).",
             "maxLength": 300,
@@ -9811,6 +9843,22 @@
               "."
             ],
             "title": "Delimiter",
+            "type": "string"
+          },
+          "function": {
+            "description": "computed: the function (Flink CDC only).",
+            "enum": [
+              "concat",
+              "date_format",
+              "length",
+              "lower",
+              "substr",
+              "to_integer",
+              "to_text",
+              "trim",
+              "upper"
+            ],
+            "title": "Function",
             "type": "string"
           },
           "id": {
@@ -9882,6 +9930,11 @@
             "title": "Rules",
             "type": "array"
           },
+          "table": {
+            "description": "computed: the table (schema.table) the column is added to.",
+            "title": "Table",
+            "type": "string"
+          },
           "tables": {
             "description": "Limit the step to these captured tables (filter with operations or rules, rename, add_field, flatten, custom). Omitted = every table.",
             "items": {
@@ -9902,7 +9955,8 @@
               "custom",
               "soft_delete",
               "truncate",
-              "route"
+              "route",
+              "computed"
             ],
             "title": "Type",
             "type": "string"

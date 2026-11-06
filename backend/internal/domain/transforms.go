@@ -22,7 +22,7 @@ import (
 // before the event shape; field changes need the row, so they come after it.
 
 // TransformTypes are the step types, in the order the UI offers them.
-var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom", "soft_delete", "truncate", "route"}
+var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom", "soft_delete", "truncate", "route", "computed"}
 
 var (
 	routeMatchRe = regexp.MustCompile(`^[A-Za-z0-9_$*-]+\.[A-Za-z0-9_$*-]+$`)
@@ -289,6 +289,8 @@ func decodeTransformExtras(v *val.V, o *val.Object, out *Transform) {
 		decodeTruncate(v, o, out)
 	case "route":
 		decodeRoutes(v, o, out)
+	case "computed":
+		decodeComputed(v, o, out)
 	}
 	if out.Tables != nil && !scoped[out.Type] {
 		v.ValueError(o.Loc().Add("tables"), out.Type+" steps apply to every table")
@@ -636,6 +638,9 @@ func validateTransforms(v *val.V, loc val.Loc, spec PipelineSpec) {
 				v.ValueError(at.Add("tables"), table+" is not captured by this pipeline")
 			}
 		}
+		if t.Type == "computed" {
+			validateComputed(v, at, spec, t)
+		}
 		if t.Type == "truncate" {
 			for j, c := range t.Truncate {
 				switch {
@@ -780,6 +785,8 @@ func dumpTransform(t Transform) *om.Map {
 			routes[i] = om.New().Set("match", r.Match).Set("to", r.To)
 		}
 		m.Set("routes", routes)
+	case "computed":
+		dumpComputed(m, t)
 	case "truncate":
 		cols := make([]any, len(t.Truncate))
 		for i, c := range t.Truncate {
@@ -851,6 +858,9 @@ func cloneTransform(t Transform) Transform {
 	}
 	if t.Routes != nil {
 		t.Routes = append([]Route{}, t.Routes...)
+	}
+	if t.Args != nil {
+		t.Args = cloneArgs(t.Args)
 	}
 	return t
 }

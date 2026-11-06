@@ -1,5 +1,5 @@
 import { captureOf, sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/connections';
-import { cleanValues, type FormValues, type JsonSchema } from '@/components/SchemaForm';
+import type { JsonSchema } from '@/components/SchemaForm';
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Check as CheckIcon, Loader2 } from 'lucide-react';
@@ -26,7 +26,7 @@ import { clusterFromPreset, manualError, streamingError, usePackCluster } from '
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
-import { CUSTOM_CPUS, CUSTOM_MEMORIES, deriveSinkOptions, fullSpec, heapMiB, memoryMiB, optionsSchemaFor, PRESET_AMOUNTS, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
+import { CUSTOM_CPUS, CUSTOM_MEMORIES, deriveSinkOptions, fullSpec, heapMiB, memoryMiB, optionsSchemaFor, PRESET_AMOUNTS, RESOURCES, SNAPSHOT_MODES, type FullSpec, flinkSinkOptions } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
 import { FlinkClusterEditor } from './FlinkClusterEditor';
 import { FlinkRunSettings } from './FlinkSettings';
@@ -148,7 +148,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const sinkSchema = optionsSchemaFor(sinkCaps.options_schema as JsonSchema | null, pipeline.engine);
   const sinkOptions = deriveSinkOptions(
     // A Flink CDC pipeline keeps only its engine's options (no recorded partitions).
-    pipeline.engine === 'flink-cdc' && sinkSchema ? cleanValues(sinkSchema, spec.sink.options as FormValues) : spec.sink.options,
+    pipeline.engine === 'flink-cdc' && sinkSchema ? flinkSinkOptions(sinkSchema, spec.sink.options) : spec.sink.options,
     sinkSchema,
     spec.source.tables.include,
     spec.keys ?? {},

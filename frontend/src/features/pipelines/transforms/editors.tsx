@@ -6,10 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Notice, Pill } from '@/components/ui/feedback';
 import { Check, Input } from '@/components/ui/form';
 import { Select } from '@/components/ui/select';
-import type { FilterOp, FilterRule, RuleValue, TransformStep, ValueFormats } from '../spec';
+import type { ComputedArg, ComputedFn, FilterOp, FilterRule, RuleValue, TransformStep, ValueFormats } from '../spec';
 import {
   columnKind,
   fieldsBefore,
+  argSlot,
+  COMPUTED_FUNCTIONS,
+  DATE_PATTERNS,
+  defaultArgs,
+  kindFits,
   globMatch,
   routeTargets,
   FLINK_OPERATIONS,
@@ -876,6 +881,83 @@ export function RouteEditor({ step, ctx, onChange }: { step: TransformStep; ctx:
       {[...new Set(targets.values())].some((to) => [...targets.values()].filter((x) => x === to).length > 1) ? (
         <Notice tone="info">Tables routed together must have the same key and columns; preflight checks it.</Notice>
       ) : null}
+    </div>
+  );
+}
+
+/** Computed column (Flink CDC): a new column of one table from a function of the fixed set, its
+ *  arguments picked — columns of the kind the function takes (left-out ones aren't offered), typed
+ *  numbers, a date pattern from a list, or a short text where the function joins texts. */
+export function ComputedEditor({ step, ctx, onChange }: { step: TransformStep; ctx: EditorContext; onChange: (s: TransformStep) => void }) {
+  const fn = step.function ?? 'upper';
+  const f = COMPUTED_FUNCTIONS[fn];
+  const args = step.args ?? [];
+  const table = ctx.tables.find((t) => t.name === step.table);
+  const excluded = ctx.spec.source.columns[step.table ?? '']?.exclude ?? [];
+  const put = (i: number, a: ComputedArg) => onChange({ ...step, args: args.map((x, j) => (j === i ? a : x)) });
+  const columns = (i: number) =>
+    (table?.columns ?? [])
+      .filter((c) => !excluded.includes(c.name) && kindFits(argSlot(fn, i), columnKind(ctx.sourceType, c.type)))
+      .map((c) => ({ value: c.name, label: c.name, description: c.type }));
+  const taken = table ? fieldsBefore(ctx.steps, ctx.index, table, ctx.spec) : [];
+  const nameErr = step.name ? nameError(step.name, taken) : null;
+  return (
+    <div className="flex flex-col gap-3">
+      <Row label="Table">
+        <Select label="Table" value={step.table ?? ''} options={ctx.tables.map((t) => ({ value: t.name, label: t.name }))}
+          onChange={(v) => onChange({ ...step, table: v, args: defaultArgs(fn) })} />
+      </Row>
+      <Row label="New column" htmlFor={`cc-name-${ctx.index}`}>
+        <div className="flex flex-col gap-1">
+          <Input id={`cc-name-${ctx.index}`} aria-label="New column" className="font-mono" value={step.name ?? ''} onChange={(e) => onChange({ ...step, name: e.target.value.trim() })} />
+          {nameErr ? <span className="text-xs text-bad" role="alert">{nameErr}</span> : null}
+        </div>
+      </Row>
+      <Row label="Function">
+        <div className="flex flex-col gap-1">
+          <Select label="Function" value={fn}
+            options={(Object.keys(COMPUTED_FUNCTIONS) as ComputedFn[]).map((k) => ({ value: k, label: COMPUTED_FUNCTIONS[k].title, description: COMPUTED_FUNCTIONS[k].help }))}
+            onChange={(v) => onChange({ ...step, function: v as ComputedFn, args: defaultArgs(v as ComputedFn) })} />
+        </div>
+      </Row>
+      {args.map((a, i) => {
+        const slot = argSlot(fn, i);
+        const label = `Argument ${i + 1}`;
+        return (
+          <Row key={i} label={label}>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+              {slot === 'number' ? (
+                <Input aria-label={label} type="number" min={1} max={65535} value={a.number ?? 1}
+                  onChange={(e) => put(i, { number: Math.max(1, Math.min(65535, Math.trunc(Number(e.target.value)) || 1)) })} />
+              ) : slot === 'pattern' ? (
+                <Select label={label} value={a.text ?? 'yyyy-MM-dd'} options={DATE_PATTERNS.map((p) => ({ value: p, label: p }))} onChange={(v) => put(i, { text: v })} />
+              ) : slot === 'any|lit' ? (
+                <div className="grid min-w-0 grid-cols-[8rem_minmax(0,1fr)] gap-2">
+                  <Select label={`${label} kind`} value={a.text !== undefined ? 'text' : 'column'}
+                    options={[{ value: 'column', label: 'A column' }, { value: 'text', label: 'A text' }]}
+                    onChange={(v) => put(i, v === 'text' ? { text: '' } : { column: '' })} />
+                  {a.text !== undefined ? (
+                    <Input aria-label={label} value={a.text} maxLength={200} onChange={(e) => put(i, { text: e.target.value })} />
+                  ) : (
+                    <Select label={label} value={a.column ?? ''} options={columns(i)} onChange={(v) => put(i, { column: v })} />
+                  )}
+                </div>
+              ) : (
+                <Select label={label} value={a.column ?? ''} options={columns(i)} onChange={(v) => put(i, { column: v })} />
+              )}
+              {f.max && args.length > (f.min ?? 0) ? (
+                <Button size="sm" variant="ghost" icon={<X />} aria-label={`Remove argument ${i + 1}`} onClick={() => onChange({ ...step, args: args.filter((_, j) => j !== i) })} />
+              ) : <span />}
+            </div>
+          </Row>
+        );
+      })}
+      {f.max && args.length < f.max ? (
+        <div>
+          <Button size="sm" icon={<Plus />} onClick={() => onChange({ ...step, args: [...args, { column: '' }] })}>Add an argument</Button>
+        </div>
+      ) : null}
+      {table && !columns(0).length ? <span className="text-xs text-muted">{step.table} has no column {f.title.toLowerCase()} can read.</span> : null}
     </div>
   );
 }

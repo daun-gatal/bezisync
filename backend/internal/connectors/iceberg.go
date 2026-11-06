@@ -130,6 +130,9 @@ func (s *icebergSink) CompileSink(conn Resolved, c CompileContext) (map[string]s
 	if err != nil {
 		return nil, nil, err
 	}
+	if by, _ := opts["partition_by"].(map[string]any); len(by) > 0 {
+		return nil, nil, problem.New(422, "engine_settings", "Partition by is a Flink CDC option: on Debezium, choose Partitioning (by key bucket, or the day of the change) in the Destination step.")
+	}
 	const p = "debezium.sink.iceberg."
 	props := map[string]string{
 		"debezium.sink.type":                    "iceberg",
@@ -641,8 +644,9 @@ func (s *icebergSink) CheckPipeline(ctx context.Context, conn Resolved, c Compil
 	}
 	cat, ctx, err := cfg.open(ctx)
 	if err != nil {
-		return out
+		return append(out, partitionChecks(ctx, nil, cfg, c, facts)...)
 	}
+	out = append(out, partitionChecks(ctx, cat, cfg, c, facts)...)
 	var existing, noIdentity []string
 	for _, dest := range sortedUnique(facts.Destinations) {
 		tbl, err := cat.LoadTable(ctx, icebergTableIdent(cfg, dest))

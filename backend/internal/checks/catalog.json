@@ -2277,6 +2277,19 @@
    ]
   },
   {
+   "code": "transform_computed_input",
+   "titles": [
+    "Transforms: computed columns"
+   ],
+   "whys": [
+    "Flink CDC stops the job when a projection reads a column the table lacks, or calls a function on a value of another type."
+   ],
+   "fixes": [
+    "Pick another column for the computed column, under Transform."
+   ],
+   "section": "Deploy"
+  },
+  {
    "code": "transform_column_missing",
    "fixes": [
     "Under Transform, pick a column the table has, or remove the step."
@@ -2486,6 +2499,32 @@
    "whys": [
     "New tables are bucketed by their key column, recorded by the wizard from discovery."
    ]
+  },
+  {
+   "code": "iceberg_partition_column",
+   "titles": [
+    "Partitioning"
+   ],
+   "whys": [
+    "Flink CDC fails creating a table partitioned by a column its rows don't carry, or by a transform the column's type can't take."
+   ],
+   "fixes": [
+    "Change Partition by in the Destination step."
+   ],
+   "section": "Apache Iceberg"
+  },
+  {
+   "code": "iceberg_partition_existing",
+   "titles": [
+    "Partitioning"
+   ],
+   "whys": [
+    "Flink CDC sets a table's partitioning when it creates the table; Iceberg keeps it, so other partitioning asked for later never applies."
+   ],
+   "fixes": [
+    "Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again."
+   ],
+   "section": "Apache Iceberg"
   },
   {
    "code": "iceberg_existing_tables",

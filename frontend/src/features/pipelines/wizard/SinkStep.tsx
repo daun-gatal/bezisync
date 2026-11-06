@@ -16,6 +16,8 @@ import { useProject } from '@/lib/session';
 import { deriveSinkOptions, fullSpec, optionsSchemaFor, sinkDestinationFor, sinkNamingError, specForEngine, type FullSpec } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { ConnectionCards, StepHeader } from './shared';
+import { cleanPartitionBy, partitionError, PartitionByEditor, type PartitionBy } from './PartitionBy';
+import { jsonbSorted } from '@/lib/settings';
 
 type Format = FullSpec['sink']['format'];
 
@@ -74,9 +76,16 @@ export function SinkStep({
   const showFormat = !forcedFormat && !flink && caps.formats.length > 0;
   const registry = showFormat && (format.type === 'avro' || format.type === 'protobuf');
   const discovery = useDiscovery(project.id, pipeline.source.id);
-  const savedOptions = optionsSchema
-    ? deriveSinkOptions(cleanValues(optionsSchema, options), optionsSchema, tables, spec.keys ?? {}, discovery.data?.tables)
-    : spec.sink.options;
+  // Partition by is Flink CDC's on Iceberg, edited by its own card and kept out of the form.
+  const [partitionBy, setPartitionBy] = useState<PartitionBy>((spec.sink.options.partition_by as PartitionBy | undefined) ?? {});
+  const partitioned = flink && current?.type === 'iceberg';
+  const partitions = cleanPartitionBy(partitionBy);
+  const savedOptions = (() => {
+    if (!optionsSchema) return spec.sink.options;
+    const { partition_by: _pb, ...rest } = deriveSinkOptions(cleanValues(optionsSchema, options), optionsSchema, tables, spec.keys ?? {}, discovery.data?.tables);
+    void _pb;
+    return partitioned && Object.keys(partitions).length ? jsonbSorted({ ...rest, partition_by: partitions }) : rest;
+  })();
 
   // Choosing another destination: start from its naming default (unless the user wrote their
   // own), a format it takes and its option defaults.
@@ -98,6 +107,8 @@ export function SinkStep({
         ? (choices.find((e) => !e.available)?.reason ?? 'Its engine isn’t available.')
       : nameError
       ? 'Fix the destination naming.'
+      : partitioned && partitionError(partitionBy)
+        ? partitionError(partitionBy)
       : registry && !format.registry_url
         ? 'Enter the schema registry URL.'
         : null;
@@ -250,6 +261,12 @@ export function SinkStep({
       {current && optionsSchema ? (
         <Card title={`${TYPE_LABEL[current.type] ?? current.type} settings for this pipeline`}>
           <SchemaForm idPrefix="sink-opt" schema={optionsSchema} values={options} onChange={setOptions} expert={expert} />
+        </Card>
+      ) : null}
+      {partitioned ? (
+        <Card>
+          <PartitionByEditor value={partitionBy} onChange={setPartitionBy} tables={tables} discovered={discovery.data?.tables} sourceType={pipeline.source.type}
+            excluded={Object.fromEntries(Object.entries(spec.source.columns).map(([t, r]) => [t, r.exclude ?? []]))} />
         </Card>
       ) : null}
       <InlineError error={error} doing="Couldn’t save the destination" />

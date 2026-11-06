@@ -510,3 +510,42 @@ func TestRouteFlink(t *testing.T) {
 		t.Fatalf("%v\n%s", got.Destinations, got.Pipeline)
 	}
 }
+
+// Computed columns on Flink CDC: the function set as SQL, columns back-quoted and literals quoted,
+// so no input becomes an expression; a name the table has is refused (T13).
+func TestComputedFlink(t *testing.T) {
+	flinkConfig(t)
+	step := func(name, fn string, args ...any) map[string]any {
+		return map[string]any{"type": "computed", "table": "shop.orders", "name": name, "function": fn, "args": args}
+	}
+	col := func(c string) map[string]any { return map[string]any{"column": c} }
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{
+			step("label", "concat", col("status"), map[string]any{"text": "it's"}, col("id")),
+			step("month", "date_format", col("created_at"), map[string]any{"text": "yyyy-MM"}),
+			step("amount", "to_integer", col("total_text")),
+			step("short", "substr", col("status"), map[string]any{"number": 2}, map[string]any{"number": 3}),
+		}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "status", "created_at", "total_text"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CONCAT(CAST(`status` AS STRING), 'it''s', CAST(`id` AS STRING)) AS `label`", "DATE_FORMAT(`created_at`, 'yyyy-MM') AS `month`",
+		"TRY_CAST(`total_text` AS BIGINT) AS `amount`", "SUBSTR(`status`, 2, 3) AS `short`"} {
+		if !strings.Contains(got.Pipeline, want) {
+			t.Errorf("no %s in\n%s", want, got.Pipeline)
+		}
+	}
+	clash := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{step("status", "upper", col("status"))}})
+	if _, err := compiler.CompileFlink(flinkCtx(clash), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); err == nil || !strings.Contains(err.Error(), "already has a column status") {
+		t.Fatal(err)
+	}
+	twice := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{step("x", "upper", col("status")), step("x", "lower", col("status"))}})
+	if _, err := compiler.CompileFlink(flinkCtx(twice), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); err == nil || !strings.Contains(err.Error(), "two columns called x") {
+		t.Fatal(err)
+	}
+}

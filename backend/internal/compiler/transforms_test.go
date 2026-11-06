@@ -298,3 +298,11 @@ func TestRouteDebezium(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// T16: Debezium has no computed columns.
+func TestComputedDebezium(t *testing.T) {
+	_, err := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "computed", "id": "cc01", "table": "public.orders", "name": "x", "function": "upper", "args": [{"column": "status"}]}]}`)
+	if err == nil || !strings.Contains(err.Error(), "runs only on Flink CDC") {
+		t.Fatal(err)
+	}
+}

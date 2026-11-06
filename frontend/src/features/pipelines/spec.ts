@@ -1,6 +1,7 @@
 import type { PipelineSpec } from '@/lib/pipelines';
 import type { SinkCaps } from '@/lib/connections';
-import type { JsonSchema } from '@/components/SchemaForm';
+import { cleanValues, type FormValues, type JsonSchema } from '@/components/SchemaForm';
+import { jsonbSorted } from '@/lib/settings';
 import type { EngineId, FlinkChoices } from '@/lib/engines';
 
 /** The spec with every default filled in (mirrors backend defaults in domain/spec.py).
@@ -65,7 +66,7 @@ export function tuningFor(tuning: Record<string, string> | null | undefined, eng
   return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
-export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom' | 'soft_delete' | 'truncate' | 'route';
+export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom' | 'soft_delete' | 'truncate' | 'route' | 'computed';
 export type FilterOperation = 'insert' | 'update' | 'delete' | 'snapshot';
 export type FilterOp = 'eq' | 'ne' | 'in' | 'not_in' | 'gt' | 'gte' | 'lt' | 'lte' | 'is_null' | 'is_not_null' | 'is_true' | 'is_false';
 export type RuleValue = string | number | boolean;
@@ -94,7 +95,15 @@ export interface TransformStep {
   /** truncate: text columns cut to at most length characters. */
   columns?: { table: string; column: string; length: number }[];
   routes?: { match: string; to: string }[];
+  /** computed: the table, the function and its arguments (name is the new column). */
+  table?: string;
+  function?: ComputedFn;
+  args?: ComputedArg[];
 }
+
+export type ComputedFn = 'upper' | 'lower' | 'trim' | 'length' | 'concat' | 'substr' | 'date_format' | 'to_text' | 'to_integer';
+/** One argument: a column, a text or a number (exactly one). */
+export interface ComputedArg { column?: string; text?: string; number?: number }
 
 /** Stage of a step: 0 keep events, 1 event shape, 2 field changes, -1 order as written. */
 export function stageOf(t: TransformStep): number {
@@ -276,6 +285,14 @@ export function deriveSinkOptions(
 /** Destination options a Flink CDC pipeline has: Iceberg keeps how rows are written (upserts by
  *  key: no append) and the table format; commit timing and bucket partitioning are Debezium's. */
 const FLINK_OPTIONS = ['write_mode', 'format_version'];
+
+/** A Flink CDC pipeline's destination options: its engine's form fields, plus Partition by (which
+ *  its own card edits, outside the form), in the server's JSONB key order. */
+export function flinkSinkOptions(schema: JsonSchema, options: Record<string, unknown>): Record<string, unknown> {
+  const out = cleanValues(schema, options as FormValues);
+  const by = options.partition_by;
+  return by && typeof by === 'object' && Object.keys(by).length ? jsonbSorted({ ...out, partition_by: by }) : out;
+}
 
 export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: EngineId): JsonSchema | null {
   if (!schema) return null;

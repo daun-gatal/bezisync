@@ -103,6 +103,9 @@ func sinkChecks(ctx context.Context, sink connectors.Resolved, desc *connectors.
 		return out
 	}
 	facts := connectors.PipelineFacts{Destinations: destinations, Options: options, FlinkCDC: flink}
+	if discover != nil {
+		facts.SourceType = discover.typ
+	}
 	if found, err := discover.get(ctx); err == nil {
 		for _, t := range found.Tables {
 			if contains(cctx.Spec.Source.Tables.Include, t.Identifier()) {

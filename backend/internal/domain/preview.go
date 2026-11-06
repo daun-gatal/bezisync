@@ -642,6 +642,32 @@ func applyStep(in PreviewInput, t Transform, value any) (any, string, string, st
 			note = "No field " + strings.Join(missing, ", ") + " at this point: nothing to rename."
 		}
 		return out, "applied", note, ""
+	case "computed":
+		if t.Table != in.Table {
+			return value, "applied", "Not this table.", ""
+		}
+		row := m
+		if after, ok := m.Get("after"); ok {
+			// The change envelope (no event shape before it): the column joins the row after.
+			if a, ok := after.(*om.Map); ok && a != nil {
+				row = a
+			} else {
+				return value, "applied", "", ""
+			}
+		}
+		if _, exists := row.Get(t.Name); exists {
+			return value, "error", "", fmt.Sprintf("The table already has a column %s.", t.Name)
+		}
+		out := cloneRow(m)
+		target := out
+		if row != m {
+			after, _ := out.Get("after")
+			a := cloneRow(after.(*om.Map))
+			out.Set("after", a)
+			target = a
+		}
+		target.Set(t.Name, computeSample(t, row))
+		return out, "applied", "", ""
 	case "add_field":
 		if _, exists := m.Get(t.Name); exists {
 			return value, "error", "", fmt.Sprintf("The event already has a field %s; the connector would stop with an error.", t.Name)

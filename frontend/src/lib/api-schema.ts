@@ -2767,6 +2767,18 @@ export interface components {
              */
             mask?: string[];
         };
+        /**
+         * ComputedArg
+         * @description Exactly one of column, text or number.
+         */
+        ComputedArg: {
+            /** Column */
+            column?: string;
+            /** Number */
+            number?: number;
+            /** Text */
+            text?: string;
+        };
         /** ConfigRead */
         ConfigRead: {
             /** Destinations */
@@ -4678,7 +4690,7 @@ export interface components {
              * Allowed Transforms
              * @description Built-in step types this project allows; omitted or null = all.
              */
-            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "soft_delete" | "truncate" | "route")[] | null;
+            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "soft_delete" | "truncate" | "route" | "computed")[] | null;
             /** Max Pipelines Per Source */
             max_pipelines_per_source?: number | null;
             /** Max Resources */
@@ -6149,6 +6161,11 @@ export interface components {
             /** Add Fields */
             add_fields?: string[];
             /**
+             * Args
+             * @description computed: the function's arguments, in order.
+             */
+            args?: components["schemas"]["ComputedArg"][];
+            /**
              * Class
              * @description custom: the SMT class (Expert; needs the project policy allow_custom_transforms).
              */
@@ -6175,6 +6192,12 @@ export interface components {
              * @enum {string}
              */
             delimiter?: "_" | ".";
+            /**
+             * Function
+             * @description computed: the function (Flink CDC only).
+             * @enum {string}
+             */
+            function?: "concat" | "date_format" | "length" | "lower" | "substr" | "to_integer" | "to_text" | "trim" | "upper";
             /**
              * Id
              * @description Stable step id; names the step t_<id> in the compiled chain. Returned only when set.
@@ -6213,6 +6236,11 @@ export interface components {
             /** Rules */
             rules?: components["schemas"]["FilterRule"][];
             /**
+             * Table
+             * @description computed: the table (schema.table) the column is added to.
+             */
+            table?: string;
+            /**
              * Tables
              * @description Limit the step to these captured tables (filter with operations or rules, rename, add_field, flatten, custom). Omitted = every table.
              */
@@ -6221,7 +6249,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom" | "soft_delete" | "truncate" | "route";
+            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom" | "soft_delete" | "truncate" | "route" | "computed";
             value?: components["schemas"]["FieldValue"];
         };
         /**

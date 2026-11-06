@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { Api, defaultProject, signIn, unique } from './helpers';
+import { Api, choose, defaultProject, signIn, unique } from './helpers';
 import { ICEBERG_REST, SOURCE_PG } from './fixtures';
 import { ownerSql, waitFor } from './data';
 import { layoutProblems } from './layout';
@@ -100,6 +100,9 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
   const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
   const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  // A computed column, and the routed Iceberg table partitioned into buckets of its key.
+  const computed = { type: 'computed', id: 'cc01', table, name: 'status_upper', function: 'upper', args: [{ column: 'status' }] };
+  const partitionBy = { [table]: [{ n: 4, column: 'id', transform: 'bucket' }] };
   // The table goes to a routed name instead of the naming pattern's.
   const routedTo = `r_${tag.replace(/-/g, '_')}`;
   // Three readers: not a preset's shape (two slots per TaskManager); smaller once it streams.
@@ -108,21 +111,27 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   };
   const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
     name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
-    spec: { source: { tables: { include: [table] } }, sink: { naming: `f_${tag.replace(/-/g, '_')}_{table}` }, snapshot: { mode: 'no_data' },
-      policies: { resources: 'custom' }, flink_cdc: { cluster, commit_seconds: 30 }, transforms: [{ type: 'soft_delete', id: 'sd01' }, { type: 'route', id: 'rt01', routes: [{ match: table, to: routedTo }] }] },
+    spec: { source: { tables: { include: [table] } }, sink: { naming: `f_${tag.replace(/-/g, '_')}_{table}`, options: { partition_by: partitionBy } }, snapshot: { mode: 'no_data' },
+      policies: { resources: 'custom' }, flink_cdc: { cluster, commit_seconds: 30 },
+      transforms: [{ type: 'soft_delete', id: 'sd01' }, { type: 'route', id: 'rt01', routes: [{ match: table, to: routedTo }] }, computed] },
   }, 201);
   const url = `${base}/pipelines/${p.id}`;
 
   // The wizard keeps the cluster on every step (Custom shown in Review).
   await signIn(page);
   await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
-  expect((await api.get<{ spec: { flink_cdc: { cluster: unknown } } }>(url)).spec.flink_cdc.cluster).toEqual(cluster);
+  const walked = await api.get<{ spec: { flink_cdc: { cluster: unknown }; transforms: unknown[]; sink: { options: { partition_by?: unknown } } } }>(url);
+  expect(walked.spec.flink_cdc.cluster).toEqual(cluster);
+  expect(walked.spec.transforms).toContainEqual(computed);
+  expect(walked.spec.sink.options.partition_by).toEqual(partitionBy);
 
   // The k3s runtime reports its nodes: the fit is checked, never left unknown.
   const pre = await api.send<{ sections: { key: string; report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
   const fit = pre.sections.find((s) => s.key === 'runtime')?.report.checks.find((c) => c.code === 'flink_cluster_fit');
   expect(fit?.status, fit?.message).toBe('pass');
   expect(fit?.message).toContain('1 TaskManager × 3 slots');
+  const parts = pre.sections.flatMap((s) => s.report.checks).find((c) => c.code === 'iceberg_partition_column');
+  expect(parts?.status, parts?.message).toBe('pass');
 
   await api.send('POST', `${url}/deploy`, {});
   type Shape = { artifacts: { flink_shape?: { phase: string; size: { slots: number; readers: number; task_manager_memory: string }; streaming_size: { task_manager_memory: string } } } };
@@ -139,7 +148,7 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   await waitFor('row readable in Iceberg', async () => {
     const e = await api.get<{ records: Rec[]; destination: string }>(`${url}/events?table=${table}&limit=100`);
     expect(e.destination).toContain(routedTo);
-    return e.records.some((r) => r.value.status === marker);
+    return e.records.some((r) => r.value.status === marker && r.value.status_upper === marker.toUpperCase());
   }, 420_000);
 
   // The copy is done and a position saved after it: the controller shrinks the cluster, which
@@ -165,6 +174,14 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
     const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
     return e.records.some((r) => r.value.status === after && r.value.__op === '-D');
   }, 420_000);
+
+  // T18: the table exists, bucketed by 4; asking for 8 now would never apply, so it blocks.
+  const now = await api.get<{ version: number; spec: { sink: { options: Record<string, unknown> } } & Record<string, unknown> }>(url);
+  await api.patch(url, { spec: { ...now.spec, sink: { ...now.spec.sink, options: { ...now.spec.sink.options, partition_by: { [table]: [{ n: 8, column: 'id', transform: 'bucket' }] } } } } }, now.version);
+  const repart = await api.send<{ sections: { report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
+  const existing = repart.sections.flatMap((s) => s.report.checks).find((c) => c.code === 'iceberg_partition_existing');
+  expect(existing?.status).toBe('fail');
+  expect(existing?.message).toContain('bucket[4](id)');
 
   await api.send('DELETE', `${url}?drop_destinations=true`);
   await waitFor('custom Flink CDC pipeline deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
@@ -252,4 +269,72 @@ test('Flink CDC: an Expert sizes a custom cluster in Review, automatic then manu
     await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'guided' });
     await ownerSql(`DROP TABLE IF EXISTS ${table}`);
   }
+});
+
+test('Flink CDC: an editor adds a computed column and partitions the Iceberg table in the wizard', async ({ page }) => {
+  test.setTimeout(300_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('flinkx');
+  const { password, ...pg } = SOURCE_PG;
+  const { secret_access_key, ...iceberg } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
+    spec: { source: { tables: { include: ['shop.orders'] } }, snapshot: { mode: 'no_data' } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  type Saved = { spec: { transforms: Record<string, unknown>[]; sink: { options: { partition_by?: unknown } } } };
+  await signIn(page);
+
+  // Destination: partition orders by the day they were made, then buckets of the key.
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=sink`);
+  const part = page.getByRole('group', { name: 'Partition shop.orders' });
+  await part.getByRole('button', { name: 'Add a partition field' }).click();
+  await choose(part.getByLabel('shop.orders field 1 column'), 'created_at');
+  // A timestamp offers the time transforms; text would not.
+  await choose(part.getByLabel('shop.orders field 1 transform'), 'Day');
+  await part.getByRole('button', { name: 'Add a partition field' }).click();
+  await choose(part.getByLabel('shop.orders field 2 column'), 'id');
+  await choose(part.getByLabel('shop.orders field 2 transform'), 'Buckets of a hash');
+  await part.getByLabel('shop.orders field 2 buckets').fill('2000');
+  await expect(page.getByRole('button', { name: 'Continue to transform →' })).toBeDisabled();
+  await part.getByLabel('shop.orders field 2 buckets').fill('8');
+  await page.getByRole('button', { name: 'Continue to transform →' }).click();
+  await expect(page.getByRole('heading', { name: 'Which rows and columns reach each table?' })).toBeVisible();
+  expect((await api.get<Saved>(url)).spec.sink.options.partition_by).toEqual({ 'shop.orders': [{ n: 0, column: 'created_at', transform: 'day' }, { n: 8, column: 'id', transform: 'bucket' }] });
+
+  // Transform: a computed column joining the status and the customer, picked, never typed as SQL.
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Computed column/ }).click();
+  const cc = page.getByRole('region', { name: /Computed column/ });
+  await choose(cc.getByLabel(/^Table:/), 'shop.orders');
+  await cc.getByLabel('New column').fill('status');
+  await expect(cc.getByText('The event already has a field status.')).toBeVisible();
+  await cc.getByLabel('New column').fill('order_label');
+  await choose(cc.getByLabel(/^Function:/), 'Join');
+  await choose(cc.getByLabel(/^Argument 1:/), 'status');
+  await choose(cc.getByLabel(/^Argument 2 kind:/), 'A text');
+  await cc.getByLabel('Argument 2', { exact: true }).fill('/');
+  await cc.getByRole('button', { name: 'Add an argument' }).click();
+  await choose(cc.getByLabel(/^Argument 3:/), 'customer_id');
+  await cc.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByText('shop.orders: order_label = Join(status, "/", customer_id)')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  const saved = await api.get<Saved>(url);
+  expect(saved.spec.transforms.find((t) => t.type === 'computed')).toMatchObject({
+    table: 'shop.orders', name: 'order_label', function: 'concat', args: [{ column: 'status' }, { text: '/' }, { column: 'customer_id' }],
+  });
+  // The generated job carries it as SQL, quoted.
+  const pre = await api.send<{ sections: { report: { checks: { code: string; status: string }[] } }[] }>('POST', `${url}/preflight`, {});
+  const all = pre.sections.flatMap((s) => s.report.checks);
+  expect(all.find((c) => c.code === 'iceberg_partition_column')?.status).toBe('pass');
+  expect(all.find((c) => c.code === 'transform_computed_input')).toBeUndefined();
+  await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+  await api.send('DELETE', url);
 });

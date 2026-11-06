@@ -1,5 +1,5 @@
 import { useState, type ComponentType } from 'react';
-import { ArrowRightLeft, Hash, Inbox, KeyRound, Layers, PenLine, Plus, Puzzle, Rows3, SquarePlus, Trash, Funnel, Split as SplitIcon } from 'lucide-react';
+import { ArrowRightLeft, Hash, Inbox, KeyRound, Layers, PenLine, Plus, Puzzle, Rows3, SquarePlus, Trash, Funnel, Split as SplitIcon, Sigma } from 'lucide-react';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Empty, Meter, Notice, Pill, Skeleton, TONE_TEXT } from '@/components/ui/feedback';
@@ -196,6 +196,7 @@ const ICON: Record<RowIcon, ComponentType<{ className?: string; 'aria-hidden'?: 
   soft_delete: Trash,
   truncate: Funnel,
   route: SplitIcon,
+  computed: Sigma,
   filter: Funnel,
   rename: PenLine,
   add_field: SquarePlus,

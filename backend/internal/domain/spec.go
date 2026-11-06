@@ -94,6 +94,9 @@ type Transform struct {
 	Properties map[string]string `json:"properties"` // custom
 	Truncate   []Truncation      `json:"columns"`    // truncate
 	Routes     []Route           `json:"routes"`     // route
+	Table      string            `json:"table"`      // computed
+	Function   string            `json:"function"`   // computed
+	Args       []ComputedArg     `json:"args"`       // computed
 }
 
 // Route sends the captured tables a pattern matches to one destination name (merging shards):

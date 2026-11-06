@@ -184,6 +184,7 @@ message transforms (SMTs); BeziSync offers them by goal and puts each step where
 | Event shape | The row after the change (with deletes kept as `__deleted = true`, as tombstones, or dropped, and optional metadata fields such as `__op`) or the full change envelope; **Keep deleted rows** (soft delete) keeps every deleted row, marked — `__deleted = true` on Debezium (the row shape is added when missing, and no tombstone follows), `__op = -D` on Flink CDC, where Iceberg and StarRocks keep the row | A table that already has a column of that name is refused (field name duplication). Adding it changes what consumers get |
 | Field changes | Rename fields, add a field (fixed text or the pipeline's name), flatten nested fields, **cut long text** (text columns to at most a length: Debezium on PostgreSQL and MySQL, Flink CDC on any source; a masked or left-out column can't be cut; another type is left as it is, and blocks on Flink CDC), custom transforms (Experts, policy) | Order matters within this stage; they need the row shape. The message key keeps column names |
 | Destinations | **Send tables elsewhere** (routes): tables a pattern matches (`schema.table`, where `*` matches any run of characters, e.g. `shop.orders_*`) go to one topic or table you name, instead of each to its own; a table two routes match is refused, and the step lists where every captured table goes | Debezium routes after its own naming; Flink CDC writes the matched tables into the named table. Tables sent to one destination must have the same key and columns (preflight blocks otherwise), and a route that matches no captured table is a warning. Adding or changing one moves events, so consumers of the old destination stop receiving them |
+| Computed column | **Flink CDC only**: a new column of one table from one function of a fixed set — upper or lower case, trim, length, join columns and texts, part of a text, a date or timestamp as text (`yyyy`, `yyyy-MM`, …), any value as text, text as a whole number — with its arguments picked from the table's columns of the kind the function takes. Debezium shows the step with why it can't run it (it would need scripting) | Compiled into the Flink CDC projection, columns back-quoted and texts quoted, so no input becomes SQL; text that isn't a number becomes empty (`TRY_CAST`), never a failed job. A masked or left-out column can't be an input. Preflight blocks an input the table no longer has or of another type, and a name the table already has (one added later raises *Transform needs attention*) |
 | Message key | Key columns per table, e.g. for tables without a primary key | PostgreSQL, MySQL, Oracle, CockroachDB and Vitess. A key column the table lacks is ignored by Debezium |
 
 Fields are picked from the discovered columns; only new names and rule values are typed, and
@@ -302,7 +303,13 @@ through the same catalogs.
 - **On Flink CDC** (chosen in the wizard when a Flink CDC image is registered; Debezium stays the
   default): the same connections and tables, written by Flink CDC's Iceberg sink. Rows are upserted
   by key (deleted rows are removed, or kept and marked `__op = '-D'`; *every change appended* is
-  Debezium only), tables are unpartitioned and new columns are added.
+  Debezium only) and new columns are added. Tables are unpartitioned unless **Partition by** (the
+  Destination step) gives a table up to four fields: a column and each value, the year, month, day
+  or hour of a date or timestamp, buckets of a hash (`bucket[N]`, N from 1 to 1024) or the leading
+  part (`truncate[N]`), compiled into Flink CDC's `partition.key`. Flink CDC applies it when it
+  creates a table; an existing table keeps its partitioning, so preflight blocks a deploy that asks
+  an existing table for other partitioning (drop it with Start over, or keep its own), and blocks
+  a partition column the rows don't carry or a transform the column's type can't take.
   The namespace must be one level of letters, digits and underscores, and a Glue catalog signs in
   with the runtime's AWS role (no access keys). Catalog and storage credentials travel to the
   cluster as catalog properties, filled in by BeziSync's helper inside the pipeline's containers.

@@ -1,5 +1,5 @@
 import { DEFAULT_SINK_CAPS, type SinkCaps } from '@/lib/connections';
-import { deriveSinkOptions, destinationFor, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
+import { deriveSinkOptions, destinationFor, flinkSinkOptions, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
 
 describe('pipeline spec helpers', () => {
   it('fills defaults that mirror the backend', () => {
@@ -165,5 +165,15 @@ describe('custom sizes', () => {
     expect(memoryMiB('1536Mi')).toBe(1536);
     expect(heapMiB(2048)).toBe(1433);
     expect(heapMiB(512)).toBe(256);
+  });
+});
+
+describe('flinkSinkOptions', () => {
+  const schema = { properties: { write_mode: { type: 'string' }, format_version: { type: 'string' } } };
+  it('keeps Partition by, which its own card edits, in JSONB key order', () => {
+    const by = { 'shop.orders': [{ n: 4, column: 'id', transform: 'bucket' }] };
+    const out = flinkSinkOptions(schema, { write_mode: 'upsert', format_version: '2', partitions: { 'shop.orders': 'id' }, partition_by: by });
+    expect(JSON.stringify(out)).toBe(JSON.stringify({ write_mode: 'upsert', partition_by: by, format_version: '2' }));
+    expect(flinkSinkOptions(schema, { write_mode: 'upsert', partition_by: {} })).toEqual({ write_mode: 'upsert' });
   });
 });

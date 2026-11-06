@@ -1,4 +1,4 @@
-import type { FilterOp, FilterOperation, FilterRule, FullSpec, RuleValue, TransformStep, TransformType, ValueFormats } from '../spec';
+import type { ComputedArg, ComputedFn, FilterOp, FilterOperation, FilterRule, FullSpec, RuleValue, TransformStep, TransformType, ValueFormats } from '../spec';
 import { stageOf } from '../spec';
 
 /** What the wizard knows about one captured table (from discovery). */
@@ -23,6 +23,8 @@ export const FLINK_TITLE: Partial<Record<TransformType, string>> = { filter: 'Ke
 
 /** Step types that run only on Debezium (the Flink CDC compiler refuses them). */
 export const DEBEZIUM_ONLY_STEPS: readonly TransformType[] = ['outbox', 'flatten', 'custom'];
+/** Steps only Flink CDC runs (T16: Debezium has no expressions short of scripting). */
+export const FLINK_ONLY_STEPS: readonly TransformType[] = ['computed'];
 
 /**
  * What the Transform step offers: the source's capabilities, without epoch timestamps for a
@@ -46,6 +48,7 @@ export const TYPE_TITLE: Record<TransformType, string> = {
   soft_delete: 'Keep deleted rows',
   truncate: 'Cut long text',
   route: 'Send tables elsewhere',
+  computed: 'Computed column',
 };
 
 /** Sources whose Debezium connector truncates columns (domain.TruncateSources). */
@@ -138,6 +141,8 @@ export function defaultStep(type: TransformType, steps: TransformStep[]): Transf
       return { type, id, columns: [] };
     case 'route':
       return { type, id, routes: [{ match: '', to: '' }] };
+    case 'computed':
+      return { type, id, table: '', name: '', function: 'upper', args: [{ column: '' }] };
     default:
       return { type, id };
   }
@@ -255,6 +260,10 @@ export function stepErrors(steps: TransformStep[], tableNames: string[] = []): M
       if (!(t.columns?.length)) out.set(i, 'Add a column to cut.');
       else if (t.columns.some((c) => !c.column)) out.set(i, 'Pick a column for every row.');
     }
+    if (t.type === 'computed') {
+      const e = computedError(t);
+      if (e) out.set(i, e);
+    }
     if (t.type === 'route') {
       const e = routeError(steps, t, steps.findIndex((x) => x.type === 'route') === i ? tableNames : []);
       if (e) out.set(i, e);
@@ -349,6 +358,8 @@ export function fieldsBefore(steps: TransformStep[], index: number, table: Table
       fields = fields.map((f) => map.get(f) ?? f);
     } else if (t.type === 'add_field' && t.name) {
       fields = [...fields, t.name];
+    } else if (t.type === 'computed' && t.table === table.name && t.name) {
+      fields = [...fields, t.name];
     } else if (t.type === 'soft_delete' && !fields.includes('__deleted')) {
       fields = [...fields, '__deleted'];
     }
@@ -398,6 +409,8 @@ export function summarize(t: TransformStep): string {
       return (t.columns ?? []).map((c) => `${c.table}.${c.column || '…'} to ${c.length}`).join(', ') || 'No columns yet';
     case 'route':
       return (t.routes ?? []).map((r) => `${r.match || '…'} → ${r.to || '…'}`).join(', ') || 'No routes yet';
+    case 'computed':
+      return `${t.table || '…'}: ${t.name || '…'} = ${formulaText(t)}`;
   }
 }
 
@@ -439,6 +452,7 @@ export function outputImpact(before: FullSpec, after: FullSpec): Impact[] {
     const what = summarize(t);
     if (t.type === 'add_field' && !old) out.push({ kind: 'additive', text: `New field ${t.name} (${scope(t)}).` });
     else if (t.type === 'soft_delete' && !old) out.push({ kind: 'breaking', text: 'Deleted rows now stay, marked deleted, instead of being removed: consumers get a new field.' });
+    else if (t.type === 'computed' && !old) out.push({ kind: 'additive', text: `New column ${t.name} (${t.table}).` });
     else if (t.type === 'route') out.push({ kind: 'breaking', text: `${old ? 'Changed' : 'New'} routes — ${what}. Matched tables arrive in another destination.` });
     else if (t.type === 'filter') out.push({ kind: 'breaking', text: `${old ? 'Changed' : 'New'} filter — ${what}. Events that do not match stop arriving.` });
     else if (t.type === 'rename') {
@@ -513,7 +527,7 @@ export function toggleFlinkOperation(ops: FilterOperation[], value: 'new' | 'upd
 /** A destination column of a Flink CDC table, and where it comes from. */
 export interface FlinkColumn {
   name: string;
-  from: { kind: 'column'; column: string; renamed: boolean } | { kind: 'added'; value: string };
+  from: { kind: 'column'; column: string; renamed: boolean } | { kind: 'added'; value: string } | { kind: 'computed'; formula: string };
   key: boolean;
 }
 
@@ -532,8 +546,83 @@ export function flinkColumns(table: TableInfo, spec: FullSpec, steps: TransformS
     .filter((c) => !excluded.includes(c.name))
     .map((c) => ({ name: renames.get(c.name) ?? c.name, from: { kind: 'column', column: c.name, renamed: renames.has(c.name) }, key: keys.includes(c.name) }));
   for (const t of steps) {
+    if (t.type === 'computed' && t.table === table.name && t.name) out.push({ name: t.name, from: { kind: 'computed', formula: formulaText(t) }, key: false });
     if (t.type !== 'add_field' || !applies(t) || !t.name) continue;
     out.push({ name: t.name, from: { kind: 'added', value: t.value?.kind === 'pipeline' ? pipelineName : (t.value?.text ?? '') }, key: false });
   }
   return out;
+}
+
+/** Argument slots (domain.Arg*): a text column, a column of any plain kind, a timestamp or date
+ *  column, a column or a text, a number 1–65535, a date pattern. */
+export type ArgSlot = 'text' | 'any' | 'time' | 'any|lit' | 'number' | 'pattern';
+
+/** The functions a computed column offers (domain.ComputedFunctions). */
+export const COMPUTED_FUNCTIONS: Record<ComputedFn, { title: string; args: ArgSlot[]; min?: number; max?: number; out: string; help: string }> = {
+  upper: { title: 'Upper case', args: ['text'], out: 'text', help: 'The text in capitals.' },
+  lower: { title: 'Lower case', args: ['text'], out: 'text', help: 'The text in small letters.' },
+  trim: { title: 'Trim spaces', args: ['text'], out: 'text', help: 'Without spaces at either end.' },
+  length: { title: 'Length', args: ['text'], out: 'int', help: 'How many characters the text has.' },
+  concat: { title: 'Join', args: ['any|lit'], min: 2, max: 5, out: 'text', help: 'Columns and texts one after another; empty when a column is.' },
+  substr: { title: 'Part of text', args: ['text', 'number', 'number'], out: 'text', help: 'From a position (1 is the first character), so many characters.' },
+  date_format: { title: 'Date as text', args: ['time', 'pattern'], out: 'text', help: 'A timestamp or date written as a pattern, e.g. 2026-10.' },
+  to_text: { title: 'As text', args: ['any'], out: 'text', help: 'Any plain value as text.' },
+  to_integer: { title: 'As a whole number', args: ['text'], out: 'int', help: 'Text that holds a whole number; empty when it doesn’t.' },
+};
+
+export const DATE_PATTERNS = ['yyyy', 'yyyy-MM', 'yyyy-MM-dd', 'yyyy-MM-dd HH', 'yyyy-MM-dd HH:mm:ss'];
+
+/** The slot of argument i. */
+export function argSlot(fn: ComputedFn, i: number): ArgSlot {
+  const a = COMPUTED_FUNCTIONS[fn].args;
+  return a[Math.min(i, a.length - 1)]!;
+}
+
+/** Whether a column of kind (columnKind) fits a slot (domain.KindFits). */
+export function kindFits(slot: ArgSlot, kind: string): boolean {
+  if (slot === 'text') return kind === 'text';
+  if (slot === 'time') return kind === 'timestamp' || kind === 'date';
+  if (slot === 'any' || slot === 'any|lit') return !['binary', 'document', 'list', 'json', 'unknown'].includes(kind);
+  return false;
+}
+
+/** The arguments a function starts with when picked. */
+export function defaultArgs(fn: ComputedFn): ComputedArg[] {
+  const f = COMPUTED_FUNCTIONS[fn];
+  const n = f.min ?? f.args.length;
+  return Array.from({ length: n }, (_, i): ComputedArg => {
+    const slot = argSlot(fn, i);
+    if (slot === 'number') return { number: 1 };
+    if (slot === 'pattern') return { text: 'yyyy-MM-dd' };
+    return { column: '' };
+  });
+}
+
+/** The formula in words, e.g. Upper case(status). */
+export function formulaText(t: TransformStep): string {
+  const fn = t.function ? COMPUTED_FUNCTIONS[t.function] : undefined;
+  if (!fn) return '…';
+  const args = (t.args ?? []).map((a) => (a.column !== undefined ? a.column || '…' : a.text !== undefined ? `"${a.text}"` : String(a.number ?? '…')));
+  return `${fn.title}(${args.join(', ')})`;
+}
+
+/** Why a computed step can't be saved as it is (the decoder's rules); null when it can. */
+export function computedError(t: TransformStep): string | null {
+  if (!t.table) return 'Choose the table.';
+  const e = nameError(t.name ?? '');
+  if (e) return e;
+  const fn = t.function ? COMPUTED_FUNCTIONS[t.function] : undefined;
+  if (!fn) return 'Choose a function.';
+  const args = t.args ?? [];
+  for (const [i, a] of args.entries()) {
+    const slot = argSlot(t.function!, i);
+    if (slot === 'number' && !(Number.isInteger(a.number) && a.number! >= 1 && a.number! <= 65535)) return 'Numbers are whole, from 1 to 65535.';
+    if ((slot === 'text' || slot === 'any' || slot === 'time') && !a.column) return 'Pick a column for every argument.';
+    if (slot === 'any|lit' && a.column === '') return 'Pick a column for every argument.';
+    if (a.text !== undefined && slot === 'any|lit') {
+      const te = textError(a.text);
+      if (te) return te;
+    }
+  }
+  return null;
 }
