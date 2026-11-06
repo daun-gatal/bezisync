@@ -9,6 +9,7 @@ import { InlineError, Notice, Pill, Skeleton } from '@/components/ui/feedback';
 import { Field, RadioCards, SlugInput, slugError, Stepper, Switch, Textarea } from '@/components/ui/form';
 import { RawProperties, type RawRow } from '@/components/RawProperties';
 import { SettingsChangeList } from '@/components/SettingsChange';
+import { freshRecommendations, Recommendations } from '@/components/Recommendations';
 import { SettingsEditor } from '@/components/SettingsEditor';
 import { Card, KeyValue } from '@/components/ui/layout';
 import { CodeBlock, Modal } from '@/components/ui/overlays';
@@ -479,6 +480,12 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
         )}
       </Card>
 
+      {/* Suggestions from this preflight's evidence, in both modes: one click sets them. */}
+      <Recommendations
+        recs={freshRecommendations(report?.recommendations, tunable, tuning)}
+        settings={tunable}
+        onUse={(key, value) => setTuning({ ...tuning, [key]: value })}
+      />
       {expert ? (
         <Card title="Engine settings">
           <div className="flex min-w-0 flex-col gap-6">

@@ -217,7 +217,17 @@ each fit alone; Kubernetes then refuses the pods of the second, and the pipeline
 **Engine settings** (Review, Expert mode) lists the typed settings BeziSync offers for the pipeline's
 engine, source and destination, grouped by when they matter (snapshot, streaming, delivery,
 engine): each has its bounds, default and what changing it does to a running pipeline. Add one from
-the searchable list; removing it restores the default.
+the searchable list; removing it restores the default. Debezium pipelines offer snapshot threads, the
+poll interval, the queue and batch sizes (BeziSync sets them from the size; the batch stays below the
+queue), a queue memory limit, the wait before reconnecting, skipping unchanged updates, the position
+save interval and the log level. Preflight checks them against this run's evidence: each tuned
+setting exists in the image's Debezium release (`setting_version`; unknown for an image BeziSync
+can't place), snapshot threads fit the source's free connections (`setting_threads`; read from
+PostgreSQL and MySQL, unknown otherwise), and a full queue and a copy fetch fit the heap
+(`setting_queue_memory`, `setting_fetch_memory`, estimated from the tables' sizes). Review — in
+both modes — suggests settings from the same evidence with one click to use them (snapshot threads
+for large copies with free connections; skipping unchanged updates when columns are left out) and
+hides a suggestion once its evidence is ten minutes old.
 
 **Advanced Debezium properties** (Review, Expert mode, one row per key and value) pass raw `debezium.source.*` and
 `debezium.sink.*` keys to Debezium Server for options BeziSync doesn't offer. They may only add what

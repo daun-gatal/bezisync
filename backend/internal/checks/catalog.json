@@ -1865,6 +1865,58 @@
    ]
   },
   {
+   "code": "setting_version",
+   "section": "Deploy",
+   "titles": [
+    "Settings in this Debezium version"
+   ],
+   "whys": [
+    "A tuned setting must exist in the Debezium release the pipeline runs: some arrive in a release, some go or are renamed. Unknown when BeziSync can't tell which release an image is."
+   ],
+   "fixes": [
+    "Remove the setting in Review → Engine settings, or move the pipeline to a Debezium version that has it."
+   ]
+  },
+  {
+   "code": "setting_threads",
+   "section": "Deploy",
+   "titles": [
+    "Connections for the copy"
+   ],
+   "whys": [
+    "Each snapshot thread holds a connection to the source while the first copy runs, besides the stream's own. Unknown when BeziSync can't read the source's connection limit (no permission, or the source is checked by an agent)."
+   ],
+   "fixes": [
+    "Use fewer snapshot threads, or raise the source's connection limit."
+   ]
+  },
+  {
+   "code": "setting_queue_memory",
+   "section": "Deploy",
+   "titles": [
+    "Queue memory"
+   ],
+   "whys": [
+    "A full queue holds that many changes in the Java heap; estimated from the tables' average row size, since no changes are seen before a deploy."
+   ],
+   "fixes": [
+    "Lower Queue size, set a Queue memory limit, or choose a bigger size."
+   ]
+  },
+  {
+   "code": "setting_fetch_memory",
+   "section": "Deploy",
+   "titles": [
+    "Copy fetch size"
+   ],
+   "whys": [
+    "The first copy reads this many rows at once into the heap."
+   ],
+   "fixes": [
+    "Lower the fetch size in the Snapshot step, or choose a bigger size."
+   ]
+  },
+  {
    "code": "runtime_disabled",
    "fixes": [],
    "section": "Deploy",

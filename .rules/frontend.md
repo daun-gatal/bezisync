@@ -136,6 +136,9 @@ src/
   now under the `suggest` policy. Policies' Resources group edits `max_resources`,
   `resource_limits` (dropped when empty) and `shrink_after_copy` (left out when `auto`), and
   `blockedBy` counts each pipeline's server `footprint` (and the Flink presets for a custom cluster).
+- `components/Recommendations.tsx` shows preflight's recommendations in Review in both modes
+  (`freshRecommendations`: evidence under ten minutes old, a setting the pipeline can use, not yet
+  chosen); Use sets the tuning value and autosave saves it.
 - Placement (`settings/PlacementProfiles.tsx`): the Kubernetes runtime edit modal edits its profiles
   (`profileError` blocks names and templates the server refuses); Review offers the chosen
   runtime's profiles as Placement and writes `placement` after `tuning`, only when set.

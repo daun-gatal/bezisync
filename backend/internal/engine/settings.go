@@ -74,6 +74,11 @@ type Setting struct {
 	// Derived: BeziSync sets a default for it (from the size), which the setting replaces. Any
 	// other key BeziSync compiles is never in the registry.
 	Derived bool `json:"derived,omitempty"`
+	// Since and Until bound the Debezium releases that have it ("2.6": from 2.6.0; Until: gone
+	// from that release); Renamed is its key from Until on.
+	Since   string `json:"since,omitempty"`
+	Until   string `json:"until,omitempty"`
+	Renamed string `json:"renamed,omitempty"`
 }
 
 // Settings is the registry, in the order the wizard lists it.
@@ -101,6 +106,27 @@ var DebeziumSettings = []Setting{
 	{Engine: Debezium, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "debezium.source.poll.interval.ms",
 		Title: "Poll interval", Type: "int", Default: "500", Min: "50", Max: "10000",
 		Why: "How long, in milliseconds, to wait for new changes before passing on a batch. Lower is fresher but busier."},
+	{Engine: Debezium, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "debezium.source.max.queue.size",
+		Title: "Queue size", Type: "int", Default: "8192", Min: "1024", Max: "131072", Derived: true,
+		Why: "Changes held in memory between reading and sending. BeziSync sets it from the size; more absorbs bursts but needs heap."},
+	{Engine: Debezium, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "debezium.source.max.batch.size",
+		Title: "Batch size", Type: "int", Default: "2048", Min: "128", Max: "32768", Derived: true,
+		Why: "Changes passed on at once. BeziSync sets it from the size; it must stay below the queue size."},
+	{Engine: Debezium, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "debezium.source.max.queue.size.in.bytes",
+		Title: "Queue memory limit", Type: "int", Default: "0", Min: "0", Max: "4294967296", Since: "1.9",
+		Why: "Bytes the queue may hold (0: no limit beyond its size). Caps memory when changes are large."},
+	{Engine: Debezium, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "debezium.source.retriable.restart.connector.wait.ms",
+		Title: "Wait before reconnecting", Type: "int", Default: "10000", Min: "1000", Max: "600000",
+		Why: "Milliseconds the connector waits after a connection error before it tries again."},
+	{Engine: Debezium, Scope: ScopeSource, Stage: StageDelivery, Impact: ImpactRestart, Key: "debezium.source.skip.messages.without.change",
+		Title: "Skip unchanged updates", Type: "bool", Default: "false", Since: "2.0",
+		Why: "Leaves out an update when none of the columns the pipeline sends changed (only columns left out of the pipeline changed)."},
+	{Engine: Debezium, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "debezium.source.offset.flush.interval.ms",
+		Title: "Position save interval", Type: "int", Default: "5000", Min: "1000", Max: "600000", Derived: true,
+		Why: "Milliseconds between saves of the position. After a crash the changes since the last save are sent again."},
+	{Engine: Debezium, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "quarkus.log.level",
+		Title: "Log level", Type: "enum", Default: "INFO", Choices: []string{"INFO", "WARN", "ERROR"}, Derived: true,
+		Why: "How much Debezium Server logs. WARN and ERROR hide progress messages that help when something goes wrong."},
 }
 
 // FlinkPipelineSettings are Flink CDC source, destination and pipeline options a pipeline may

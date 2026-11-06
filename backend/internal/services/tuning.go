@@ -1,9 +1,12 @@
 package services
 
 import (
+	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 
+	"github.com/daun-gatal/bezisync/backend/internal/compiler"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
@@ -55,6 +58,25 @@ func ValidateTuning(id engine.ID, sourceType, sinkType string, spec domain.Pipel
 		}
 		if msg != "" {
 			errs = append(errs, map[string]any{"loc": []string{"tuning", k}, "message": msg})
+		}
+	}
+	// Debezium passes batches out of its queue: a batch as big as the queue never fills.
+	if id == engine.Debezium && len(errs) == 0 {
+		res := compiler.ResourceFor(spec.Policies)
+		batch, queue := res.Batch, res.Queue
+		if v, ok := spec.Tuning["debezium.source.max.batch.size"]; ok {
+			batch, _ = strconv.Atoi(v)
+		}
+		if v, ok := spec.Tuning["debezium.source.max.queue.size"]; ok {
+			queue, _ = strconv.Atoi(v)
+		}
+		if batch >= queue {
+			key := "debezium.source.max.batch.size"
+			if _, set := spec.Tuning[key]; !set {
+				key = "debezium.source.max.queue.size"
+			}
+			errs = append(errs, map[string]any{"loc": []string{"tuning", key},
+				"message": fmt.Sprintf("the batch size (%d) must stay below the queue size (%d)", batch, queue)})
 		}
 	}
 	if len(errs) > 0 {

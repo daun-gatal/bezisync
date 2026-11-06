@@ -3274,6 +3274,11 @@
             "title": "Min",
             "type": "string"
           },
+          "renamed": {
+            "description": "Its key from Until on.",
+            "title": "Renamed",
+            "type": "string"
+          },
           "scope": {
             "description": "Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.",
             "enum": [
@@ -3283,6 +3288,11 @@
               "pipeline"
             ],
             "title": "Scope",
+            "type": "string"
+          },
+          "since": {
+            "description": "Debezium releases from this one have it.",
+            "title": "Since",
             "type": "string"
           },
           "stage": {
@@ -3308,6 +3318,11 @@
               "bool"
             ],
             "title": "Type",
+            "type": "string"
+          },
+          "until": {
+            "description": "Debezium releases from this one no longer have it.",
+            "title": "Until",
             "type": "string"
           },
           "why": {
@@ -5701,6 +5716,14 @@
             ],
             "title": "Properties"
           },
+          "recommendations": {
+            "description": "Omitted when there are none.",
+            "items": {
+              "$ref": "#/components/schemas/Recommendation"
+            },
+            "title": "Recommendations",
+            "type": "array"
+          },
           "sections": {
             "items": {
               "$ref": "#/components/schemas/PreflightSection"
@@ -6311,6 +6334,36 @@
           "providers"
         ],
         "title": "Providers",
+        "type": "object"
+      },
+      "Recommendation": {
+        "description": "A setting value preflight suggests from this run's evidence; hide it once evidence_at is older than 10 minutes.",
+        "properties": {
+          "evidence_at": {
+            "format": "date-time",
+            "title": "Evidence At",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "why",
+          "evidence_at"
+        ],
+        "title": "Recommendation",
         "type": "object"
       },
       "RefCheck": {

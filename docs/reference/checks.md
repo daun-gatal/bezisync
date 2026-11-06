@@ -2137,6 +2137,58 @@ Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota.
 
 **Runtime {name}**
 
+<a id="setting-fetch-memory"></a>
+### `setting_fetch_memory`
+
+**Copy fetch size**
+
+- Why: The first copy reads this many rows at once into the heap.
+
+Fix:
+
+```
+Lower the fetch size in the Snapshot step, or choose a bigger size.
+```
+
+<a id="setting-queue-memory"></a>
+### `setting_queue_memory`
+
+**Queue memory**
+
+- Why: A full queue holds that many changes in the Java heap; estimated from the tables' average row size, since no changes are seen before a deploy.
+
+Fix:
+
+```
+Lower Queue size, set a Queue memory limit, or choose a bigger size.
+```
+
+<a id="setting-threads"></a>
+### `setting_threads`
+
+**Connections for the copy**
+
+- Why: Each snapshot thread holds a connection to the source while the first copy runs, besides the stream's own. Unknown when BeziSync can't read the source's connection limit (no permission, or the source is checked by an agent).
+
+Fix:
+
+```
+Use fewer snapshot threads, or raise the source's connection limit.
+```
+
+<a id="setting-version"></a>
+### `setting_version`
+
+**Settings in this Debezium version**
+
+- Why: A tuned setting must exist in the Debezium release the pipeline runs: some arrive in a release, some go or are renamed. Unknown when BeziSync can't tell which release an image is.
+
+Fix:
+
+```
+Remove the setting in Review → Engine settings, or move the pipeline to a Debezium version that has it.
+```
+
 <a id="sink-image-platform"></a>
 ### `sink_image_platform`
 

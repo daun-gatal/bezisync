@@ -47,6 +47,8 @@ type PreflightReport struct {
 	Change       domain.ChangeSummary `json:"change"`
 	// SettingsChange is what the deploy changes in the pipeline's settings (omitted when nothing).
 	SettingsChange *domain.SettingsChange `json:"settings_change,omitempty"`
+	// Recommendations are setting values worth offering, from this run's evidence (omitted: none).
+	Recommendations []Recommendation `json:"recommendations,omitempty"`
 }
 
 // ParseSpec validates a spec from a request (422 invalid_spec).
@@ -1218,6 +1220,23 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		}
 	}
 	discover := &discoverOnce{src: source, typ: sourceConn.Type}
+	var recommended []Recommendation
+	if !flink {
+		if c := settingVersionCheck(spec, image); c != nil {
+			configChecks = append(configChecks, *c)
+		}
+		limit, used, known := connectionsOf(ctx, source, sourceConn.Type, rt)
+		if c := threadsCheck(p, spec, limit, used, known); c != nil {
+			configChecks = append(configChecks, *c)
+		}
+		found, derr := discover.get(ctx)
+		var avgRow, rows int64
+		if derr == nil {
+			avgRow, rows = averageRow(found, spec.Source.Tables.Include)
+		}
+		configChecks = append(configChecks, memoryChecks(spec, compiled, avgRow)...)
+		recommended = recommendations(p, spec, sourceConn.Type, rows, len(spec.Source.Tables.Include), limit, used, known, time.Now())
+	}
 	configChecks = append(configChecks, transformChecks(ctx, sourceConn, discover, p.Name, spec)...)
 	configChecks = append(configChecks, personalDataChecks(ctx, srcDesc, discover, spec)...)
 	if sinkDesc != nil && compiled != nil {
@@ -1247,7 +1266,8 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		return nil, err
 	}
 	return &PreflightReport{OK: overall.OK, Summary: overall.Summary, Sections: sections, Properties: properties,
-		Destinations: destinations, Change: domain.SummarizeChange(old, spec), SettingsChange: redactSettings(domain.SummarizeSettings(old, spec))}, nil
+		Destinations: destinations, Change: domain.SummarizeChange(old, spec), SettingsChange: redactSettings(domain.SummarizeSettings(old, spec)),
+		Recommendations: recommended}, nil
 }
 
 // ReportExtra is report.model_dump(mode="json") for problem bodies.

@@ -380,7 +380,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   for its spec hash, else the runtime's profile now), goes into `Compiled.Placement` (in the config
   hash only when set) and `Workload.Placement` (the Kubernetes driver's `applyPlacement`; agents
   advertise `runtime.FeaturePlacement`). Packing sees `RuntimeCapacityFor`: the largest node the
-  profile accepts among the `nodes` the Kubernetes driver reports. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  profile accepts among the `nodes` the Kubernetes driver reports. Settings checks and
+  recommendations (`services/settingchecks.go`) read only this run's evidence — the image's release
+  (`Setting.Since`/`Until`/`Renamed`), `connectors.ConnectionCounter` (PostgreSQL, MySQL; never
+  through an agent), discovery's size estimates — and are Unknown or absent without it;
+  `PreflightReport.recommendations` carry `evidence_at`. `ValidateTuning` keeps Debezium's batch
+  below its queue (size-derived defaults included). `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

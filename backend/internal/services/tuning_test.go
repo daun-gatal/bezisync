@@ -36,13 +36,13 @@ func TestValidateTuning(t *testing.T) {
 		"debezium.source.snapshot.max.threads": "4",
 		"debezium.source.poll.interval.ms":     "0250",
 		"source.connection.pool.size":          "5",
-		"debezium.source.max.batch.size":       "1",
+		"debezium.source.made.up.key":          "1",
 	})))
 	want := map[string]string{
 		"debezium.source.snapshot.max.threads": "doesn't apply to this source or destination",
 		"debezium.source.poll.interval.ms":     "write it as 250",
 		"source.connection.pool.size":          "applies only to pipelines that run on Flink CDC",
-		"debezium.source.max.batch.size":       "is not a setting BeziSync offers",
+		"debezium.source.made.up.key":          "is not a setting BeziSync offers",
 	}
 	for k, w := range want {
 		if got[k] != w {

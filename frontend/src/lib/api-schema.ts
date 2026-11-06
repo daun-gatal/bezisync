@@ -3481,11 +3481,21 @@ export interface components {
             /** Min */
             min?: string;
             /**
+             * Renamed
+             * @description Its key from Until on.
+             */
+            renamed?: string;
+            /**
              * Scope
              * @description Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.
              * @enum {string}
              */
             scope: "engine" | "source" | "sink" | "pipeline";
+            /**
+             * Since
+             * @description Debezium releases from this one have it.
+             */
+            since?: string;
             /**
              * Stage
              * @enum {string}
@@ -3498,6 +3508,11 @@ export interface components {
              * @enum {string}
              */
             type: "duration" | "int" | "fraction" | "enum" | "bool";
+            /**
+             * Until
+             * @description Debezium releases from this one no longer have it.
+             */
+            until?: string;
             /** Why */
             why: string;
         };
@@ -4428,6 +4443,11 @@ export interface components {
             ok: boolean;
             /** Properties */
             properties: string | null;
+            /**
+             * Recommendations
+             * @description Omitted when there are none.
+             */
+            recommendations?: components["schemas"]["Recommendation"][];
             /** Sections */
             sections: components["schemas"]["PreflightSection"][];
             /** @description Omitted when no setting changes. */
@@ -4644,6 +4664,23 @@ export interface components {
             password: boolean;
             /** Providers */
             providers: components["schemas"]["SignInOption"][];
+        };
+        /**
+         * Recommendation
+         * @description A setting value preflight suggests from this run's evidence; hide it once evidence_at is older than 10 minutes.
+         */
+        Recommendation: {
+            /**
+             * Evidence At
+             * Format: date-time
+             */
+            evidence_at: string;
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
+            /** Why */
+            why: string;
         };
         /** RefCheck */
         RefCheck: {

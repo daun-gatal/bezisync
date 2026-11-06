@@ -121,3 +121,29 @@ test('a deploy that changes settings says what each change does', async ({ page 
 
   await api.send('DELETE', `${url}?drop_destinations=true`);
 });
+
+test('preflight suggests a setting from its evidence; one click uses it (Guided mode too)', async ({ page }) => {
+  test.setTimeout(180_000);
+  const api = await Api.signIn();
+  const tag = unique('suggest');
+  const project = await api.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `Suggest ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  const { password, ...pg } = SOURCE_PG;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'kafka', name: `k-${tag}`, config: KAFKA }, 201);
+  // A column left out: an update that changed only it would arrive with nothing changed.
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id,
+    spec: { source: { tables: { include: ['shop.orders'] }, columns: { 'shop.orders': { exclude: ['status'], mask: [] } } } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=review`);
+  await expect(page.getByText('A suggested setting')).toBeVisible({ timeout: 60_000 });
+  await page.getByRole('button', { name: 'Use Skip unchanged updates on' }).click();
+  await expect(page.getByText('A suggested setting')).toBeHidden();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  expect((await api.get<{ spec: { tuning?: Record<string, string> } }>(url)).spec.tuning).toEqual({ 'debezium.source.skip.messages.without.change': 'true' });
+  await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+});
