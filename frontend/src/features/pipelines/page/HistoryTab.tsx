@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { toast } from 'sonner';
+import { SettingsChangeList, settingsChangeLines } from '@/components/SettingsChange';
 import { Button } from '@/components/ui/button';
 import { InlineError, Notice, Pill, Skeleton } from '@/components/ui/feedback';
 import { Check, Field, Input } from '@/components/ui/form';
@@ -159,6 +160,7 @@ function DeployConfirm({ pipeline: p, version, onClose }: { pipeline: Pipeline; 
         ...(notes.length
           ? notes.map((n) => `Changes from v${p.deployed_version}: ${n}`)
           : [diff.isPending ? 'Comparing the versions…' : `No configuration changes from v${p.deployed_version}.`]),
+        ...settingsChangeLines(diff.data?.settings_change),
         ...(policies.data?.require_approval ? ['This project needs approval: the deploy waits until someone else with approval rights approves it.'] : []),
       ]}
       confirmLabel={rollback ? `Roll back to v${version}` : `Deploy v${version}`}
@@ -201,6 +203,7 @@ export function DiffView({ pipeline: p, from, to }: { pipeline: Pipeline; from: 
                 ))}
               </ul>
             ) : null}
+            {d.settings_change ? <SettingsChangeList change={d.settings_change} /> : null}
             <pre
               aria-label="Version diff"
               tabIndex={0}

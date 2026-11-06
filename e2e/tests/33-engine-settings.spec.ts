@@ -81,3 +81,36 @@ test('an Expert tunes a Debezium pipeline: typed settings, raw properties, and a
     await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'guided' });
   }
 });
+
+test('a deploy that changes settings says what each change does', async ({ page }) => {
+  test.setTimeout(600_000);
+  const api = await Api.signIn();
+  const tag = unique('impact');
+  const project = await api.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `Impact ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  const { password, ...pg } = SOURCE_PG;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'kafka', name: `k-${tag}`, config: KAFKA }, 201);
+  const p = await api.send<{ id: string; version: number }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, spec: { source: { tables: { include: ['shop.orders'] } }, snapshot: { mode: 'no_data' } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  await api.send('POST', `${url}/deploy`, {});
+  const deployed = await api.get<{ version: number }>(url);
+  await api.patch(url, { spec: { source: { tables: { include: ['shop.orders'] } }, snapshot: { mode: 'no_data' }, tuning: { 'debezium.source.snapshot.max.threads': '4', 'debezium.source.poll.interval.ms': '250' } } }, deployed.version);
+
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=review`);
+  const notice = page.getByRole('status').filter({ hasText: 'What changes in the settings' });
+  await expect(notice).toBeVisible({ timeout: 60_000 });
+  await expect(notice.getByText('Snapshot threads')).toBeVisible();
+  await expect(notice.getByText('First copy', { exact: true })).toBeVisible();
+  await expect(notice.getByText('Restart', { exact: true })).toBeVisible();
+
+  // The version history says the same.
+  await page.goto(`/p/${project.slug}/pipelines/${p.id}?tab=history`);
+  await expect(page.getByText('Poll interval')).toBeVisible({ timeout: 30_000 });
+
+  await api.send('DELETE', `${url}?drop_destinations=true`);
+});

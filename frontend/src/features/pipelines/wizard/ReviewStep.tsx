@@ -8,6 +8,7 @@ import { Button, ButtonLink } from '@/components/ui/button';
 import { InlineError, Notice, Pill, Skeleton } from '@/components/ui/feedback';
 import { Field, RadioCards, SlugInput, slugError, Stepper, Switch, Textarea } from '@/components/ui/form';
 import { RawProperties, type RawRow } from '@/components/RawProperties';
+import { SettingsChangeList } from '@/components/SettingsChange';
 import { SettingsEditor } from '@/components/SettingsEditor';
 import { Card, KeyValue } from '@/components/ui/layout';
 import { CodeBlock, Modal } from '@/components/ui/overlays';
@@ -462,6 +463,14 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                     <li key={n}>{n}</li>
                   ))}
                 </ul>
+              </Notice>
+            ) : null}
+            {report.settings_change ? (
+              <Notice
+                tone={report.settings_change.impact === 'breaks_positions' ? 'bad' : report.settings_change.impact === 'next_copy' ? 'warn' : 'info'}
+                title="What changes in the settings"
+              >
+                <SettingsChangeList change={report.settings_change} />
               </Notice>
             ) : null}
             {report.sections.map((s) => (

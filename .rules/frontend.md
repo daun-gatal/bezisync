@@ -119,6 +119,9 @@ src/
   `tuning`) are compared in JSONB order (`jsonbSorted`), or autosave never settles. Review's Engine
   settings card (Expert) holds both: `tuningSettings` picks the pipeline's settings (Flink settings
   stay in `FlinkRunSettings`), and a raw key that is a setting converts with "Use the typed setting".
+  `SettingsChangeList` (`components/SettingsChange.tsx`) shows preflight's or the diff's
+  `settings_change` grouped by impact, heaviest first: in Review's final checks, History's diff and
+  deploy confirmation (`settingsChangeLines`), and the approval banner.
 - `SchemaForm` renders descriptor JSON Schemas (connections, a sink's pipeline options): `ui.group`,
   `ui.expert`, `ui.labels` / `ui.descriptions` for enum values and `ui.when` (shown only while other
   fields hold listed values; hidden fields are dropped by `cleanValues`; `context` passes the sibling
