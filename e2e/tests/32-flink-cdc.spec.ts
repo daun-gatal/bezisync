@@ -100,12 +100,14 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
   const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
   const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
-  // Three readers: not a preset's shape (two slots per TaskManager).
-  const cluster = { parallelism: 3, slot: { cpu: '0.5', memory: '768Mi' }, job_manager: { cpu: '0.5', memory: '1Gi' }, shape: 'auto' };
+  // Three readers: not a preset's shape (two slots per TaskManager); smaller once it streams.
+  const cluster = {
+    parallelism: 3, slot: { cpu: '0.5', memory: '768Mi' }, streaming_slot: { cpu: '0.25', memory: '512Mi' }, job_manager: { cpu: '0.5', memory: '1Gi' }, shape: 'auto',
+  };
   const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
     name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
     spec: { source: { tables: { include: [table] } }, sink: { naming: `f_${tag.replace(/-/g, '_')}_{table}` }, snapshot: { mode: 'no_data' },
-      policies: { resources: 'custom' }, flink_cdc: { cluster } },
+      policies: { resources: 'custom' }, flink_cdc: { cluster, commit_seconds: 30 } },
   }, 201);
   const url = `${base}/pipelines/${p.id}`;
 
@@ -121,8 +123,10 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   expect(fit?.message).toContain('1 TaskManager × 3 slots');
 
   await api.send('POST', `${url}/deploy`, {});
-  const deployed = await api.get<{ artifacts: { flink_shape?: { size: { slots: number; readers: number } } } }>(url);
-  expect(deployed.artifacts.flink_shape?.size).toMatchObject({ slots: 3, readers: 3 });
+  type Shape = { artifacts: { flink_shape?: { phase: string; size: { slots: number; readers: number; task_manager_memory: string }; streaming_size: { task_manager_memory: string } } } };
+  const deployed = await api.get<Shape>(url);
+  expect(deployed.artifacts.flink_shape?.size).toMatchObject({ slots: 3, readers: 3, task_manager_memory: '2816Mi' });
+  expect(deployed.artifacts.flink_shape?.phase).toBe('copy');
   await waitFor('custom Flink CDC cluster streaming', async () => {
     const cur = await api.get<{ lifecycle: string; status: unknown }>(url);
     if (cur.lifecycle === 'failed') throw new Error(JSON.stringify(cur.status));
@@ -133,6 +137,23 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   await waitFor('row readable in Iceberg', async () => {
     const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
     return e.records.some((r) => r.value.status === marker);
+  }, 420_000);
+
+  // The copy is done and a position saved after it: the controller shrinks the cluster, which
+  // restarts from its saved position and goes on streaming (R25, R17).
+  await waitFor('cluster shrunk after its copy', async () => (await api.get<Shape>(url)).artifacts.flink_shape?.phase === 'streaming', 420_000);
+  const events = await api.get<{ items: { kind: string; actor_label: string }[] }>(`/api/v1/projects/${project.id}/events?resource_id=${p.id}&limit=100`);
+  expect(events.items.filter((e) => e.kind === 'pipeline.resized').map((e) => e.actor_label)).toEqual(['controller']);
+  await waitFor('streaming again on the smaller shape', async () => {
+    const cur = await api.get<{ lifecycle: string; status: { flink?: { taskmanagers_wanted?: number } } }>(url);
+    if (cur.lifecycle === 'failed') throw new Error(JSON.stringify(cur.status));
+    return cur.lifecycle === 'streaming';
+  }, 600_000);
+  const after = `FLINKC2-${tag}`;
+  await ownerSql(`INSERT INTO ${table} (status, total) VALUES ('${after}', 2)`);
+  await waitFor('a row written after the shrink is readable', async () => {
+    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
+    return e.records.some((r) => r.value.status === after);
   }, 420_000);
 
   await api.send('DELETE', `${url}?drop_destinations=true`);

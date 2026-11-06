@@ -618,6 +618,10 @@ func pipelineRoutes(r chi.Router) {
 	}
 	r.Post(base+"/{pipeline_id}/pause", desired("paused"))
 	r.Post(base+"/{pipeline_id}/resume", desired("running"))
+	r.Post(base+"/{pipeline_id}/cluster:shrink", pipelineAction(auth.PipelineOperate, http.StatusOK,
+		func(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, _ *http.Request) (int, error) {
+			return 0, services.ShrinkCluster(ctx, q, a, p)
+		}))
 	r.Post(base+"/{pipeline_id}/restart", pipelineAction(auth.PipelineOperate, http.StatusOK,
 		func(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, _ *http.Request) (int, error) {
 			_, err := services.Restart(ctx, q, a, p)

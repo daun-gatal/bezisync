@@ -273,15 +273,18 @@ func RestoreSavedPosition(ctx context.Context, q db.Querier, a *auth.ProjectAcce
 		return nil, err
 	}
 	s.Current, s.TakenAt = true, s.TakenAt.UTC()
+	copyDone := CopyDoneSave(p)
 	artifacts := cloneArtifacts(p)
 	artifacts[ArtifactRestoreAfter] = s.ID - 1
 	delete(artifacts, ArtifactStartup)
 	p.Artifacts = artifacts
+	// A position saved during the first copy goes on with the copy: the copy shape first (R28).
+	grew := copyDone > 0 && id < copyDone && GrowBack(p) // id: the position restored (s is its copy)
 	if err := SavePipeline(ctx, q, p); err != nil {
 		return nil, err
 	}
 	_, err = Record(ctx, q, AuditEvent{Kind: "pipeline.position_restored", Summary: fmt.Sprintf("Restored %s to saved position #%d (%s)", p.Name, id, s.TakenAt.Format(time.RFC3339)),
-		ProjectID: &a.Project.ID, Principal: a.Principal, ResourceType: "pipeline", ResourceID: &p.ID, Details: map[string]any{"saved_position": id}})
+		ProjectID: &a.Project.ID, Principal: a.Principal, ResourceType: "pipeline", ResourceID: &p.ID, Details: map[string]any{"saved_position": id, "grew_back": grew}})
 	return &s, err
 }
 
@@ -349,13 +352,15 @@ func resetFlink(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *mod
 	artifacts[ArtifactRestoreAfter] = latest
 	artifacts[ArtifactStartup] = startup
 	p.Artifacts = artifacts
+	// Copying every table again needs the copy shape (R27).
+	grew := mode == "resnapshot" && GrowBack(p)
 	if err := SavePipeline(ctx, q, p); err != nil {
 		return nil, err
 	}
 	labels := map[string]string{"resnapshot": "copy every table again", "skip_to_now": "changes from now", "from_time": "changes since " + time.UnixMilli(fromMS).UTC().Format(time.RFC3339)}
 	if _, err := Record(ctx, q, AuditEvent{Kind: "pipeline.offsets_reset", Summary: fmt.Sprintf("Started %s over (%s)", p.Name, labels[mode]),
 		ProjectID: &a.Project.ID, Principal: a.Principal, ResourceType: "pipeline", ResourceID: &p.ID,
-		Details: map[string]any{"mode": mode, "results": results, "set_aside_through": latest}}); err != nil {
+		Details: map[string]any{"mode": mode, "results": results, "set_aside_through": latest, "grew_back": grew}}); err != nil {
 		return nil, err
 	}
 	return map[string]any{"mode": mode, "results": results}, nil

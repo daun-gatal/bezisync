@@ -1333,7 +1333,8 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 		if rt != nil {
 			capacity = rt.Capacity
 		}
-		applyFlinkShape(p, domain.MustSpec(map[string]any(v.Spec)), capacity)
+		// Tables added to a running pipeline are copied while it streams: it grows back for that.
+		applyFlinkShape(p, domain.MustSpec(map[string]any(v.Spec)), capacity, previous != nil && len(report.Change.TablesAdded) == 0)
 	}
 	p.DeployedVersionID = &v.ID
 	p.DesiredState = "running"

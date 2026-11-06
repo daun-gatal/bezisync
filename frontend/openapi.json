@@ -1391,6 +1391,17 @@
             "title": "Slots",
             "type": "integer"
           },
+          "streaming": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterShapeRead"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The shape once the first copy is done; null without streaming_slot."
+          },
           "task_manager_cpu": {
             "title": "Task Manager Cpu",
             "type": "string"
@@ -1420,7 +1431,8 @@
           "why",
           "need",
           "node",
-          "check"
+          "check",
+          "streaming"
         ],
         "title": "ClusterPackRead",
         "type": "object"
@@ -1436,6 +1448,60 @@
           "cluster"
         ],
         "title": "ClusterPackRequest",
+        "type": "object"
+      },
+      "ClusterShapeRead": {
+        "properties": {
+          "job_manager_cpu": {
+            "title": "Job Manager Cpu",
+            "type": "string"
+          },
+          "job_manager_memory": {
+            "title": "Job Manager Memory",
+            "type": "string"
+          },
+          "need": {
+            "$ref": "#/components/schemas/ClusterNeed"
+          },
+          "readers": {
+            "title": "Readers",
+            "type": "integer"
+          },
+          "slots": {
+            "description": "Slots per TaskManager.",
+            "title": "Slots",
+            "type": "integer"
+          },
+          "task_manager_cpu": {
+            "title": "Task Manager Cpu",
+            "type": "string"
+          },
+          "task_manager_memory": {
+            "title": "Task Manager Memory",
+            "type": "string"
+          },
+          "task_managers": {
+            "title": "Task Managers",
+            "type": "integer"
+          },
+          "why": {
+            "description": "Why it has that many TaskManagers, naming the limit.",
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_managers",
+          "slots",
+          "readers",
+          "task_manager_cpu",
+          "task_manager_memory",
+          "job_manager_cpu",
+          "job_manager_memory",
+          "why",
+          "need"
+        ],
+        "title": "ClusterShapeRead",
         "type": "object"
       },
       "Column": {
@@ -3122,6 +3188,17 @@
           "slot": {
             "$ref": "#/components/schemas/SlotSize",
             "description": "What each reader's slot needs: CPU 0.25 to 4, memory 512Mi to 8Gi."
+          },
+          "streaming_slot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlotSize"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What each slot needs once the first copy is done (smaller than slot; automatic shape only): BeziSync then shrinks the cluster, restarting it from its saved position, and grows it back before a later copy."
           },
           "task_managers": {
             "anyOf": [
@@ -5893,6 +5970,16 @@
             "default": false,
             "title": "Require Approval",
             "type": "boolean"
+          },
+          "shrink_after_copy": {
+            "default": "auto",
+            "description": "What happens once a custom Flink CDC cluster with a streaming slot size finishes its first copy: auto (BeziSync shrinks it) or suggest (someone chooses Shrink now). Returned only when suggest.",
+            "enum": [
+              "auto",
+              "suggest"
+            ],
+            "title": "Shrink After Copy",
+            "type": "string"
           }
         },
         "title": "ProjectPolicies",
@@ -14265,6 +14352,60 @@
           }
         },
         "summary": "Pack a Flink CDC cluster",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:shrink": {
+      "post": {
+        "description": "Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet.",
+        "operationId": "shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Shrink a Flink CDC cluster now",
         "tags": [
           "pipelines"
         ]

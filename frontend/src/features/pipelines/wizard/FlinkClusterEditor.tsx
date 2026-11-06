@@ -1,6 +1,6 @@
 import { ClusterDiagram } from '@/components/ClusterDiagram';
 import { Notice, Skeleton } from '@/components/ui/feedback';
-import { Field, Segmented, Stepper } from '@/components/ui/form';
+import { Field, Segmented, Stepper, Switch } from '@/components/ui/form';
 import { Select } from '@/components/ui/select';
 import { Meta } from '@/components/ui/text';
 import {
@@ -16,6 +16,8 @@ import {
   manualError,
   memoryLabel,
   mib,
+  streamingError,
+  streamingFrom,
   type PackedCluster,
 } from '@/lib/cluster';
 import type { FlinkCluster } from '@/lib/engines';
@@ -65,6 +67,8 @@ export function FlinkClusterEditor({
   const toManual = () =>
     set({
       shape: 'manual',
+      // A manual shape is never resized.
+      streaming_slot: undefined,
       task_managers: {
         count: packed?.task_managers ?? 1,
         slots: packed?.slots ?? Math.min(value.parallelism, MAX_SLOTS),
@@ -74,6 +78,11 @@ export function FlinkClusterEditor({
       },
     });
   const shapeError = manualError(value);
+  const shrinkError = streamingError(value);
+  const stream = value.streaming_slot;
+  // A streaming size no bigger than the copy one: the lists stop at the copy size.
+  const streamCpus = SLOT_CPUS.filter((c) => Number(c) <= Number(value.slot.cpu));
+  const streamMemories = SLOT_MEMORIES.filter((m) => mib(m) <= mib(value.slot.memory));
   return (
     <section aria-label="Cluster" className="flex min-w-0 flex-col gap-4 rounded-md border border-line p-4">
       <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,200px),1fr))] gap-4">
@@ -95,6 +104,24 @@ export function FlinkClusterEditor({
           )}
         </Field>
       </div>
+      <Switch
+        label="Shrink after the first copy"
+        checked={stream !== undefined && stream !== null}
+        disabled={manual}
+        why="A manual shape is never resized."
+        description="Streaming reads the log with one reader: once the copy is done and a position is saved, BeziSync repacks the readers smaller (a restart from the saved position), and grows them back before a later copy."
+        onChange={(on) => set({ streaming_slot: on ? streamingFrom(value.slot) : undefined })}
+      />
+      {stream && !manual ? (
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,200px),1fr))] gap-4">
+          <Field label="Streaming reader CPU" error={shrinkError}>
+            {(id) => <Select id={id} value={stream.cpu} onChange={(cpu) => set({ streaming_slot: { ...stream, cpu } })} options={cpuOptions(streamCpus)} />}
+          </Field>
+          <Field label="Streaming reader memory">
+            {(id) => <Select id={id} value={stream.memory} onChange={(memory) => set({ streaming_slot: { ...stream, memory } })} options={memoryOptions(streamMemories)} />}
+          </Field>
+        </div>
+      ) : null}
       <Field label="Shape" group hint={manual ? 'TaskManagers as you set them.' : 'BeziSync packs the readers into TaskManagers that fit the runtime’s nodes when it deploys, and keeps that shape until the next deploy.'}>
         {() => (
           <Segmented
@@ -124,12 +151,16 @@ export function FlinkClusterEditor({
           </Field>
         </div>
       ) : null}
-      {packed && !shapeError ? (
+      {packed && !shapeError && !shrinkError ? (
         <>
-          <ClusterDiagram title={manual ? 'Your TaskManagers' : 'How it would be packed now'} shape={packed} />
+          <ClusterDiagram title={manual ? 'Your TaskManagers' : packed.streaming ? 'During the first copy' : 'How it would be packed now'} shape={packed} />
           {manual ? null : <Meta className="text-sm text-ink-2">{packed.why}</Meta>}
+          {packed.streaming ? <ClusterDiagram title="While streaming" shape={packed.streaming} /> : null}
           <Meta className="text-sm text-ink-2">
-            In all: {Number(packed.need.cpu.toFixed(2))} CPU and {memoryLabel(`${packed.need.memory_mib}Mi`)}
+            {packed.streaming ? 'At its peak (the first copy)' : 'In all'}: {Number(packed.need.cpu.toFixed(2))} CPU and {memoryLabel(`${packed.need.memory_mib}Mi`)}
+            {packed.streaming
+              ? `; while streaming ${Number(packed.streaming.need.cpu.toFixed(2))} CPU and ${memoryLabel(`${packed.streaming.need.memory_mib}Mi`)}`
+              : ''}
             {packed.node ? `; the largest node has ${packed.node.cpu} CPU and ${memoryLabel(`${packed.node.memory_mib}Mi`)}.` : '.'}
           </Meta>
           {packed.check && packed.check.status !== 'pass' ? (

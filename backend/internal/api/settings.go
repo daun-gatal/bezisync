@@ -123,7 +123,16 @@ func settingsRoutes(r chi.Router) {
 		if pv.Node.Known() {
 			node = map[string]any{"cpu": float64(pv.Node.CPUMilli) / 1000, "memory_mib": pv.Node.MemoryMiB}
 		}
+		var streaming any
+		if ss := pv.Streaming; ss != nil {
+			n := services.FlinkNeed(ss.Size)
+			streaming = map[string]any{"task_managers": ss.Size.TaskManagers, "slots": ss.Size.SlotsPerTaskManager(), "readers": ss.Size.Parallelism(),
+				"task_manager_cpu": ss.Size.TaskManagerCPU, "task_manager_memory": ss.Size.TaskManagerMemory,
+				"job_manager_cpu": ss.Size.JobManagerCPU, "job_manager_memory": ss.Size.JobManagerMemory, "why": ss.Why,
+				"need": map[string]any{"cpu": n.CPU, "memory_mib": n.MiB}}
+		}
 		httpapi.JSON(w, http.StatusOK, map[string]any{
+			"streaming":     streaming,
 			"task_managers": s.TaskManagers, "slots": s.SlotsPerTaskManager(), "readers": s.Parallelism(),
 			"task_manager_cpu": s.TaskManagerCPU, "task_manager_memory": s.TaskManagerMemory,
 			"job_manager_cpu": s.JobManagerCPU, "job_manager_memory": s.JobManagerMemory,

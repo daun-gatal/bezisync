@@ -359,7 +359,15 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   the runtime section, so a forced deploy can't skip it. A shape change needs nothing new from the
   drivers or agents (TaskManager count, CPU and memory are existing `FlinkTopology` fields; slots
   and parallelism travel in flink-conf); `flink_readers_changed` (config section) refuses another
-  parallelism while a saved position above the Start over floor exists. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  parallelism while a saved position above the Start over floor exists. Shrinking after the copy
+  (`services/shrink.go`): the `flink_shape` artifact holds `size` (copy) and `streaming_size`, and
+  `phase`; `FlinkSizeOf` returns the streaming shape once `phase` is `streaming`, so the config hash
+  changes once and the drivers restart the cluster from its position. `FlinkPhaseStep` (controller,
+  each tick of a running pipeline) shrinks only on evidence (`Streaming`, then a save after
+  `streaming_since`), reverts a streaming shape that failed before saving (`MaxShrinkFailures`, then
+  `shrink_off` and the `cluster_shrink_failed` alert); `GrowBack` runs on Start over with a copy and
+  on restoring a position before `copy_done_save`; Deploy keeps a shrunk shape unless tables were
+  added. Audits a person didn't cause set `AuditEvent.Actor` ("controller"). `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

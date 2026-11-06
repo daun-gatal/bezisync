@@ -21,7 +21,7 @@ import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
 import { canonicalSetting, jsonbSorted, settingError, tuningSettings, useClassify } from '@/lib/settings';
 import { slugify } from '@/lib/format';
 import { useDeploy, usePipelines, usePreflight, useSavedPositions, type Pipeline, type Preflight } from '@/lib/pipelines';
-import { clusterFromPreset, manualError, usePackCluster } from '@/lib/cluster';
+import { clusterFromPreset, manualError, streamingError, usePackCluster } from '@/lib/cluster';
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
@@ -128,7 +128,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const positions = useSavedPositions(project.id, pipeline.id, flink && deployed);
   const readersLocked = flink && deployed && (positions.data === undefined || positions.data.positions.some((s) => s.current));
   const clusterOn = flink && resources === 'custom' && fc.cluster !== undefined;
-  const pack = usePackCluster(project.id, pipeline.id, fc.cluster, clusterOn && !(fc.cluster && manualError(fc.cluster)));
+  const pack = usePackCluster(project.id, pipeline.id, fc.cluster, clusterOn && !(fc.cluster && (manualError(fc.cluster) ?? streamingError(fc.cluster))));
   const tableRows = useMemo(() => {
     const byName = new Map((discovery.data?.tables ?? []).map((t) => [`${t.schema}.${t.name}`, t.rows_estimate ?? null]));
     const rows = spec.source.tables.include.map((t) => byName.get(t) ?? null);
@@ -174,7 +174,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     owner !== pipeline.owner ||
     runtimeId !== pipeline.runtime?.id ||
     JSON.stringify(nextSpec) !== JSON.stringify(spec);
-  const clusterError = clusterOn && fc.cluster ? manualError(fc.cluster) : null;
+  const clusterError = clusterOn && fc.cluster ? (manualError(fc.cluster) ?? streamingError(fc.cluster)) : null;
   const invalid = nameErr ?? rawError ?? tuningError ?? customError ?? clusterError;
 
   // Save shortly after the last change; one save at a time, so versions never conflict.

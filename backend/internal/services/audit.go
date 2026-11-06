@@ -21,6 +21,8 @@ type AuditEvent struct {
 	Details       map[string]any
 	// NotAudit marks an operational (non-audit) event; audit is the default.
 	NotAudit bool
+	// Actor names who acted when no person did ("controller"; default "system").
+	Actor string
 }
 
 // Record writes an event (every mutation records one).
@@ -28,6 +30,9 @@ func Record(ctx context.Context, q db.Querier, e AuditEvent) (uuid.UUID, error) 
 	id := db.NewID()
 	var actorID *uuid.UUID
 	label := "system"
+	if e.Actor != "" {
+		label = e.Actor
+	}
 	if e.Principal != nil {
 		actorID = &e.Principal.User.ID
 		label = e.Principal.Label()

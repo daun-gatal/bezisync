@@ -82,6 +82,9 @@ describe('flinkSpecBlock', () => {
       parallelism: 4,
     };
     expect(JSON.stringify(flinkSpecBlock(flinkChoices({ ...stored, cluster: shuffled })))).toBe(JSON.stringify({ ...stored, cluster }));
+    // A streaming slot size goes right after slot.
+    const shrinking = { parallelism: 4, job_manager: { cpu: '1', memory: '1Gi' }, shape: 'auto' as const, streaming_slot: { memory: '512Mi', cpu: '0.5' }, slot: { cpu: '1', memory: '2Gi' } };
+    expect(Object.keys(flinkSpecBlock(flinkChoices({ ...stored, cluster: shrinking })).cluster!)).toEqual(['parallelism', 'slot', 'streaming_slot', 'job_manager', 'shape']);
     // An automatic shape has no task_managers.
     const auto = { parallelism: 2, slot: { cpu: '1', memory: '1Gi' }, job_manager: { cpu: '1', memory: '1Gi' }, shape: 'auto' as const };
     expect(JSON.stringify(flinkSpecBlock(flinkChoices({ ...stored, cluster: { ...auto, task_managers: null } })).cluster)).toBe(JSON.stringify(auto));

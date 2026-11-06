@@ -1,6 +1,7 @@
 import { useState, type ComponentType } from 'react';
 import { ArrowRightLeft, Hash, Inbox, KeyRound, Layers, PenLine, Plus, Puzzle, Rows3, SquarePlus, Trash, Funnel } from 'lucide-react';
-import { ButtonLink } from '@/components/ui/button';
+import { Button, ButtonLink } from '@/components/ui/button';
+import { toast } from 'sonner';
 import { Empty, Meter, Notice, Pill, Skeleton, TONE_TEXT } from '@/components/ui/feedback';
 import { Segmented } from '@/components/ui/form';
 import { Card, KeyValue, QueryState, Split, Stack } from '@/components/ui/layout';
@@ -8,12 +9,12 @@ import { List, ListRow } from '@/components/ui/table';
 import { Ident, Meta, plural, Short } from '@/components/ui/text';
 import { TimeSeries } from '@/components/TimeSeries';
 import { ago, formatCount, formatDuration } from '@/lib/format';
-import { useMetrics, useVersions, type Pipeline } from '@/lib/pipelines';
+import { useMetrics, useShrinkCluster, useVersions, type Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { isStale, statusOf, type FlinkStatus } from '@/lib/status';
 import { fullSpec } from '../spec';
 import { Flow } from './Flow';
-import { flinkView, formatLatency, latest, protectionView, transformView, type Fact, type Row, type RowIcon } from './overview';
+import { flinkView, formatLatency, latest, protectionView, shapeView, transformView, type Fact, type Row, type RowIcon } from './overview';
 
 /** Overview: the flow strip is the summary; the cards below only add what it doesn't show. */
 export function Overview({ pipeline: p }: { pipeline: Pipeline }) {
@@ -36,7 +37,7 @@ export function Overview({ pipeline: p }: { pipeline: Pipeline }) {
           {r.fix || undefined}
         </Notice>
       ))}
-      {p.engine === 'flink-cdc' && s.flink && !gone ? <FlinkCluster status={s.flink} /> : null}
+      {p.engine === 'flink-cdc' && s.flink && !gone ? <FlinkCluster pipeline={p} status={s.flink} /> : null}
       {p.lifecycle === 'draft' ? (
         <Card>
           <Empty title="Not deployed yet">
@@ -323,11 +324,32 @@ function DeliveryCard({ pipeline: p }: { pipeline: Pipeline }) {
 }
 
 /** A Flink CDC pipeline's cluster: the job, its TaskManagers, its last save and the first copy. */
-function FlinkCluster({ status }: { status: FlinkStatus }) {
+function FlinkCluster({ pipeline: p, status }: { pipeline: Pipeline; status: FlinkStatus }) {
+  const { project, can } = useProject();
+  const shrink = useShrinkCluster(project.id);
   const v = flinkView(status, ago);
+  const shape = shapeView(p.artifacts as Record<string, unknown>, ago);
   if (!v) return null;
   return (
-    <Card title="Flink CDC cluster">
+    <Card
+      title="Flink CDC cluster"
+      actions={
+        shape?.ready && can('pipeline.operate') ? (
+          <Button
+            size="sm"
+            loading={shrink.isPending}
+            onClick={() => shrink.mutate(p.id, { onSuccess: () => toast.success('Shrinking: the cluster restarts from its saved position.') })}
+          >
+            Shrink now
+          </Button>
+        ) : undefined
+      }
+    >
+      {shape?.problem ? (
+        <Notice tone="warn" title="It stopped shrinking">
+          {shape.problem}
+        </Notice>
+      ) : null}
       {v.problem ? (
         <Notice tone="warn" title="Positions aren’t being saved">
           {v.problem}
@@ -336,6 +358,7 @@ function FlinkCluster({ status }: { status: FlinkStatus }) {
       <KeyValue
         items={[
           ['Job', v.job],
+          shape ? ['Size', shape.text] : null,
           v.taskmanagers ? ['TaskManagers', v.taskmanagers] : null,
           ['Last saved', v.saved ?? 'Not yet'],
           v.restored ? ['Started from', v.restored] : null,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { clusterSummary, readersPerTaskManager } from '@/components/ClusterDiagram';
 import { copyMinutes } from '@/features/pipelines/wizard/FlinkClusterEditor';
-import { clusterFromPreset, JM_CPUS, JM_MEMORIES, manualError, memoryLabel, SLOT_CPUS, SLOT_MEMORIES, TM_MEMORIES } from '../cluster';
+import { clusterFromPreset, JM_CPUS, JM_MEMORIES, manualError, memoryLabel, SLOT_CPUS, SLOT_MEMORIES, streamingError, streamingFrom, TM_MEMORIES } from '../cluster';
 
 const small = { jobmanager_cpu: '500m', jobmanager_memory: '1Gi', taskmanagers: 1, taskmanager_cpu: '1', taskmanager_memory: '2Gi', parallelism: 2, total_memory_mib: 3072 };
 const large = { jobmanager_cpu: '1', jobmanager_memory: '1536Mi', taskmanagers: 4, taskmanager_cpu: '1', taskmanager_memory: '2Gi', parallelism: 8, total_memory_mib: 9728 };
@@ -52,5 +52,17 @@ describe('custom Flink CDC clusters', () => {
     expect(copyMinutes(12_000_000, 1)).toBe(20);
     expect(copyMinutes(12_000_000, 4)).toBe(5);
     expect(copyMinutes(10, 4)).toBe(1);
+  });
+});
+
+describe('shrinking after the copy', () => {
+  it('starts about half the copy size and refuses one that isn’t smaller', () => {
+    expect(streamingFrom({ cpu: '1', memory: '2Gi' })).toEqual({ cpu: '0.5', memory: '1Gi' });
+    expect(streamingFrom({ cpu: '0.25', memory: '512Mi' })).toEqual({ cpu: '0.25', memory: '512Mi' });
+    const c = { parallelism: 4, slot: { cpu: '1', memory: '2Gi' }, job_manager: { cpu: '1', memory: '1Gi' }, shape: 'auto' as const };
+    expect(streamingError({ ...c, streaming_slot: { cpu: '0.5', memory: '1Gi' } })).toBeNull();
+    expect(streamingError({ ...c, streaming_slot: { cpu: '1', memory: '2Gi' } })).toContain('nothing to shrink to');
+    expect(streamingError({ ...c, streaming_slot: { cpu: '2', memory: '1Gi' } })).toContain('no more than');
+    expect(streamingError(c)).toBeNull();
   });
 });

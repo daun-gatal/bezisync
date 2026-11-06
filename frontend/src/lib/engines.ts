@@ -85,6 +85,7 @@ function clusterBlock(c: FlinkCluster): FlinkCluster {
   return {
     parallelism: c.parallelism,
     slot: { cpu: c.slot.cpu, memory: c.slot.memory },
+    ...(c.streaming_slot ? { streaming_slot: { cpu: c.streaming_slot.cpu, memory: c.streaming_slot.memory } } : {}),
     job_manager: { cpu: c.job_manager.cpu, memory: c.job_manager.memory },
     shape: c.shape ?? 'auto',
     ...(tm ? { task_managers: { count: tm.count, slots: tm.slots, cpu: tm.cpu, memory: tm.memory } } : {}),

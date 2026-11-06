@@ -28,6 +28,14 @@ func TestFlinkCluster(t *testing.T) {
 	slot := map[string]any{"cpu": "1", "memory": "2Gi"}
 	jm := map[string]any{"cpu": "1", "memory": "1Gi"}
 	auto := map[string]any{"parallelism": 4, "slot": slot, "job_manager": jm}
+	with := func(base map[string]any, k string, v any) map[string]any {
+		out := map[string]any{}
+		for kk, vv := range base {
+			out[kk] = vv
+		}
+		out[k] = v
+		return out
+	}
 	s, errs := parseCluster(custom, auto)
 	if len(errs) > 0 || s.FlinkCDC.Cluster == nil || s.FlinkCDC.Cluster.Shape != "auto" || s.FlinkCDC.Cluster.Parallelism != 4 {
 		t.Fatal(errs, s.FlinkCDC.Cluster)
@@ -38,6 +46,17 @@ func TestFlinkCluster(t *testing.T) {
 	}
 	if c := s.Clone(); c.FlinkCDC.Cluster == s.FlinkCDC.Cluster {
 		t.Fatal("clone shares the cluster")
+	}
+	// A streaming slot size: dumped after slot, cloned.
+	st, errs := parseCluster(custom, with(auto, "streaming_slot", map[string]any{"cpu": "0.5", "memory": "2Gi"}))
+	if len(errs) > 0 || st.FlinkCDC.Cluster.StreamingSlot == nil || *st.FlinkCDC.Cluster.StreamingSlot != (domain.SlotSize{CPU: "0.5", Memory: "2Gi"}) {
+		t.Fatal(errs)
+	}
+	if b, _ := json.Marshal(st); !strings.Contains(string(b), `"slot":{"cpu":"1","memory":"2Gi"},"streaming_slot":{"cpu":"0.5","memory":"2Gi"},"job_manager"`) {
+		t.Fatal(string(b))
+	}
+	if c := st.Clone(); c.FlinkCDC.Cluster.StreamingSlot == st.FlinkCDC.Cluster.StreamingSlot {
+		t.Fatal("clone shares the streaming slot")
 	}
 	// A manual shape round-trips (its count and slots are fields of the same object as cpu/memory).
 	manual := map[string]any{"parallelism": 6, "slot": slot, "job_manager": jm, "shape": "manual",
@@ -51,14 +70,6 @@ func TestFlinkCluster(t *testing.T) {
 	_ = json.Unmarshal(b, &back)
 	if r, errs := parseCluster(custom, back["flink_cdc"].(map[string]any)["cluster"]); len(errs) > 0 || *r.FlinkCDC.Cluster.TaskManagers != *m.FlinkCDC.Cluster.TaskManagers {
 		t.Fatal(errs)
-	}
-	with := func(base map[string]any, k string, v any) map[string]any {
-		out := map[string]any{}
-		for kk, vv := range base {
-			out[kk] = vv
-		}
-		out[k] = v
-		return out
 	}
 	tm := func(count, slots int, mem string) map[string]any {
 		return map[string]any{"count": count, "slots": slots, "cpu": "2", "memory": mem}
@@ -85,9 +96,38 @@ func TestFlinkCluster(t *testing.T) {
 		"cluster without custom":  {map[string]any{"resources": "medium"}, auto, "a custom size needs resources: custom"},
 		"both custom kinds":       {map[string]any{"resources": "custom", "custom_resources": map[string]any{"cpu": "1", "memory": "1Gi"}}, auto, "use one"},
 		"custom without either":   {custom, nil, "custom_resources (Debezium) or flink_cdc.cluster"},
+		"streaming bigger":        {custom, with(auto, "streaming_slot", map[string]any{"cpu": "2", "memory": "1Gi"}), "never bigger"},
+		"streaming the same":      {custom, with(auto, "streaming_slot", map[string]any{"cpu": "1", "memory": "2Gi"}), "smaller than slot"},
+		"streaming out of bounds": {custom, with(auto, "streaming_slot", map[string]any{"cpu": "0.1", "memory": "1Gi"}), "streaming_slot.cpu"},
+		"streaming on manual":     {custom, with(with(with(auto, "shape", "manual"), "task_managers", tm(2, 2, "4Gi")), "streaming_slot", map[string]any{"cpu": "0.5", "memory": "1Gi"}), "never resized"},
 	} {
 		if _, errs := parseCluster(bad.policies, bad.cluster); !strings.Contains(strings.Join(errs, "|"), bad.want) {
 			t.Errorf("%s: %v", name, errs)
 		}
+	}
+}
+
+func TestShrinkAfterCopyPolicy(t *testing.T) {
+	parse := func(raw map[string]any) (domain.ProjectPolicies, int) {
+		v := &val.V{}
+		p, _ := domain.ParsePolicies(v, nil, raw)
+		return p, len(v.Errors)
+	}
+	p, errs := parse(map[string]any{})
+	if errs > 0 || !p.ShrinkAuto() {
+		t.Fatal(errs)
+	}
+	if b, _ := json.Marshal(p); strings.Contains(string(b), "shrink_after_copy") {
+		t.Fatal("the default is dumped", string(b))
+	}
+	p, _ = parse(map[string]any{"shrink_after_copy": "suggest"})
+	if b, _ := json.Marshal(p); p.ShrinkAuto() || !strings.HasSuffix(string(b), `"shrink_after_copy":"suggest"}`) {
+		t.Fatal(string(b))
+	}
+	if p, _ := parse(map[string]any{"shrink_after_copy": "auto"}); !p.ShrinkAuto() {
+		t.Fatal(p)
+	}
+	if _, errs := parse(map[string]any{"shrink_after_copy": "never"}); errs == 0 {
+		t.Fatal("accepted")
 	}
 }

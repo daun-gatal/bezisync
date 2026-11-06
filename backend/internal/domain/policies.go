@@ -39,7 +39,14 @@ type ProjectPolicies struct {
 	// AllowAdvancedProperties lets Experts pass raw Debezium properties (refused by preflight
 	// otherwise). Dumped only when set.
 	AllowAdvancedProperties bool `json:"allow_advanced_properties"`
+	// ShrinkAfterCopy is what happens once a custom Flink CDC cluster with a streaming slot size
+	// finishes its first copy: "auto" (default; BeziSync repacks it) or "suggest" (someone
+	// chooses Shrink now). Dumped only when "suggest".
+	ShrinkAfterCopy string `json:"shrink_after_copy"`
 }
+
+// ShrinkAuto reports whether BeziSync shrinks custom Flink CDC clusters after their copy itself.
+func (p ProjectPolicies) ShrinkAuto() bool { return p.ShrinkAfterCopy != "suggest" }
 
 // DefaultPolicies is ProjectPolicies().
 func DefaultPolicies() ProjectPolicies {
@@ -93,6 +100,9 @@ func (p ProjectPolicies) Dump() *om.Map {
 	}
 	if p.AllowAdvancedProperties {
 		out.Set("allow_advanced_properties", true)
+	}
+	if p.ShrinkAfterCopy == "suggest" {
+		out.Set("shrink_after_copy", "suggest")
 	}
 	return out
 }
@@ -171,6 +181,11 @@ func ParsePolicies(v *val.V, loc val.Loc, raw any) (ProjectPolicies, bool) {
 	if f := o.Get("allow_advanced_properties"); f.Present {
 		if b, ok := v.Bool(f.Loc, f.Raw); ok {
 			p.AllowAdvancedProperties = b
+		}
+	}
+	if f := o.Get("shrink_after_copy"); f.Present && !f.IsNull() {
+		if s, ok := v.Literal(f.Loc, f.Raw, "auto", "suggest"); ok && s == "suggest" {
+			p.ShrinkAfterCopy = s
 		}
 	}
 	if f := o.Get("allowed_transforms"); f.Present && !f.IsNull() {

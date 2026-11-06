@@ -94,6 +94,15 @@ export function useLifecycle(projectId: string) {
   });
 }
 
+/** Shrink now: a custom Flink CDC cluster that finished its copy moves to its streaming shape. */
+export function useShrinkCluster(projectId: string) {
+  const done = useInvalidate(projectId);
+  return useMutation({
+    mutationFn: (id: string) => unwrap(client.POST('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:shrink', path(projectId, id))),
+    onSuccess: done,
+  });
+}
+
 export function useDeletePipeline(projectId: string) {
   const done = useInvalidate(projectId);
   return useMutation({

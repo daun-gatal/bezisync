@@ -1173,6 +1173,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:shrink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Shrink a Flink CDC cluster now
+         * @description Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet.
+         */
+        post: operations["shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/config": {
         parameters: {
             query?: never;
@@ -2627,6 +2647,8 @@ export interface components {
              * @description Slots per TaskManager.
              */
             slots: number;
+            /** @description The shape once the first copy is done; null without streaming_slot. */
+            streaming: components["schemas"]["ClusterShapeRead"] | null;
             /** Task Manager Cpu */
             task_manager_cpu: string;
             /** Task Manager Memory */
@@ -2642,6 +2664,32 @@ export interface components {
         /** ClusterPackRequest */
         ClusterPackRequest: {
             cluster: components["schemas"]["FlinkCluster"];
+        };
+        /** ClusterShapeRead */
+        ClusterShapeRead: {
+            /** Job Manager Cpu */
+            job_manager_cpu: string;
+            /** Job Manager Memory */
+            job_manager_memory: string;
+            need: components["schemas"]["ClusterNeed"];
+            /** Readers */
+            readers: number;
+            /**
+             * Slots
+             * @description Slots per TaskManager.
+             */
+            slots: number;
+            /** Task Manager Cpu */
+            task_manager_cpu: string;
+            /** Task Manager Memory */
+            task_manager_memory: string;
+            /** Task Managers */
+            task_managers: number;
+            /**
+             * Why
+             * @description Why it has that many TaskManagers, naming the limit.
+             */
+            why: string;
         };
         /** Column */
         Column: {
@@ -3396,6 +3444,8 @@ export interface components {
             shape: "auto" | "manual";
             /** @description What each reader's slot needs: CPU 0.25 to 4, memory 512Mi to 8Gi. */
             slot: components["schemas"]["SlotSize"];
+            /** @description What each slot needs once the first copy is done (smaller than slot; automatic shape only): BeziSync then shrinks the cluster, restarting it from its saved position, and grows it back before a later copy. */
+            streaming_slot?: components["schemas"]["SlotSize"] | null;
             /** @description A manual shape's TaskManagers (only with shape: manual). */
             task_managers?: components["schemas"]["ManualTaskManagers"] | null;
         };
@@ -4442,6 +4492,13 @@ export interface components {
              * @default false
              */
             require_approval: boolean;
+            /**
+             * Shrink After Copy
+             * @description What happens once a custom Flink CDC cluster with a streaming slot size finishes its first copy: auto (BeziSync shrinks it) or suggest (someone chooses Shrink now). Returned only when suggest.
+             * @default auto
+             * @enum {string}
+             */
+            shrink_after_copy: "auto" | "suggest";
         };
         /** ProjectRead */
         ProjectRead: {
@@ -8811,6 +8868,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClusterPackRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRead"];
                 };
             };
             /** @description Validation Error */

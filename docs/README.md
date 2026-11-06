@@ -661,7 +661,16 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   can change its TaskManagers, slots, CPU and memory: the deploy saves the position, recreates the
   cluster and restores it. Its number of readers stays while a saved position is left to restore
   (the position is kept per reader): `flink_readers_changed` blocks that deploy, even when forced,
-  until you pause it and use Positions → Start over. Preflight checks the runtime has room
+  until you pause it and use Positions → Start over. **Shrink after the first copy**
+  (`streaming_slot: {cpu, memory}`, smaller than `slot`; automatic shape only): streaming reads the
+  log with one reader, so once every table is copied and a position was saved after streaming
+  began, the controller repacks the cluster for the streaming size — a restart from that position,
+  audited as `controller`, shown on the Overview's cluster card. It grows back to the copy size
+  before copying again (Start over that copies every table, restoring a position saved during the
+  copy, a deploy that adds tables). If the streaming shape fails before it saves a position it goes
+  back to the copy size; after three such failures BeziSync stops shrinking it (alert *Cluster
+  stopped shrinking*). With the project policy `shrink_after_copy: suggest` the Overview offers
+  **Shrink now** instead. Preflight and project limits count the copy size, the peak. Preflight checks the runtime has room
   (`runtime_capacity`). Every reader copies in parallel, but streaming reads the binlog or
   WAL with one. On PostgreSQL each reader opens its own temporary replication slot while it copies,
   so a first copy needs 1 + readers free slots and WAL senders: `flink_replication_slots` blocks a

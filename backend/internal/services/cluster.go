@@ -22,7 +22,8 @@ func NodeOf(capacity map[string]any) engine.Node {
 }
 
 // FlinkSizeOf is a Flink CDC pipeline's size: a preset, or its custom cluster as stored at deploy
-// for this spec, or packed now for the runtime's nodes.
+// for this spec (the streaming shape once it shrank after its first copy), or packed now for the
+// first copy on the runtime's nodes.
 func FlinkSizeOf(p *models.Pipeline, spec domain.PipelineSpec, capacity map[string]any) engine.Packed {
 	c := spec.FlinkCDC.Cluster
 	if spec.Policies.Resources != "custom" || c == nil {
@@ -37,34 +38,113 @@ func FlinkSizeOf(p *models.Pipeline, spec domain.PipelineSpec, capacity map[stri
 		return engine.Packed{Fits: true, Why: "Manual shape.", Size: engine.FlinkSize{JobManagerCPU: c.JobManager.CPU, JobManagerMemory: c.JobManager.Memory,
 			TaskManagers: tm.Count, Slots: tm.Slots, Readers: c.Parallelism, TaskManagerCPU: tm.CPU, TaskManagerMemory: tm.Memory}}
 	}
-	if stored, ok := p.Artifacts[ArtifactFlinkShape].(map[string]any); ok && stored["spec_hash"] == domain.SpecHash(spec) {
+	if stored := storedShape(p, spec); stored != nil {
+		if stored["phase"] == PhaseStreaming {
+			if size, ok := sizeFromArtifact(stored["streaming_size"]); ok {
+				return engine.Packed{Size: size, Fits: true, Why: "Shrunk after the first copy."}
+			}
+		}
 		if size, ok := sizeFromArtifact(stored["size"]); ok {
 			return engine.Packed{Size: size, Fits: true, Why: "Packed at deploy."}
 		}
 	}
-	cpu, _ := domain.ParseCPUAny(c.Slot.CPU)
-	mem, _ := domain.ParseMemoryAny(c.Slot.Memory)
+	return packSlot(c, c.Slot, capacity)
+}
+
+// StreamingSizeOf is the shape a custom cluster shrinks to after its first copy, packed now
+// (false when it has no streaming slot size).
+func StreamingSizeOf(spec domain.PipelineSpec, capacity map[string]any) (engine.Packed, bool) {
+	c := spec.FlinkCDC.Cluster
+	if spec.Policies.Resources != "custom" || c == nil || c.Shape == "manual" || c.StreamingSlot == nil {
+		return engine.Packed{}, false
+	}
+	return packSlot(c, *c.StreamingSlot, capacity), true
+}
+
+func packSlot(c *domain.FlinkCluster, slot domain.SlotSize, capacity map[string]any) engine.Packed {
+	cpu, _ := domain.ParseCPUAny(slot.CPU)
+	mem, _ := domain.ParseMemoryAny(slot.Memory)
 	return engine.Pack(c.Parallelism, cpu, mem, c.JobManager.CPU, c.JobManager.Memory, NodeOf(capacity))
 }
 
-// applyFlinkShape records in p's artifacts the shape a custom cluster is deployed with, packed now
-// (nothing for presets and manual shapes, which never depend on the nodes). The caller saves p.
-func applyFlinkShape(p *models.Pipeline, spec domain.PipelineSpec, capacity map[string]any) {
+// Phases of a custom Flink CDC cluster with a streaming slot size.
+const (
+	PhaseCopy      = "copy"
+	PhaseStreaming = "streaming"
+	// MaxShrinkFailures: after this many shrinks that failed, BeziSync stops trying (R31).
+	MaxShrinkFailures = 3
+)
+
+// storedShape is the flink_shape artifact when it was packed for this spec (nil otherwise).
+func storedShape(p *models.Pipeline, spec domain.PipelineSpec) map[string]any {
+	stored, ok := p.Artifacts[ArtifactFlinkShape].(map[string]any)
+	if !ok || stored["spec_hash"] != domain.SpecHash(spec) {
+		return nil
+	}
+	return stored
+}
+
+// applyFlinkShape records in p's artifacts the shapes a custom cluster is deployed with, packed now:
+// for its first copy and, with a streaming slot size, for once it has copied. A redeploy that
+// copies nothing new keeps a cluster that already shrank on its streaming shape; one that adds
+// tables (copied while it streams) grows back first. Presets and manual shapes store nothing.
+// The caller saves p.
+func applyFlinkShape(p *models.Pipeline, spec domain.PipelineSpec, capacity map[string]any, keepStreaming bool) {
 	c := spec.FlinkCDC.Cluster
+	previous, _ := p.Artifacts[ArtifactFlinkShape].(map[string]any)
 	if spec.Policies.Resources != "custom" || c == nil || c.Shape == "manual" {
 		delete(p.Artifacts, ArtifactFlinkShape)
 		return
 	}
-	fresh := *p
-	fresh.Artifacts = db.Map{} // pack now, not from an older store
-	packed := FlinkSizeOf(&fresh, spec, capacity)
 	if p.Artifacts == nil {
 		p.Artifacts = db.Map{}
 	}
-	s := packed.Size
-	p.Artifacts[ArtifactFlinkShape] = map[string]any{"spec_hash": domain.SpecHash(spec), "size": map[string]any{
-		"job_manager_cpu": s.JobManagerCPU, "job_manager_memory": s.JobManagerMemory, "task_managers": s.TaskManagers,
-		"task_manager_cpu": s.TaskManagerCPU, "task_manager_memory": s.TaskManagerMemory, "slots": s.Slots, "readers": s.Readers}}
+	shape := map[string]any{"spec_hash": domain.SpecHash(spec), "size": sizeMap(packSlot(c, c.Slot, capacity).Size), "phase": PhaseCopy}
+	if streaming, ok := StreamingSizeOf(spec, capacity); ok {
+		shape["streaming_size"] = sizeMap(streaming.Size)
+		if keepStreaming && previous != nil && previous["phase"] == PhaseStreaming {
+			for _, k := range []string{"phase", "copy_done_save", "shrunk_at"} {
+				if v, ok := previous[k]; ok {
+					shape[k] = v
+				}
+			}
+		}
+	}
+	p.Artifacts[ArtifactFlinkShape] = shape
+}
+
+// GrowBack puts a custom cluster that shrank back on its copy shape before a later copy (Start
+// over with a copy, restoring a position saved during the copy). Reports whether it changed.
+func GrowBack(p *models.Pipeline) bool {
+	stored, ok := p.Artifacts[ArtifactFlinkShape].(map[string]any)
+	if !ok || stored["streaming_size"] == nil {
+		return false
+	}
+	changed := stored["phase"] != PhaseCopy || stored["streaming_since"] != nil
+	next := map[string]any{}
+	for k, v := range stored {
+		next[k] = v
+	}
+	next["phase"] = PhaseCopy
+	for _, k := range []string{"streaming_since", "copy_done_save", "shrunk_at", "shrink_ready"} {
+		delete(next, k)
+	}
+	artifacts := cloneArtifacts(p)
+	artifacts[ArtifactFlinkShape] = next
+	p.Artifacts = artifacts
+	return changed
+}
+
+// CopyDoneSave is the saved position whose save let a cluster shrink (0 when it hasn't): a
+// position before it was saved during the copy.
+func CopyDoneSave(p *models.Pipeline) int64 {
+	stored, _ := p.Artifacts[ArtifactFlinkShape].(map[string]any)
+	return int64(toFloat(stored["copy_done_save"]))
+}
+
+func sizeMap(s engine.FlinkSize) map[string]any {
+	return map[string]any{"job_manager_cpu": s.JobManagerCPU, "job_manager_memory": s.JobManagerMemory, "task_managers": s.TaskManagers,
+		"task_manager_cpu": s.TaskManagerCPU, "task_manager_memory": s.TaskManagerMemory, "slots": s.Slots, "readers": s.Readers}
 }
 
 func sizeFromArtifact(raw any) (engine.FlinkSize, bool) {
@@ -133,6 +213,8 @@ type ClusterPreview struct {
 	Need  Need
 	Node  engine.Node
 	Check *checks.Check
+	// Streaming is the shape once the first copy is done (nil without a streaming slot size).
+	Streaming *engine.Packed
 }
 
 // PreviewCluster packs c for p's runtime as a deploy would now (pure: nothing is stored).
@@ -148,6 +230,10 @@ func PreviewCluster(ctx context.Context, q db.Querier, p *models.Pipeline, c *do
 	spec := domain.DefaultSpec()
 	spec.Policies.Resources, spec.FlinkCDC.Cluster = "custom", c
 	packed := FlinkSizeOf(&models.Pipeline{Artifacts: db.Map{}}, spec, capacity)
-	return &ClusterPreview{Size: packed.Size, Why: packed.Why, Need: FlinkNeed(packed.Size), Node: NodeOf(capacity),
-		Check: flinkClusterFitCheck(spec, packed, capacity)}, nil
+	out := &ClusterPreview{Size: packed.Size, Why: packed.Why, Need: FlinkNeed(packed.Size), Node: NodeOf(capacity),
+		Check: flinkClusterFitCheck(spec, packed, capacity)}
+	if s, ok := StreamingSizeOf(spec, capacity); ok {
+		out.Streaming = &s
+	}
+	return out, nil
 }

@@ -130,6 +130,10 @@ src/
   the words), why it splits, the total against the largest node and the fit check. `flinkSpecBlock`
   writes the cluster in `dumpCluster` order. Readers are locked while a deployed pipeline has a
   current saved position (`useSavedPositions`), as preflight's `flink_readers_changed` is.
+  "Shrink after the first copy" sets `streaming_slot` (lists stop at the copy size,
+  `streamingError` mirrors decodeCluster) and shows both diagrams with the peak and streaming
+  totals. The Overview's cluster card reads `artifacts.flink_shape` (`shapeView`) and offers Shrink
+  now under the `suggest` policy.
 - `SchemaForm` renders descriptor JSON Schemas (connections, a sink's pipeline options): `ui.group`,
   `ui.expert`, `ui.labels` / `ui.descriptions` for enum values and `ui.when` (shown only while other
   fields hold listed values; hidden fields are dropped by `cleanValues`; `context` passes the sibling

@@ -14,7 +14,10 @@ import (
 type FlinkCluster struct {
 	Parallelism int      `json:"parallelism"`
 	Slot        SlotSize `json:"slot"`
-	JobManager  SlotSize `json:"job_manager"`
+	// StreamingSlot is what each slot needs once the first copy is done (no bigger than Slot):
+	// BeziSync then repacks the cluster for it. Nil: the copy size throughout.
+	StreamingSlot *SlotSize `json:"streaming_slot"`
+	JobManager    SlotSize  `json:"job_manager"`
 	// Shape is "auto" or "manual" (TaskManagers then set).
 	Shape        string              `json:"shape"`
 	TaskManagers *ManualTaskManagers `json:"task_managers"`
@@ -56,6 +59,10 @@ func (c *FlinkCluster) clone() *FlinkCluster {
 		return nil
 	}
 	out := *c
+	if c.StreamingSlot != nil {
+		s := *c.StreamingSlot
+		out.StreamingSlot = &s
+	}
 	if c.TaskManagers != nil {
 		tm := *c.TaskManagers
 		out.TaskManagers = &tm
@@ -112,6 +119,10 @@ func decodeCluster(v *val.V, loc val.Loc, raw any) *FlinkCluster {
 	} else {
 		out.Slot = sizeIn(v, f.Loc, f.Raw, "SlotSize", MinSlotCPU, MaxSlotCPU, MinSlotMemory, MaxSlotMemory)
 	}
+	if f := o.Get("streaming_slot"); f.Present && !f.IsNull() {
+		s := sizeIn(v, f.Loc, f.Raw, "SlotSize", MinSlotCPU, MaxSlotCPU, MinSlotMemory, MaxSlotMemory)
+		out.StreamingSlot = &s
+	}
 	if f := o.Get("job_manager"); !f.Present {
 		v.Fail(f.Loc, "missing", "Field required")
 	} else {
@@ -152,6 +163,17 @@ func decodeCluster(v *val.V, loc val.Loc, raw any) *FlinkCluster {
 		v.ValueError(o.Loc().Add("task_managers"), "a manual shape needs task_managers")
 	case out.Shape == "auto" && out.TaskManagers != nil:
 		v.ValueError(o.Loc().Add("task_managers"), "task_managers is for a manual shape only")
+	case out.Shape == "manual" && out.StreamingSlot != nil:
+		v.ValueError(o.Loc().Add("streaming_slot"), "a manual shape is never resized: remove streaming_slot or use the automatic shape")
+	case out.StreamingSlot != nil:
+		// Shrinking must never grow (R33), and the same size is nothing to shrink to.
+		cpu, okC := ParseCPUAny(out.Slot.CPU)
+		mem, okM := ParseMemoryAny(out.Slot.Memory)
+		scpu, okSC := ParseCPUAny(out.StreamingSlot.CPU)
+		smem, okSM := ParseMemoryAny(out.StreamingSlot.Memory)
+		if okC && okM && okSC && okSM && (scpu > cpu || smem > mem || (scpu == cpu && smem == mem)) {
+			v.ValueError(o.Loc().Add("streaming_slot"), "streaming_slot is what each slot needs after the copy: smaller than slot in CPU or memory, never bigger")
+		}
 	case out.TaskManagers != nil && out.TaskManagers.Count > 0 && out.TaskManagers.Slots > 0:
 		tm := out.TaskManagers
 		if tm.Count*tm.Slots < out.Parallelism {
@@ -166,7 +188,11 @@ func decodeCluster(v *val.V, loc val.Loc, raw any) *FlinkCluster {
 
 func dumpCluster(c *FlinkCluster) *om.Map {
 	size := func(s SlotSize) *om.Map { return om.New().Set("cpu", s.CPU).Set("memory", s.Memory) }
-	m := om.New().Set("parallelism", c.Parallelism).Set("slot", size(c.Slot)).Set("job_manager", size(c.JobManager)).Set("shape", c.Shape)
+	m := om.New().Set("parallelism", c.Parallelism).Set("slot", size(c.Slot))
+	if c.StreamingSlot != nil {
+		m.Set("streaming_slot", size(*c.StreamingSlot))
+	}
+	m.Set("job_manager", size(c.JobManager)).Set("shape", c.Shape)
 	if c.TaskManagers != nil {
 		tm := c.TaskManagers
 		m.Set("task_managers", om.New().Set("count", tm.Count).Set("slots", tm.Slots).Set("cpu", tm.CPU).Set("memory", tm.Memory))

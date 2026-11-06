@@ -67,6 +67,24 @@ export function clusterFromPreset(size: Schemas['FlinkSize'] | undefined): Flink
   };
 }
 
+/** A streaming slot size that starts below the copy slot: about half, never bigger. */
+export function streamingFrom(slot: { cpu: string; memory: string }): { cpu: string; memory: string } {
+  const cpu = Math.max(250, Math.floor((Number(slot.cpu) * 1000) / 2 / 250) * 250);
+  const mem = Math.max(512, Math.floor(mib(slot.memory) / 2 / 256) * 256);
+  return { cpu: String(cpu / 1000), memory: mem % 1024 === 0 ? `${mem / 1024}Gi` : `${mem}Mi` };
+}
+
+/** Why a streaming slot size can't be used (mirrors decodeCluster); null when it can. */
+export function streamingError(c: FlinkCluster): string | null {
+  const s = c.streaming_slot;
+  if (!s) return null;
+  const bigger = Number(s.cpu) > Number(c.slot.cpu) || mib(s.memory) > mib(c.slot.memory);
+  const same = Number(s.cpu) === Number(c.slot.cpu) && mib(s.memory) === mib(c.slot.memory);
+  if (bigger) return 'While streaming a reader needs no more than while copying.';
+  if (same) return 'The same size as while copying: there is nothing to shrink to.';
+  return null;
+}
+
 /** Why a manual shape can't hold the readers (mirrors decodeCluster); null when it can. */
 export function manualError(c: FlinkCluster): string | null {
   const tm = c.task_managers;

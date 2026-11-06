@@ -272,6 +272,8 @@ type fakeDriver struct {
 	ImagePull string
 	// Cap is what the runtime reports as its capacity (Test and Capacity); nil: 4 CPUs only.
 	Cap map[string]any
+	// FlinkStatus is the helper's /bz/status body ("": {"phase": "running"}).
+	FlinkStatus string
 }
 
 func (d *fakeDriver) capacity() map[string]any {
@@ -343,6 +345,11 @@ func (d *fakeDriver) HTTPGet(_ context.Context, _ string, port int, path string,
 		return 200, d.Metrics, nil
 	}
 	if path == "/bz/status" {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if d.FlinkStatus != "" {
+			return 200, d.FlinkStatus, nil
+		}
 		return 200, `{"phase": "running"}`, nil
 	}
 	return d.Health[0].(int), d.Health[1].(string), nil

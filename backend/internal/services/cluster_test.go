@@ -52,7 +52,7 @@ func TestFlinkSizeOf(t *testing.T) {
 	if m.Size.TaskManagers != 2 || m.Size.Slots != 2 || m.Size.Readers != 4 || m.Size.TaskManagerMemory != "3Gi" {
 		t.Fatalf("%+v", m)
 	}
-	applyFlinkShape(p, manual, nil)
+	applyFlinkShape(p, manual, nil, false)
 	if _, ok := p.Artifacts[ArtifactFlinkShape]; ok {
 		t.Fatal("a manual shape stores nothing")
 	}
@@ -63,7 +63,7 @@ func TestFlinkSizeOf(t *testing.T) {
 func TestFlinkShapeStoredAtDeploy(t *testing.T) {
 	spec := customFlink(6, "1", "2Gi")
 	p := &models.Pipeline{Artifacts: db.Map{"other": "kept"}}
-	applyFlinkShape(p, spec, nodes(4, 8))
+	applyFlinkShape(p, spec, nodes(4, 8), false)
 	// As the database returns it: JSON numbers.
 	raw, _ := json.Marshal(p.Artifacts)
 	p.Artifacts = db.Map{}
@@ -83,11 +83,11 @@ func TestFlinkShapeStoredAtDeploy(t *testing.T) {
 		t.Fatalf("%+v", got.Size)
 	}
 	// Redeploying repacks for today's nodes; going back to a preset forgets the shape.
-	applyFlinkShape(p, spec, nodes(64, 256))
+	applyFlinkShape(p, spec, nodes(64, 256), false)
 	if got := FlinkSizeOf(p, spec, nil); got.Size.TaskManagers != 1 || got.Size.Slots != 6 {
 		t.Fatalf("%+v", got.Size)
 	}
-	applyFlinkShape(p, domain.DefaultSpec(), nil)
+	applyFlinkShape(p, domain.DefaultSpec(), nil, false)
 	if _, ok := p.Artifacts[ArtifactFlinkShape]; ok {
 		t.Fatal(p.Artifacts)
 	}
