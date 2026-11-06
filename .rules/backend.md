@@ -332,6 +332,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   tables `offsets_<id>` / `history_<id>`). `config_hash` is computed with Python's `json.dumps`
   semantics (`pyjson`) so it matches what the Python releases stored: a hash change restarts connectors.
 - Debezium 3.7 keeps its SMTs in `lib_opt/`; workloads always set `ENABLE_DEBEZIUM_SCRIPTING=true`.
+- The settings registry (`engine/settings.go`): every option a pipeline may tune, for both engines,
+  as `engine.Setting` (engine, scope, stage, type and bounds, default, why, the source or destination
+  types it applies to, and its `Impact`: live, restart, first_copy, next_copy, breaks_positions).
+  `SettingsFor`, `SettingOf` and `CheckSetting` are the only way to read and check one; the Flink
+  settings (`flink_conf`) are its engine-scoped Flink CDC entries. `CheckSetting` must keep accepting
+  what it accepted before (the compiler re-checks deployed specs on every reconcile).
 - Transforms (`domain/transforms.go`, `compiler/transforms.go`): `spec.transforms` steps are
   `unwrap`, `filter`, `outbox` (the Python types: fixed four-field dump) and the typed `rename`,
   `add_field`, `flatten`, `custom`; filters are either typed (`operations` + `rules`) or a raw

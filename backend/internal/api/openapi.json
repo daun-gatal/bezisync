@@ -2835,8 +2835,36 @@
             "title": "Choices",
             "type": "array"
           },
+          "connectors": {
+            "description": "Source or destination types it applies to (absent: every one).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Connectors",
+            "type": "array"
+          },
           "default": {
             "title": "Default",
+            "type": "string"
+          },
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
+            "type": "string"
+          },
+          "impact": {
+            "description": "What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.",
+            "enum": [
+              "live",
+              "restart",
+              "first_copy",
+              "next_copy",
+              "breaks_positions"
+            ],
+            "title": "Impact",
             "type": "string"
           },
           "key": {
@@ -2851,6 +2879,27 @@
             "title": "Min",
             "type": "string"
           },
+          "scope": {
+            "description": "Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.",
+            "enum": [
+              "engine",
+              "source",
+              "sink",
+              "pipeline"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "snapshot",
+              "streaming",
+              "delivery",
+              "engine"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2860,7 +2909,8 @@
               "duration",
               "int",
               "fraction",
-              "enum"
+              "enum",
+              "bool"
             ],
             "title": "Type",
             "type": "string"
@@ -2871,6 +2921,10 @@
           }
         },
         "required": [
+          "engine",
+          "scope",
+          "stage",
+          "impact",
           "key",
           "title",
           "type",
@@ -2878,7 +2932,8 @@
           "why"
         ],
         "title": "FlinkSetting",
-        "type": "object"
+        "type": "object",
+        "description": "A tunable setting of the registry (both engines)."
       },
       "FlinkSize": {
         "properties": {

@@ -3228,25 +3228,55 @@ export interface components {
              */
             schema_changes?: ("apply" | "ignore" | "stop") | null;
         };
-        /** FlinkSetting */
+        /**
+         * FlinkSetting
+         * @description A tunable setting of the registry (both engines).
+         */
         FlinkSetting: {
             /** Choices */
             choices?: string[];
+            /**
+             * Connectors
+             * @description Source or destination types it applies to (absent: every one).
+             */
+            connectors?: string[];
             /** Default */
             default: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
+            /**
+             * Impact
+             * @description What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.
+             * @enum {string}
+             */
+            impact: "live" | "restart" | "first_copy" | "next_copy" | "breaks_positions";
             /** Key */
             key: string;
             /** Max */
             max?: string;
             /** Min */
             min?: string;
+            /**
+             * Scope
+             * @description Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.
+             * @enum {string}
+             */
+            scope: "engine" | "source" | "sink" | "pipeline";
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "snapshot" | "streaming" | "delivery" | "engine";
             /** Title */
             title: string;
             /**
              * Type
              * @enum {string}
              */
-            type: "duration" | "int" | "fraction" | "enum";
+            type: "duration" | "int" | "fraction" | "enum" | "bool";
             /** Why */
             why: string;
         };

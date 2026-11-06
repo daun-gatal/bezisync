@@ -5,9 +5,10 @@ import { flinkChoices, type FlinkChoices } from '@/lib/engines';
 import { FlinkRunSettings } from '../FlinkSettings';
 import { flinkSizeHelp } from '../ReviewStep';
 
+const tags = { engine: 'flink-cdc' as const, scope: 'engine' as const, stage: 'engine' as const, impact: 'restart' as const };
 const catalogue = [
-  { key: 'restart-strategy.type', title: 'Restart strategy', type: 'enum' as const, default: 'exponential-delay', choices: ['exponential-delay', 'fixed-delay'], why: 'How it restarts.' },
-  { key: 'pekko.ask.timeout', title: 'Internal call timeout', type: 'duration' as const, default: '10 s', min: '10s', max: '10m', why: 'Waits.' },
+  { ...tags, key: 'restart-strategy.type', title: 'Restart strategy', type: 'enum' as const, default: 'exponential-delay', choices: ['exponential-delay', 'fixed-delay'], why: 'How it restarts.' },
+  { ...tags, key: 'pekko.ask.timeout', title: 'Internal call timeout', type: 'duration' as const, default: '10 s', min: '10s', max: '10m', why: 'Waits.' },
 ];
 
 function Harness({ sinkType, expert, onValue }: { sinkType: string; expert: boolean; onValue: (v: FlinkChoices) => void }) {
