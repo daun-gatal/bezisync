@@ -30,6 +30,8 @@ export interface FullSpec {
   advanced: Record<string, string>;
   /** Typed settings from the registry (GET /engines), key → canonical value; absent = none. */
   tuning?: Record<string, string>;
+  /** The runtime's placement profile the pods run with (Kubernetes); dumped only when set. */
+  placement?: string;
   /** Connector value encodings; absent = connector defaults. */
   values?: ValueFormats;
   /** Message key columns per captured table; absent = primary keys. On Flink CDC: the

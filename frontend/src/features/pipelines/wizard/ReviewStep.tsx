@@ -94,6 +94,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const [canary, setCanary] = useState(spec.policies.delivery_canary);
   const [rawRows, setRawRows] = useState<RawRow[]>(Object.entries(spec.advanced).map(([key, value]) => ({ key, value })));
   const [tuning, setTuning] = useState<Record<string, string>>(spec.tuning ?? {});
+  const [placement, setPlacement] = useState(spec.placement ?? '');
   const [force, setForce] = useState(false);
   const [reason, setReason] = useState('');
   const { save, pending: saving, error: saveError } = useSaveSpec(pipeline);
@@ -163,6 +164,9 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   // tuning is dumped last, and only when set: the same here, or the draft never matches.
   delete nextSpec.tuning;
   if (Object.keys(tuning).length) nextSpec.tuning = jsonbSorted(tuning);
+  // placement is dumped after tuning, and only when set.
+  delete nextSpec.placement;
+  if (placement) nextSpec.placement = placement;
   const body: SaveBody = {
     ...(slugify(name) !== pipeline.name && !deployed ? { name: slugify(name) } : {}),
     owner,
@@ -237,6 +241,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             : !report?.ok
               ? 'The final checks must pass.'
               : null;
+  // The chosen runtime's placement profiles (Kubernetes runtimes only have them).
+  const profiles = (runtimes.data ?? []).find((r) => r.id === runtimeId)?.placement_profiles ?? [];
   const runtimeOptions = (runtimes.data ?? []).map((r) => {
     const allowed = allows(policies?.allowed_runtime_ids, r.id);
     const why = !allowed ? 'Not allowed by this project’s policy.' : !r.enabled ? 'Turned off by an Admin.' : null;
@@ -312,6 +318,29 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               )
             }
           </Field>
+          {profiles.length || placement ? (
+            <Field
+              label="Placement"
+              hint="Where on the runtime its pods run: a profile its Admins set (nodes, tolerations, priority)."
+              error={placement && !profiles.some((x) => x.name === placement) ? `This runtime has no profile ${placement}.` : null}
+            >
+              {(id) => (
+                <Select
+                  id={id}
+                  value={placement}
+                  onChange={setPlacement}
+                  options={[
+                    { value: '', label: 'Anywhere', description: 'No placement profile' },
+                    ...profiles.map((x) => ({
+                      value: x.name,
+                      label: x.name,
+                      description: Object.entries(x.node_selector ?? {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'Any node',
+                    })),
+                  ]}
+                />
+              )}
+            </Field>
+          ) : null}
           {expert ? (
             <Field label="Latency target" hint="Above this, the pipeline is shown as Lagging.">
               {(id) => <Stepper id={id} value={latency} onChange={setLatency} min={1} max={3600} unit="seconds" />}

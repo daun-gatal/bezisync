@@ -4264,6 +4264,11 @@ export interface components {
             keys?: {
                 [key: string]: string[];
             };
+            /**
+             * Placement
+             * @description The runtime's placement profile the pods run with (Kubernetes); returned only when set.
+             */
+            placement?: string;
             policies?: components["schemas"]["Policies"];
             sink?: components["schemas"]["SinkSpec"];
             snapshot?: components["schemas"]["SnapshotSpec"];
@@ -4306,6 +4311,35 @@ export interface components {
             /** Sink Id */
             sink_id?: string | null;
             spec?: components["schemas"]["PipelineSpec"] | null;
+        };
+        /**
+         * PlacementProfile
+         * @description Where a Kubernetes runtime's pipelines may run: values are taken as they are (no ${…} or {{…}}), label keys and values are Kubernetes names, and BeziSync's own pod labels can't be set.
+         */
+        PlacementProfile: {
+            /**
+             * Labels
+             * @description Added to the pods.
+             */
+            labels?: {
+                [key: string]: string;
+            };
+            /**
+             * Name
+             * @description What a pipeline's spec.placement names: lowercase letters, digits and dashes.
+             */
+            name: string;
+            /** Node Selector */
+            node_selector?: {
+                [key: string]: string;
+            };
+            /**
+             * Priority Class
+             * @default
+             */
+            priority_class: string;
+            /** Tolerations */
+            tolerations?: components["schemas"]["Toleration"][];
         };
         /** Policies */
         Policies: {
@@ -4794,6 +4828,11 @@ export interface components {
             mode: "direct" | "agent";
             /** Name */
             name: string;
+            /**
+             * Placement Profiles
+             * @description Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.
+             */
+            placement_profiles?: components["schemas"]["PlacementProfile"][];
             /** Secrets */
             secrets?: {
                 [key: string]: unknown;
@@ -4873,6 +4912,11 @@ export interface components {
             name: string;
             /** Pipelines */
             pipelines: number;
+            /**
+             * Placement Profiles
+             * @description Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.
+             */
+            placement_profiles: components["schemas"]["PlacementProfile"][];
             /** Secret Fields Set */
             secret_fields_set: string[];
             /** Version */
@@ -4906,6 +4950,11 @@ export interface components {
             enabled?: boolean | null;
             /** Name */
             name?: string | null;
+            /**
+             * Placement Profiles
+             * @description Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.
+             */
+            placement_profiles?: components["schemas"]["PlacementProfile"][];
             /** Secrets */
             secrets?: {
                 [key: string]: unknown | null;
@@ -5835,6 +5884,33 @@ export interface components {
             read_only: boolean;
             /** Token */
             token?: string | null;
+        };
+        /** Toleration */
+        Toleration: {
+            /**
+             * Effect
+             * @description NoSchedule, PreferNoSchedule, NoExecute, or empty: any.
+             * @default
+             * @enum {string}
+             */
+            effect: "" | "NoSchedule" | "PreferNoSchedule" | "NoExecute";
+            /**
+             * Key
+             * @description The taint's key; empty with Exists tolerates every taint.
+             * @default
+             */
+            key: string;
+            /**
+             * Operator
+             * @enum {string}
+             */
+            operator: "Equal" | "Exists";
+            /**
+             * Value
+             * @description With Equal only.
+             * @default
+             */
+            value: string;
         };
         /** Transform */
         Transform: {

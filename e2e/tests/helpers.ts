@@ -54,8 +54,8 @@ export class Api {
     return this.ctx.fetch(path, { method, data });
   }
 
-  async raw(method: string, path: string, data?: unknown) {
-    return this.ctx.fetch(path, { method, data, headers: { 'x-csrf-token': this.csrf } });
+  async raw(method: string, path: string, data?: unknown, headers: Record<string, string> = {}) {
+    return this.ctx.fetch(path, { method, data, headers: { 'x-csrf-token': this.csrf, ...headers } });
   }
 }
 

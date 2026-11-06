@@ -1876,6 +1876,20 @@
    ]
   },
   {
+   "code": "placement",
+   "section": "Deploy",
+   "titles": [
+    "Placement"
+   ],
+   "whys": [
+    "The pipeline's pods run with one of its runtime's placement profiles (node selector, tolerations, priority class, labels). It blocks when the runtime has no such profile, when no schedulable node takes these pods, or when the runtime's agent can't apply placement; it is unknown when the runtime doesn't list its nodes."
+   ],
+   "fixes": [
+    "Choose one of the runtime's profiles in Review.",
+    "Ask the runtime's Admin to fix the profile, or label or untaint nodes for it."
+   ]
+  },
+  {
    "code": "runtime_ready",
    "fixes": [],
    "section": "Deploy",

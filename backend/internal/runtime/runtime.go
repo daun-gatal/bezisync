@@ -50,6 +50,9 @@ type Workload struct {
 	// StopGraceSeconds is how long a stop may take before the container is killed (0: 30). A
 	// Flink CDC JobManager saves its position in that time.
 	StopGraceSeconds int `json:"stop_grace_seconds,omitempty"`
+	// Placement is the placement profile the pipeline runs with (Kubernetes only; nil: none).
+	// Agents without FeaturePlacement would ignore it, so preflight refuses them.
+	Placement *Placement `json:"placement,omitempty"`
 }
 
 // FlinkTopology is a Flink CDC pipeline's cluster: one JobManager and TaskManagers, all from Image.

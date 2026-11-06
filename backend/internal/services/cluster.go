@@ -225,7 +225,12 @@ func PreviewCluster(ctx context.Context, q db.Querier, p *models.Pipeline, c *do
 		if err != nil {
 			return nil, err
 		}
-		capacity = rt.Capacity
+		// The nodes the pipeline's placement profile can use (its current version's).
+		current, err := SpecOf(ctx, q, p.CurrentVersionID)
+		if err != nil {
+			return nil, err
+		}
+		capacity = RuntimeCapacityFor(p, *current, rt)
 	}
 	spec := domain.DefaultSpec()
 	spec.Policies.Resources, spec.FlinkCDC.Cluster = "custom", c

@@ -10,6 +10,7 @@ import { CodeBlock, Confirm, Menu, Modal } from '@/components/ui/overlays';
 import { Select } from '@/components/ui/select';
 import { Meta, plural, Short } from '@/components/ui/text';
 import { cleanValues, defaultsOf, SchemaForm, type FormValues, type JsonSchema } from '@/components/SchemaForm';
+import { PlacementProfiles, profileError, type PlacementProfile } from './PlacementProfiles';
 import { client, unwrap, type Schemas } from '@/lib/api';
 import { ago, formatBytes, slugify } from '@/lib/format';
 import { shortImage } from '@/lib/debezium';
@@ -71,11 +72,12 @@ export function RuntimesSection() {
   const catalog = useCatalog();
   const [disabling, setDisabling] = useState<Runtime | null>(null);
   const [deleting, setDeleting] = useState<Runtime | null>(null);
-  const [edit, setEdit] = useState<{ name: string; defaultImage: string; config: FormValues; secrets: FormValues }>({
+  const [edit, setEdit] = useState<{ name: string; defaultImage: string; config: FormValues; secrets: FormValues; profiles: PlacementProfile[] }>({
     name: '',
     defaultImage: '',
     config: {},
     secrets: {},
+    profiles: [],
   });
   const [name, setName] = useState('');
   const [config, setConfig] = useState<FormValues>({});
@@ -148,7 +150,7 @@ export function RuntimesSection() {
   });
 
   function startEdit(rt: Runtime) {
-    setEdit({ name: rt.name, defaultImage: rt.default_image ?? '', config: rt.config as FormValues, secrets: {} });
+    setEdit({ name: rt.name, defaultImage: rt.default_image ?? '', config: rt.config as FormValues, secrets: {}, profiles: rt.placement_profiles ?? [] });
     setEditing(rt);
   }
 
@@ -164,6 +166,9 @@ export function RuntimesSection() {
         default_image: edit.defaultImage.trim() || null,
         config: cleanValues(editSchema, edit.config),
         ...(editing.mode === 'direct' ? { secrets: cleanValues(editDef.secret_schema as JsonSchema, edit.secrets, edit.config) } : {}),
+        ...(editing.kind === 'kubernetes' && JSON.stringify(edit.profiles) !== JSON.stringify(editing.placement_profiles ?? [])
+          ? { placement_profiles: edit.profiles }
+          : {}),
       },
     });
   }
@@ -188,10 +193,10 @@ export function RuntimesSection() {
   const addMissing = !name.trim() ? 'Name the runtime.' : slugError(name, names);
   const editMissing = !edit.name.trim()
     ? 'Name the runtime.'
-    : slugError(
+    : (slugError(
         edit.name,
         names.filter((n) => n !== editing?.name),
-      );
+      ) ?? edit.profiles.map((p) => profileError(p, edit.profiles)).find(Boolean) ?? null);
   const [copied, setCopied] = useState(false);
 
   const manage = can('runtime.manage');
@@ -490,6 +495,7 @@ export function RuntimesSection() {
             ) : null}
           </>
         ) : null}
+        {editing?.kind === 'kubernetes' ? <PlacementProfiles value={edit.profiles} onChange={(profiles) => setEdit({ ...edit, profiles })} /> : null}
         <InlineError error={update.error} doing="Couldn’t save the runtime" />
       </Modal>
       <Confirm

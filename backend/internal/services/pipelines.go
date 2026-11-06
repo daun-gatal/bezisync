@@ -771,9 +771,16 @@ func CompileFor(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 		if err != nil {
 			return nil, err
 		}
-		return compiler.FromFlink(f), nil
+		c := compiler.FromFlink(f)
+		c.Placement = PlacementOf(p, spec, rt)
+		return c, nil
 	}
-	return compiler.Compile(cctx, src, snk, image)
+	c, err := compiler.Compile(cctx, src, snk, image)
+	if err != nil {
+		return nil, err
+	}
+	c.Placement = PlacementOf(p, spec, rt)
+	return c, nil
 }
 
 // WorkloadFor is the desired workload of a deployed pipeline (nil when never deployed).
@@ -824,12 +831,12 @@ func WorkloadFor(ctx context.Context, q db.Querier, p *models.Pipeline) (*runtim
 		return &runtime.Workload{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Image: c.Image, Env: c.Env, Files: files,
 			ConfigHash: c.ConfigHash(), Running: p.DesiredState == "running", ImagePullSecrets: pull, ServiceAccount: sa, Tunnel: c.Tunnel,
 			HealthPort: c.HealthPort, Engine: string(engine.FlinkCDC), Flink: c.Flink.Topology(config.Get().AgentImage),
-			StopGraceSeconds: compiler.FlinkStopGrace}, nil
+			StopGraceSeconds: compiler.FlinkStopGrace, Placement: c.Placement}, nil
 	}
 	return &runtime.Workload{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Image: c.Image, Properties: c.Render(),
 		Env: c.Env, Files: files, ConfigHash: c.ConfigHash(), CPU: fmt.Sprint(c.Resources["cpu"]), Memory: fmt.Sprint(c.Resources["memory"]),
 		Heap: fmt.Sprint(c.Resources["heap"]), Running: p.DesiredState == "running", ImagePullSecrets: pull, ServiceAccount: sa, Tunnel: c.Tunnel,
-		HealthPort: c.HealthPort}, nil
+		HealthPort: c.HealthPort, Placement: c.Placement}, nil
 }
 
 func cpuOf(v string) float64 { return runtime.QuantityCPU(v) }
@@ -977,7 +984,7 @@ func runningNeed(ctx context.Context, q db.Querier, p *models.Pipeline, rt *mode
 		return Need{}, err
 	}
 	if EngineOf(p) == engine.FlinkCDC {
-		return FlinkNeed(FlinkSizeOf(p, *deployed, rt.Capacity).Size), nil
+		return FlinkNeed(FlinkSizeOf(p, *deployed, RuntimeCapacityFor(p, *deployed, rt)).Size), nil
 	}
 	return DebeziumNeed(deployed.Policies), nil
 }
@@ -1084,16 +1091,18 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	capacity := capacityCheck(rt.Capacity, DebeziumNeed(spec.Policies), running, "")
 	var fit *checks.Check
 	if EngineOf(p) == engine.FlinkCDC {
-		packed := FlinkSizeOf(p, spec, rt.Capacity)
+		placed := RuntimeCapacityFor(p, spec, rt)
+		packed := FlinkSizeOf(p, spec, placed)
 		capacity = capacityCheck(rt.Capacity, FlinkNeed(packed.Size), running, flinkWhat(packed.Size))
-		fit = flinkClusterFitCheck(spec, packed, rt.Capacity)
+		fit = flinkClusterFitCheck(spec, packed, placed)
 	}
+	placement := placementCheck(p, spec, rt)
 	if c := capacity; c != nil {
 		// Appended after summarizing, like the Python report (no doc link, summary unchanged).
 		sections[2].Report.Checks = append(sections[2].Report.Checks, *c)
 	}
 	sinkDescriptor, _ := connectors.Describe("sink", sinkConn.Type)
-	for _, c := range []*checks.Check{PlatformCheck(rt.Capacity, sinkDescriptor), AgentHealthPortCheck(rt, sinkDescriptor), fit} {
+	for _, c := range []*checks.Check{PlatformCheck(rt.Capacity, sinkDescriptor), AgentHealthPortCheck(rt, sinkDescriptor), placement, fit} {
 		if c != nil {
 			sections[2].Report = checks.Summarize(append(sections[2].Report.Checks, *c), started)
 		}
@@ -1200,7 +1209,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		}
 	}
 	if flink {
-		c, err := flinkReadersCheck(ctx, q, p, spec, rt.Capacity)
+		c, err := flinkReadersCheck(ctx, q, p, spec, RuntimeCapacityFor(p, spec, rt))
 		if err != nil {
 			return nil, err
 		}
@@ -1328,11 +1337,9 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 		}
 	}
 	p.Artifacts = artifacts
+	applyPlacement(p, domain.MustSpec(map[string]any(v.Spec)), rt)
 	if EngineOf(p) == engine.FlinkCDC {
-		var capacity map[string]any
-		if rt != nil {
-			capacity = rt.Capacity
-		}
+		capacity := RuntimeCapacityFor(p, domain.MustSpec(map[string]any(v.Spec)), rt)
 		// Tables added to a running pipeline are copied while it streams: it grows back for that.
 		applyFlinkShape(p, domain.MustSpec(map[string]any(v.Spec)), capacity, previous != nil && len(report.Change.TablesAdded) == 0)
 	}
@@ -1618,7 +1625,7 @@ func PolicyChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec do
 	var capacity map[string]any
 	if p.RuntimeID != nil {
 		if rt, err := GetRuntime(ctx, q, *p.RuntimeID); err == nil && rt != nil {
-			capacity = rt.Capacity
+			capacity = RuntimeCapacityFor(p, spec, rt)
 		}
 	}
 	if extra := resourcePolicyChecks(p, rules, spec, FootprintOf(p, spec, capacity)); len(extra) > 0 {

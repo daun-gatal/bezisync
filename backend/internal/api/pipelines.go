@@ -131,7 +131,7 @@ func pipelineRead(ctx context.Context, q db.Querier, p *models.Pipeline, withSpe
 		var capacity map[string]any
 		if eng == engine.FlinkCDC && spec.Policies.Resources == "custom" && p.RuntimeID != nil {
 			if full, err := services.GetRuntime(ctx, q, *p.RuntimeID); err == nil && full != nil {
-				capacity = full.Capacity
+				capacity = services.RuntimeCapacityFor(p, spec, full)
 			}
 		}
 		f := services.FootprintOf(p, spec, capacity)

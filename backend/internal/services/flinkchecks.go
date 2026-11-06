@@ -25,7 +25,7 @@ func FlinkChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec dom
 	if c := flinkAgentCheck(rt); c != nil {
 		out = append(out, *c)
 	}
-	packed := FlinkSizeOf(p, spec, rt.Capacity)
+	packed := FlinkSizeOf(p, spec, RuntimeCapacityFor(p, spec, rt))
 	if c := flinkServicesCheck(ctx, q, rt); c != nil {
 		out = append(out, *c)
 	}

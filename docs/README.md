@@ -481,6 +481,13 @@ hold the rest.
 - **Edit** — name, settings, credentials (write-only: leave a secret empty to keep it) and the
   default Debezium image. Changing where a runtime points needs its running pipelines paused first.
   Pipeline manifests refer to runtimes by name, so update them after a rename.
+- **Placement profiles** (Kubernetes, in Edit) — named places pipelines may run: a node selector,
+  tolerations, a priority class and pod labels, taken as they are (no `${…}` or `{{…}}`; Kubernetes
+  label names; BeziSync's own labels can't be set). A pipeline picks one in Review (`spec.placement`)
+  and keeps the profile it deployed with until its next deploy, so editing a profile restarts
+  nothing; one in use can't be removed (the error names its pipelines). Preflight's `placement`
+  check blocks a profile no schedulable node takes, or an agent too old to apply it, and a custom
+  Flink CDC cluster is packed for the largest node the profile can use. Docker runtimes have none.
 - **Disable / Enable** — disabling *cordons* the runtime: pipelines already on it keep running and
   can still be paused, resumed, restarted and snapshotted, but nobody can create, move or deploy
   pipelines onto it (a blocking `runtime_disabled` check). Both are audited.

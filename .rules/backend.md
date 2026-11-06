@@ -373,7 +373,14 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   (`policy_resource_limits`) on both engines, and `max_resources` for a custom Flink CDC cluster by
   the Flink preset's totals (`resourcePolicyChecks`; presets and Debezium sizes stay in
   `domain.EvaluatePolicies`). `max_resources` is not migrated into numbers: its presets mean other
-  totals on each engine, so any conversion would change which pipelines pass. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  totals on each engine, so any conversion would change which pipelines pass. Placement profiles
+  (`runtimes.placement_profiles`, migration 00009; `runtime.Placement`, `ValidatePlacement`) live
+  outside the schema-driven config, so editing them never needs pipelines paused; a pipeline's
+  `spec.placement` resolves through `services.PlacementOf` (the `placement` artifact Deploy stores
+  for its spec hash, else the runtime's profile now), goes into `Compiled.Placement` (in the config
+  hash only when set) and `Workload.Placement` (the Kubernetes driver's `applyPlacement`; agents
+  advertise `runtime.FeaturePlacement`). Packing sees `RuntimeCapacityFor`: the largest node the
+  profile accepts among the `nodes` the Kubernetes driver reports. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

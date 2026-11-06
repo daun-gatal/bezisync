@@ -2091,6 +2091,25 @@ Fix:
 In Tables, choose Mask or Remove for each listed column, or Keep as is when it may be sent.
 ```
 
+<a id="placement"></a>
+### `placement`
+
+**Placement**
+
+- Why: The pipeline's pods run with one of its runtime's placement profiles (node selector, tolerations, priority class, labels). It blocks when the runtime has no such profile, when no schedulable node takes these pods, or when the runtime's agent can't apply placement; it is unknown when the runtime doesn't list its nodes.
+
+Fix:
+
+```
+Choose one of the runtime's profiles in Review.
+```
+
+Fix:
+
+```
+Ask the runtime's Admin to fix the profile, or label or untaint nodes for it.
+```
+
 <a id="runtime-capacity"></a>
 ### `runtime_capacity`
 

@@ -133,6 +133,9 @@ type PipelineSpec struct {
 	// Tuning are typed settings from the registry (engine.SettingsFor), key → canonical value.
 	// Dumped only when set.
 	Tuning map[string]string `json:"tuning"`
+	// Placement names the runtime's placement profile the pipeline's pods run with (Kubernetes;
+	// "": none). Dumped only when set.
+	Placement string `json:"placement"`
 }
 
 // DefaultTransform is Transform(type=...) with defaults.
@@ -302,6 +305,9 @@ func (s PipelineSpec) Dump() *om.Map {
 		}
 		out.Set("tuning", tuning)
 	}
+	if s.Placement != "" {
+		out.Set("placement", s.Placement)
+	}
 	return out
 }
 
@@ -424,6 +430,14 @@ func decodeSpec(v *val.V, loc val.Loc, raw any) PipelineSpec {
 			}
 		}
 	}
+	if f := o.Get("placement"); f.Present && !f.IsNull() {
+		if s, ok := v.Str(f.Loc, f.Raw); ok {
+			if s != "" && !placementRe.MatchString(s) {
+				v.ValueError(f.Loc, "a placement profile's name: lowercase letters, digits and dashes, at most 63")
+			}
+			spec.Placement = s
+		}
+	}
 	if f := o.Get("values"); f.Present && !f.IsNull() {
 		spec.Values = decodeValues(v, f.Loc, f.Raw)
 	}
@@ -470,6 +484,8 @@ func decodeSpec(v *val.V, loc val.Loc, raw any) PipelineSpec {
 	}
 	return spec
 }
+
+var placementRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
 func contains(list []string, s string) bool {
 	for _, x := range list {

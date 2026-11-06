@@ -8,6 +8,7 @@ package compiler
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -22,6 +23,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
+	"github.com/daun-gatal/bezisync/backend/internal/runtime"
 )
 
 // Resource presets.
@@ -95,6 +97,9 @@ type Compiled struct {
 	// Managed are the properties BeziSync set before the spec's advanced ones: no advanced
 	// property may change them (ClassifyAdvanced). Not part of the config hash.
 	Managed map[string]bool
+	// Placement is the placement profile the pods run with (nil: none). Part of the config hash
+	// only when set, so pipelines without one keep theirs.
+	Placement *runtime.Placement
 }
 
 // Render is application.properties, or a Flink CDC pipeline's pipeline.yaml.
@@ -114,6 +119,28 @@ func FromFlink(f *FlinkCompiled) *Compiled {
 // ConfigHash identifies what the workload runs. It must stay byte-identical to the Python
 // implementation: json.dumps(…, sort_keys=True) with default separators.
 func (c *Compiled) ConfigHash() string {
+	base := c.baseHash()
+	if c.Placement == nil {
+		return base
+	}
+	// Through encoding/json: the profile's own field names, sorted by Dumps.
+	raw, err := json.Marshal(c.Placement)
+	if err != nil {
+		panic(err)
+	}
+	var placement any
+	if err := json.Unmarshal(raw, &placement); err != nil {
+		panic(err)
+	}
+	s, err := pyjson.Dumps(map[string]any{"h": base, "placement": placement})
+	if err != nil {
+		panic(err)
+	}
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func (c *Compiled) baseHash() string {
 	if c.Flink != nil {
 		return c.Flink.ConfigHash()
 	}

@@ -5319,6 +5319,11 @@
             "title": "Keys",
             "type": "object"
           },
+          "placement": {
+            "description": "The runtime's placement profile the pods run with (Kubernetes); returned only when set.",
+            "title": "Placement",
+            "type": "string"
+          },
           "policies": {
             "$ref": "#/components/schemas/Policies"
           },
@@ -5462,6 +5467,51 @@
           }
         },
         "title": "PipelineUpdate",
+        "type": "object"
+      },
+      "PlacementProfile": {
+        "additionalProperties": false,
+        "description": "Where a Kubernetes runtime's pipelines may run: values are taken as they are (no ${\u2026} or {{\u2026}}), label keys and values are Kubernetes names, and BeziSync's own pod labels can't be set.",
+        "properties": {
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Added to the pods.",
+            "title": "Labels",
+            "type": "object"
+          },
+          "name": {
+            "description": "What a pipeline's spec.placement names: lowercase letters, digits and dashes.",
+            "maxLength": 63,
+            "title": "Name",
+            "type": "string"
+          },
+          "node_selector": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Node Selector",
+            "type": "object"
+          },
+          "priority_class": {
+            "default": "",
+            "title": "Priority Class",
+            "type": "string"
+          },
+          "tolerations": {
+            "items": {
+              "$ref": "#/components/schemas/Toleration"
+            },
+            "maxItems": 20,
+            "title": "Tolerations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PlacementProfile",
         "type": "object"
       },
       "Policies": {
@@ -6693,6 +6743,15 @@
             "title": "Name",
             "type": "string"
           },
+          "placement_profiles": {
+            "description": "Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.",
+            "items": {
+              "$ref": "#/components/schemas/PlacementProfile"
+            },
+            "maxItems": 20,
+            "title": "Placement Profiles",
+            "type": "array"
+          },
           "secrets": {
             "additionalProperties": true,
             "title": "Secrets",
@@ -6888,6 +6947,15 @@
             "title": "Pipelines",
             "type": "integer"
           },
+          "placement_profiles": {
+            "description": "Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.",
+            "items": {
+              "$ref": "#/components/schemas/PlacementProfile"
+            },
+            "maxItems": 20,
+            "title": "Placement Profiles",
+            "type": "array"
+          },
           "secret_fields_set": {
             "items": {
               "type": "string"
@@ -6914,7 +6982,8 @@
           "last_seen_at",
           "capacity",
           "pipelines",
-          "version"
+          "version",
+          "placement_profiles"
         ],
         "title": "RuntimeRead",
         "type": "object"
@@ -6995,6 +7064,15 @@
               }
             ],
             "title": "Name"
+          },
+          "placement_profiles": {
+            "description": "Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.",
+            "items": {
+              "$ref": "#/components/schemas/PlacementProfile"
+            },
+            "maxItems": 20,
+            "title": "Placement Profiles",
+            "type": "array"
           },
           "secrets": {
             "anyOf": [
@@ -9264,6 +9342,48 @@
           "created_at"
         ],
         "title": "TokenRead",
+        "type": "object"
+      },
+      "Toleration": {
+        "additionalProperties": false,
+        "properties": {
+          "effect": {
+            "default": "",
+            "description": "NoSchedule, PreferNoSchedule, NoExecute, or empty: any.",
+            "enum": [
+              "",
+              "NoSchedule",
+              "PreferNoSchedule",
+              "NoExecute"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "key": {
+            "default": "",
+            "description": "The taint's key; empty with Exists tolerates every taint.",
+            "title": "Key",
+            "type": "string"
+          },
+          "operator": {
+            "enum": [
+              "Equal",
+              "Exists"
+            ],
+            "title": "Operator",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "description": "With Equal only.",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operator"
+        ],
+        "title": "Toleration",
         "type": "object"
       },
       "Transform": {

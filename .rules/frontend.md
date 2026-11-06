@@ -136,6 +136,9 @@ src/
   now under the `suggest` policy. Policies' Resources group edits `max_resources`,
   `resource_limits` (dropped when empty) and `shrink_after_copy` (left out when `auto`), and
   `blockedBy` counts each pipeline's server `footprint` (and the Flink presets for a custom cluster).
+- Placement (`settings/PlacementProfiles.tsx`): the Kubernetes runtime edit modal edits its profiles
+  (`profileError` blocks names and templates the server refuses); Review offers the chosen
+  runtime's profiles as Placement and writes `placement` after `tuning`, only when set.
 - `SchemaForm` renders descriptor JSON Schemas (connections, a sink's pipeline options): `ui.group`,
   `ui.expert`, `ui.labels` / `ui.descriptions` for enum values and `ui.when` (shown only while other
   fields hold listed values; hidden fields are dropped by `cleanValues`; `context` passes the sibling

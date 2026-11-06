@@ -226,6 +226,7 @@ func (k *KubernetesDriver) Apply(ctx context.Context, w Workload) error {
 			},
 		},
 	}
+	applyPlacement(dep, w.Placement)
 	files := map[string][]byte{}
 	for key, v := range w.Files {
 		files[key] = []byte(v)
@@ -557,6 +558,7 @@ func (k *KubernetesDriver) Capacity(ctx context.Context) map[string]any {
 	var allocCPU, nodeCPU float64
 	var allocMem, nodeMem int64
 	var archs []string
+	var infos []any
 	for _, n := range nodes.Items {
 		archs = append(archs, n.Status.NodeInfo.Architecture)
 		cpu := n.Status.Allocatable[corev1.ResourceCPU]
@@ -567,6 +569,19 @@ func (k *KubernetesDriver) Capacity(ctx context.Context) map[string]any {
 		// The largest node a pod can still land on: what a Flink CDC TaskManager must fit.
 		if !n.Spec.Unschedulable {
 			nodeCPU, nodeMem = max(nodeCPU, c), max(nodeMem, m)
+			// Each schedulable node's labels and taints: a placement profile packs for the
+			// largest node it can land on.
+			if len(infos) < MaxReportedNodes {
+				taints := []any{}
+				for _, t := range n.Spec.Taints {
+					taints = append(taints, map[string]any{"key": t.Key, "value": t.Value, "effect": string(t.Effect)})
+				}
+				labels := map[string]any{}
+				for k, v := range n.Labels {
+					labels[k] = v
+				}
+				infos = append(infos, map[string]any{"labels": labels, "taints": taints, "cpu": c, "memory": m})
+			}
 		}
 	}
 	pods, err := k.cs.CoreV1().Pods(k.namespace).List(ctx, metav1.ListOptions{LabelSelector: ManagedBy + "=bezisync"})
@@ -586,7 +601,10 @@ func (k *KubernetesDriver) Capacity(ctx context.Context) map[string]any {
 	}
 	out := map[string]any{"cpu_allocatable": allocCPU, "memory_allocatable": allocMem, "cpu_requested": reqCPU,
 		"memory_requested": reqMem, "workloads": len(pods.Items), "architectures": Architectures(archs...),
-		"node_cpu_max": nodeCPU, "node_memory_max": nodeMem}
+		"node_cpu_max": nodeCPU, "node_memory_max": nodeMem, "nodes": infos}
+	if infos == nil {
+		out["nodes"] = []any{}
+	}
 	for k, v := range k.quota(ctx) {
 		out[k] = v
 	}
