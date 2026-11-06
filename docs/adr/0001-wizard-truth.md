@@ -31,11 +31,11 @@ The wizard must show what the server saves and what the compiler runs. Three rep
    - Around it, the screen also disagrees with the compiler. On Debezium, `withSoftDelete` (`backend/internal/compiler/sinkcaps.go:84`) forces deletes to be rows marked `__deleted`, and inserts a "Row after change" step where none exists. The Transform step can still say "Full change envelope" or "deletes dropped", and Review's summary and the Overview page repeat it.
    - The client's ordering check (`stepErrors`) treats only `unwrap` as the event shape. The server treats the first stage-1 step as the shape (`backend/internal/domain/transforms.go:663-668`). So on Flink CDC, where there is usually no `unwrap`, the client accepts `[soft_delete, filter]` and the server refuses it.
 2. **Review switches between "Saving…" and "Not saved" forever.**
-   - The autosave effect re-runs whenever `saving` changes (`ReviewStep.tsx:196-203`). After a refused save, `saving` goes back to false, the draft is still unsaved, and the step saves again 800 ms later. That is about one request a second for as long as the page is open.
+   - The autosave effect re-runs whenever `saving` changes (`ReviewStep.tsx:196-203` before this fix, at `a80b84a`). After a refused save, `saving` goes back to false, the draft is still unsaved, and the step saves again 800 ms later. That is about one request a second for as long as the page is open.
    - Many things trigger it: a refused advanced key (`managed_property`), a tuning rule the client doesn't check, a 412 `version_conflict`, a network error, a 5xx.
    - The page already asks the server which raw keys are refused, but never uses the answer to stop a save, and doesn't ask at all in Guided mode.
 3. **"Not saved: fix the highlighted field" names no field.**
-   - The error chain at `ReviewStep.tsx:190` keeps only the first problem, and nothing says which field it is.
+   - The error chain at `ReviewStep.tsx:190` (before this fix) keeps only the first problem, and nothing says which field it is.
    - The Debezium custom-size error covers CPU and memory but sits only under CPU (`:392`). The Flink streaming-size and manual TaskManager errors also sit on one field each.
    - The Deploy reason says "Fix the highlighted settings first."
 4. **A blocking error can be on no visible field.** With Expert mode off, the Engine settings card isn't drawn, but its errors still block the save. With Expert on and no typed settings to offer, `SettingsEditor` isn't drawn, so an unknown saved setting blocks with nothing to remove.
@@ -55,7 +55,7 @@ The wizard must show what the server saves and what the compiler runs. Three rep
 - Any backend, API, OpenAPI or migration change, including a compiler fix for the ordering issue in Consequences.
 - Rewriting or reordering saved specs.
 - Changing `stageOf`, which mirrors `domain.Stage()`.
-- A form-error framework, or a shared autosave hook (only Review autosaves).
+- A form-error framework, or an autosave hook shared outside Review (only Review autosaves; its `useAutosave` lives next to its rules in `wizard/review.ts`).
 - Automatic retries or backoff.
 - Showing the full Engine settings editor in Guided mode.
 - Naming fields from the server's error locations (`errors[].loc`). See Future improvements.
@@ -73,7 +73,7 @@ The wizard must show what the server saves and what the compiler runs. Three rep
    - Removing the step shows "Drop delete events" again. The stored value was never changed.
 3. **Flink CDC, add Keep deleted rows, then a filter.** Both appear under Keep rows, the filter first. The draft saves.
 4. **A pipeline whose saved spec has `soft_delete` and no unwrap, or two `soft_delete` steps, is opened.** Every step is drawn with Remove, no save request is sent, and the version, spec and compiled config are unchanged.
-5. **A refused raw key in Review (Expert).** The user adds `debezium.format.value` = `json`, which is refused ("The event format is chosen on the Destination step", `compiler/advanced.go:166`).
+5. **A refused raw key in Review (Expert).** The user adds `debezium.format.value` = `json`, which is refused ("The event format is chosen on the Destination step", `compiler/advanced.go:171`).
    - The row turns red and the badge reads "Not saved: fix Advanced Debezium properties". Clicking the badge focuses the row's key.
    - The verdict usually arrives before the 800 ms autosave. If it doesn't, one save is refused and autosave pauses (journey 6).
    - Removing the row saves the draft, and the badge reads "All changes saved".
@@ -82,7 +82,7 @@ The wizard must show what the server saves and what the compiler runs. Three rep
    - No further request is sent until the draft changes, Try again is clicked, or the step is left.
 7. **An older pipeline holds a refused raw key with the same value; the user changes its owner.** The save goes through, the key's row stays red, and preflight still blocks the deploy.
 8. **Debezium custom size over the project limit.** A Memory above the limit shows its error under Memory, not CPU. The badge reads "Not saved: fix Memory", and clicking it focuses Memory. Flink cluster errors sit on their own fields in the same way.
-9. **A blocking setting in Guided mode.** A card "Settings that block saving" lists only the blocking rows, each with Remove, and says "Switch to Expert mode (account menu) to edit these." The badge names the row's section. After Remove, the draft saves.
+9. **A blocking setting in Guided mode.** A card "Settings that block saving" lists only the blocking rows, each with Remove, and says "Switch to Expert mode (account menu) to edit these." The badge names the first row (a setting by its title, an unknown one by its key; a raw property by its section), and clicking it focuses that row's Remove. After Remove, the draft saves.
 
 ## Decision
 
@@ -104,7 +104,7 @@ Every rule becomes a pure function with table tests. The components call it and 
 ### Fix A: the Review autosave never repeats a refused save
 
 **A1. Pause after a failure.**
-- ReviewStep keeps `failedSignature: string | null` in state, set to the body's signature when a save resolves false and cleared when one resolves true.
+- `useAutosave` (`wizard/review.ts`) keeps `failedSignature: string | null` in state, set to the body's signature when a save resolves false and cleared when one resolves true.
 - `paused = failedSignature !== null && signature === failedSignature`.
 - A pure `autosaveDecision({ dirty, saving, invalid, paused })` checks top to bottom, and the first match wins:
 
@@ -131,6 +131,7 @@ A 412 pauses like any other failure, and its message, "Someone else changed this
 | --- | --- |
 | "Saving…" | a save is in flight |
 | "Not saved: fix {fields}" (a button, Fix B) | the draft has a client-side problem |
+| "Fix {fields} before deploying" (the same button) | nothing is unsaved, but a stored value is a problem (for example a setting the project hid since) |
 | "Not saved" (with the server's message below) | paused |
 | "Saving soon…" | dirty, save scheduled |
 | "All changes saved" | clean |
@@ -168,11 +169,18 @@ Entries come in page order. These read the list:
 The server's error locations are not merged in (see Non-goals). Placement is never a problem, because preflight checks it.
 
 **B2. Each error on its own control.**
-- **Debezium custom size:** `customErrors(amount, max, min, sinkLabel)` returns `{ cpu?, memory? }`. Each amount is checked against the project's maximum and the destination's minimum on its own.
-- **Flink cluster:** `lib/cluster.ts` gains two functions. `streamingError` and `manualError` stay, returning the first message in the order CPU then memory, and TaskManagers then TaskManager memory. Their existing messages are unchanged, and `usePackCluster` keeps using them.
+- **Debezium custom size:** `customErrors(amount, max, min, sinkLabel)` returns `{ cpu?, memory? }`. Each amount is checked on its own, the maximum before the minimum: "This project allows at most {max.cpu} CPU." / "{sinkLabel} needs at least {min.cpu} CPU." on CPU, and "This project allows at most {max.mem} MiB." / "{sinkLabel} needs at least {min.mem} MiB." on Memory.
+- **Flink cluster:** `lib/cluster.ts` gains two functions. `streamingError` and `manualError` stay, returning the first message in the order CPU then memory, and TaskManagers then TaskManager memory. Their existing messages are unchanged; ReviewStep still uses them to decide when to ask the server to pack the cluster (`usePackCluster`).
   - **`streamingErrors(c)` → `{ cpu?, memory? }`.** It returns `{}` for a manual shape, which is never resized and whose streaming fields aren't drawn (`toManual` clears the streaming size). A bigger CPU goes on CPU and a bigger memory on memory. "The same size" (CPU and memory both equal) goes on both fields.
   - **`manualErrors(c)` → `{ taskManagers?, memory? }`.** It returns `{}` for an automatic shape. "Can't hold N readers" goes on TaskManagers, and "each slot needs at least 512 MiB" goes on TaskManager memory.
-- **`FlinkClusterEditor`** takes these errors as props instead of computing them again.
+- **`FlinkClusterEditor`** takes these errors as props instead of computing them again. One name per layer:
+
+| `lib/cluster.ts` | `ReviewField` | `FlinkClusterEditor` prop | Label |
+| --- | --- | --- | --- |
+| `streamingErrors().cpu` | `streaming-cpu` | `errors.streamingCpu` | Streaming reader CPU |
+| `streamingErrors().memory` | `streaming-memory` | `errors.streamingMemory` | Streaming reader memory |
+| `manualErrors().taskManagers` | `task-managers` | `errors.taskManagers` | TaskManagers |
+| `manualErrors().memory` | `tm-memory` | `errors.tmMemory` | TaskManager memory |
 
 **B3. Focus.**
 - Each control that can hold a problem sits in a `<div data-review-field="…">`. ReviewStep wraps its own fields, FlinkClusterEditor wraps the cluster fields, and the Engine settings and raw property fields are wrapped as whole sections.
@@ -182,7 +190,7 @@ The server's error locations are not merged in (see Non-goals). Placement is nev
 **B4. Never block on a field that isn't drawn.**
 - **Guided mode:** with Expert off and any `tuning` or `advanced` problem, a new `wizard/BlockingSettings.tsx` card titled "Settings that block saving" is drawn where the Engine settings card would be. It has one row per problem (key, message, Remove), plus "Switch to Expert mode (account menu) to edit these."
 - **Expert mode with nothing typed to offer:** when `tunable` is empty, the same rows are drawn inside the Engine settings card.
-- **Remove** deletes the key from `tuning` (rebuilt with `jsonbSorted`) or the row from `rawRows`.
+- **Remove** deletes the key from `tuning` (written with `jsonbSorted`, as always) or the last row with that key from `rawRows`. `BlockingSettings` wraps its setting rows in `data-review-field="tuning"` and its raw rows in `data-review-field="advanced"`, so the badge focuses the first row's Remove in Guided mode too.
 - **Everything else is drawn by construction:**
   - the custom-size fields are drawn whenever Size is Custom, which is the only time `customErrors` runs;
   - the streaming fields whenever the shape is automatic with a streaming size;
@@ -226,14 +234,14 @@ The server's error locations are not merged in (see Non-goals). Placement is nev
 - When the destination doesn't require the shape, the shape area draws "Row after change · Keep deleted rows needs it; BeziSync adds it". It has no Adjust: an Adjust would insert an unwrap in a different place and with different fields from the compiler's (`withShape` against `sinkcaps.go:96-97`), which changes `config_hash`. To edit that unwrap's options, remove Keep deleted rows, choose "Use the row after change", then add Keep deleted rows back.
 - When the destination requires the shape, the existing `shapeRequired` line stays, unchanged.
 
-**C5. What deletes really do.** `effectiveDeletes(steps, ctx)`, with `ctx = { flink, unwrap?: SinkUnwrap | null, options }`, mirrors `withSinkUnwrap` and then `withSoftDelete`, in that order (`compiler.go:303`). It returns `{ mode, by, step? }`, and the first row that matches wins:
+**C5. What deletes really do.** `effectiveDeletes(steps, options, ctx?)`, with `ShapeCtx = { flink?, unwrap?: SinkUnwrap | null, optionDefaults? }` (optional; the default is a Debezium destination with no rule), mirrors `withSinkUnwrap` and then `withSoftDelete`, in that order (`compiler.go:303`). `options` is each spec's own `sink.options`, read over `optionDefaults` (the option schema's defaults, as the compiler fills them in, `compiler.go:289`). It returns `{ mode, by, step? }`, and the first row that matches wins:
 
 | Case | `mode` | `by` |
 | --- | --- | --- |
 | Flink CDC with `soft_delete` | `op_marked` | `keep_deleted` |
 | Flink CDC otherwise | `flink_default` | `shape` |
 | Debezium with any `soft_delete` | `rewrite` | `keep_deleted`; `step` = the drawn number of the first one |
-| Debezium, unwrap present or required, and `unwrap.delete_handling_from` maps the destination option's value | the mapped value | `destination` |
+| Debezium, unwrap present, and `unwrap.delete_handling_from` maps the destination option's value | the mapped value | `destination` |
 | Debezium, unwrap present | its `delete_handling` (default `rewrite`) | `shape` |
 | Debezium, unwrap required but absent | `unwrap.delete_handling[0]` (default `rewrite`) | `shape` |
 | Debezium otherwise | `envelope` | `shape` |
@@ -241,10 +249,10 @@ The server's error locations are not merged in (see Non-goals). Placement is nev
 Keep deleted rows wins over the destination's Deletes option because `withSoftDelete` runs after `withSinkUnwrap`. The function reads these places:
 - **ShapeEditor:** while `by === 'keep_deleted'`, the Deletes select shows "Keep as an event with __deleted = true", disabled, with "Set by Keep deleted rows (step N). Remove that step to choose." It never writes `delete_handling`.
 - **`summarizeShape(steps, ctx)`:** the shape line in the Transform row and in Review's StepsSummary. When there is no unwrap and a `soft_delete` exists, StepsSummary says "Event shape: Row after change, added by BeziSync for Keep deleted rows."
-- **`outputImpact(before, after, ctx)`:** compares the effective shape (`envelope` against everything else) and the effective deletes. When only `soft_delete` was added or removed, only its own line shows, which today reads "Deleted rows now stay, marked deleted…".
-- **`transformView(spec, ctx)` (Overview):** with any `soft_delete`, it shows the row and "Deletes are kept, flagged `__deleted = true`" on Debezium, or "Deleted rows are kept, marked by their change type (`__op = -D`)" on Flink CDC.
+- **`outputImpact(before, after, ctx?)`:** compares the effective shape (`envelope` against everything else) and the effective deletes, each spec with its own options. Adding Keep deleted rows to an envelope pipeline shows "Events become the row after the change…" and its own "Deleted rows now stay, marked deleted…" line. When only `soft_delete` was added or removed on a pipeline that already had rows, only its own line shows.
+- **`transformView(spec, flink?, ctx?)` (Overview):** with any `soft_delete`, it shows the row and "Deletes are kept, flagged `__deleted = true`" on Debezium, or "Deleted rows are kept, marked by their change type (`__op = -D`)" on Flink CDC. It also follows the destination's Deletes option.
 
-`ctx` comes from the connector types the callers already load (`sinkCapsOf`), plus the spec's `sink.options`.
+Callers get `ctx` from `useShapeCtx(pipeline)` (`transforms/Impact.tsx`): the destination's connector type (`sinkCapsOf`) and its option schema's defaults. The Transform step builds the same from what it already loads and passes it to the editors (`EditorContext.shape`).
 
 **C6. Locks and their reasons** (a disabled control always says why):
 - **The add menu** offers `soft_delete` once: "Already added: see Event shape" on Debezium, or "see Keep rows" on Flink CDC.
@@ -283,7 +291,7 @@ This ADR and its index row ship in commit 1. `make verify-quick` runs `tsc`, `vi
 | `frontend/src/features/pipelines/wizard/__tests__/review.test.ts` (new) | Every `autosaveDecision` row and the precedence between rows. `useAutosave` under `renderHook` and fake timers: a `save` that always resolves false is called once in 10 s, once more after a change of signature, once more after Try again; a draft that becomes valid saves with no edit; `attempt` saves while paused; a clean draft never saves. `rawLabel`. |
 | `frontend/src/lib/__tests__/settings.test.ts` | `rawErrors`: a new refused key blocks; a stored refused key with the same value doesn't; a stored refused key with a changed value does; an allowed key doesn't; no verdict doesn't; a duplicate blocks; keys are trimmed. |
 | `e2e/tests/33-engine-settings.spec.ts` | Two new tests, below the table. |
-| `e2e/tests/32-flink-cdc.spec.ts` | In the test at `:191`, add one refused Flink option, `source.scan.startup.mode` = `x` ("Only jdbc.properties.* and debezium.* source options pass through", `compiler/flinkadvanced.go:61`). Expect the "Advanced Flink CDC options" label and at most one `PATCH` in 4 s. |
+| `e2e/tests/32-flink-cdc.spec.ts` | In the test at `:191`, after the refused catalog option it already types (`sink.catalog.properties.uri`), expect the "Advanced Flink CDC options" label and at most one `PATCH` in 4 s. |
 | `docs/adr/0001-wizard-truth.md`, `docs/adr/README.md` | This ADR and its index row. |
 | `frontend/src/features/pipelines/wizard/README.md` | Interface: `review.ts`. Invariants: the autosave pause, and when the next attempt happens; classification in both modes; a refused key blocks only when new or changed. |
 | `frontend/src/lib/README.md` | Interface: `rawErrors`. Invariants: it mirrors `RefuseNewAdvanced`'s new-or-changed rule. |
@@ -327,10 +335,10 @@ The two new tests in `33-engine-settings.spec.ts`:
 | `frontend/src/features/pipelines/wizard/__tests__/review.test.ts` | See the list below the table. |
 | `frontend/src/lib/__tests__/cluster.test.ts` | `streamingErrors`: bigger CPU only, bigger memory only, same size (both), manual (`{}`). `manualErrors`: too few slots, too little memory per slot, automatic (`{}`). The wrappers keep the existing cases green. |
 | `e2e/tests/33-engine-settings.spec.ts` | Two new tests, below the table. |
-| `e2e/tests/32-flink-cdc.spec.ts` | In the test at `:191`: set Streaming reader CPU and memory equal to the reader's CPU and memory. Expect errors on both streaming fields and the badge "Not saved: fix Streaming reader CPU and 1 more". |
+| `e2e/tests/32-flink-cdc.spec.ts` | In the test at `:191`, after the first "All changes saved" and before Manual: turn on "Shrink after the first copy", set Streaming reader CPU and memory equal to the reader's (0.5 CPU, 768 MiB), expect "nothing to shrink to" under both streaming fields and the badge "Not saved: fix Streaming reader CPU and 1 more", then turn the switch off and expect "All changes saved". |
 | `frontend/src/features/pipelines/wizard/README.md` | Interface: the new functions, `BlockingSettings`, and FlinkClusterEditor's `errors` prop. Invariants: every blocking problem has a drawn field in both modes; the badge, `deployWhy` and field errors read `reviewProblems`. This replaces the `tuningError` sentence. |
 | `frontend/src/lib/README.md` | Interface: `streamingErrors`, `manualErrors`. |
-| `.rules/frontend.md` | Next to the Engine settings rule (`:120`) and Guided against Expert (`:219-220`): Guided shows only the settings that block saving, with Remove; Expert shows the editor. |
+| `.rules/frontend.md` | Next to Guided against Expert (`:221-222` after commit 1): Guided never shows the raw editor, but a value that blocks saving is listed under "Settings that block saving" with Remove; an error names its field. |
 | `docs/README.md` | Review: the "Not saved: fix …" badge names the field and goes there on click (`:219`, `:240`). Guided mode lists settings that block saving. |
 | `changelogs/unreleased/wizard-fixes.md` | Add "Review says which field to fix". |
 
@@ -346,19 +354,21 @@ The `review.test.ts` cases:
 - `problemsSummary` with one problem and with three.
 - `focusReviewField` in jsdom: it focuses the `aria-invalid` input inside the wrapper, falls back to the first focusable element, and doesn't throw without `scrollIntoView`.
 
-The two new tests in `33-engine-settings.spec.ts`:
+The three new tests in `33-engine-settings.spec.ts`:
+- **"Try again saves once more after a network error":** abort the next `PATCH` with `page.route`, change Size, expect "Couldn't save your changes" and one `PATCH` in 3 s, click Try again, then expect "All changes saved" and two `PATCH`es in all (E4).
 - **"the badge names the field":**
   - set the project's `max_resources` to `small` through the policies API;
   - in Review (Expert), choose Size → Custom, then a Memory over the limit with CPU within it;
   - expect the error under Memory and none under CPU, and the badge "Not saved: fix Memory";
   - click the badge and expect focus inside Memory's control;
+  - at 390 px, expect `layoutProblems` to be empty and no serious `AxeBuilder` violation on the badge and the Memory field (E18);
   - keep `getByLabel('CPU', { exact: true })` (`:69-71`) working.
 - **"Guided mode lists settings that block saving":**
   - set a valid tuning value through the API;
   - hide that setting with a project `setting_limits` `hide` rule, so `ReviewStep.tsx:110` treats the stored key as unknown;
   - open Review in Guided mode;
-  - expect "Settings that block saving" with the key, and a badge naming it;
-  - click Remove, then expect "All changes saved".
+  - expect "Settings that block saving" with the key, and the badge "Fix {key} before deploying" (the value is stored, so nothing is unsaved);
+  - click the badge and expect focus on its Remove button; click Remove, then expect "All changes saved" and no `tuning` left.
 
 **Gate:** `make verify-quick`, then `make e2e-quick SPECS="tests/33-engine-settings.spec.ts tests/32-flink-cdc.spec.ts tests/16-accessibility.spec.ts tests/28-layout.spec.ts tests/12-self-service.spec.ts"`.
 
@@ -366,17 +376,17 @@ The two new tests in `33-engine-settings.spec.ts`:
 
 | File | Change |
 | --- | --- |
-| `frontend/src/features/pipelines/transforms/model.ts` | `shapeIndex`; `stepErrors` and `addStep` per C1 and C2; `sectionOf`, `drawOrder`, `effectiveDeletes`, `summarizeShape`; `outputImpact(before, after, ctx)` per C5; the Flink `soft_delete` summary text (C7). |
+| `frontend/src/features/pipelines/transforms/model.ts` | `shapeIndex`; `stepErrors` and `addStep` per C1 and C2; `sectionOf`, `drawOrder`, `ShapeCtx`, `effectiveDeletes`, `summarizeShape`; `outputImpact(before, after, ctx?)` per C5; the `soft_delete` summary says it keeps rows (C7). Existing calls without `ctx` keep compiling and their tests pass unchanged. |
 | `frontend/src/features/pipelines/transforms/TransformStep.tsx` | See the list below the table. |
 | `frontend/src/features/pipelines/transforms/editors.tsx` | ShapeEditor reads `effectiveDeletes(ctx.steps, …)` (C5). Add `SoftDeleteEditor`. |
 | `frontend/src/features/pipelines/transforms/Impact.tsx` | `OutputImpact` loads the connector types and passes `ctx` to `outputImpact`. `StepsSummary` takes `ctx` and uses `summarizeShape`. |
 | `frontend/src/features/pipelines/wizard/ReviewStep.tsx` | Pass `sinkCaps.unwrap` and the options to `StepsSummary`. |
-| `frontend/src/features/pipelines/page/overview.ts`, `page/Overview.tsx` | `transformView(spec, ctx)` (C5). `Overview.tsx:274` builds `ctx` from the connector types. |
+| `frontend/src/features/pipelines/page/overview.ts`, `page/Overview.tsx` | `transformView(spec, flink?, ctx?)` (C5). `Overview.tsx` passes `useShapeCtx(p)`. |
 | `frontend/src/features/pipelines/wizard/SinkStep.tsx` | The note (C8). |
 | `frontend/src/features/pipelines/transforms/__tests__/model.test.ts` | The cases listed below the table. |
 | `frontend/src/features/pipelines/__tests__/overview.test.ts` | `transformView` with `[soft_delete]` on Debezium says row plus deletes kept. Flink CDC with `soft_delete` says `__op = -D`. |
 | `e2e/tests/27-transforms.spec.ts` | Three changes, below the table. |
-| `e2e/tests/32-flink-cdc.spec.ts` | The test at `:89` creates `[soft_delete, route, computed]`. Open its Transform step, expect Keep deleted rows under "Keep rows", add a "Keep only some rows" filter, continue, then expect "All changes saved" and a saved chain starting `[filter, soft_delete, …]`. |
+| `e2e/tests/32-flink-cdc.spec.ts` | A new draft-only test (the deploy test at `:89` keeps its chain): on a new Flink CDC draft, add Keep deleted rows (Step 1, under Keep rows; the menu then says "Already added: see Keep rows."), then a "Keep only some rows" filter. Expect the filter as Step 1 and Keep deleted rows as Step 2, continue, then expect "All changes saved" and a saved chain `[filter, soft_delete]`. |
 | `frontend/src/features/pipelines/transforms/README.md` | Interface: the new functions and `SoftDeleteEditor`. Invariants: drawing (C3), placement (C2), `shapeIndex` and `effectiveDeletes` under "Mirrors of backend rules", and the removed known-issue sentence. |
 | `frontend/src/features/pipelines/wizard/README.md`, `page/README.md` | SinkStep's note. `transformView` reads `effectiveDeletes`. |
 | `ARCHITECTURE.md` | Delete Known issue 14, leaving the other numbers unchanged. Add a new row: "With a destination that requires the event shape (Iceberg), a chain with `soft_delete` and a field step but no explicit unwrap compiles the field step before the unwrap: `withSinkUnwrap` appends it at the end, then `withSoftDelete` drops the `soft_delete`. The wizard never builds such a chain; the API accepts it." Paths: `compiler/sinkcaps.go`, `compiler/compiler.go`. |
@@ -414,17 +424,17 @@ The `model.test.ts` cases, one table:
   - `[]` with no rule → `envelope`
   - two `soft_delete` steps → `step` is the first one's drawn number
 - **`outputImpact`:**
-  - adding `soft_delete` to an envelope chain gives the soft-delete line, and no line saying the shape changed or deletes changed;
+  - adding `soft_delete` to an envelope chain gives "Events become the row after the change…" and the soft-delete line, and no "Deletes change" line;
   - adding it to `unwrap(drop)` gives exactly one deletes line (a regression guard: it passes today).
 - **`summarizeShape`** with and without `soft_delete`.
 
 The three changes to `27-transforms.spec.ts`:
-- **Extend "an editor keeps deleted rows and cuts long text"** (`:323`):
-  - after adding Keep deleted rows, expect its row (region "Keep deleted rows") under the "Event shape" heading;
-  - open Row after change, set Deletes to "Drop delete events" (enabled before the add), then expect the select disabled with "Set by Keep deleted rows";
-  - expect "Use the full change envelope instead" disabled, and Add transform → Keep deleted rows disabled with "Already added";
-  - Remove it, and expect Deletes enabled showing "Drop delete events" and the saved spec to have no `soft_delete`;
-  - add it back for the rest of the test.
+- **Extend "an editor keeps deleted rows and cuts long text"** (`:323`), in this order:
+  1. open Row after change and set Deletes to "Drop delete events";
+  2. add Keep deleted rows, and expect its row as "Step 2: Keep deleted rows"; open Row after change again and expect the select disabled with "Set by Keep deleted rows (step 2). Remove that step to choose.";
+  3. expect "Use the full change envelope instead" disabled with "Keep deleted rows needs the row: remove it first.", and Add transform → Keep deleted rows disabled with "Already added: see Event shape.";
+  4. remove it, and expect Deletes enabled showing "Drop delete events";
+  5. add it back for the rest of the test; after Continue, the saved unwrap still has `delete_handling: drop`.
 - **A new test, "a saved Keep deleted rows without a shape is drawn and never re-saved":**
   - create through the API `transforms: [{type:'soft_delete'}]` and `[{type:'soft_delete'},{type:'soft_delete'}]` (two drafts);
   - for each, read `GET …/pipelines/{id}` (version, spec) and `GET …/pipelines/{id}/config`;
@@ -434,6 +444,10 @@ The three changes to `27-transforms.spec.ts`:
 - **A new test, "the Destination step notes Keep deleted rows":** create a JDBC destination connection with the config `08-sinks.spec.ts:149-160` uses, and a draft with `[{type:'unwrap'},{type:'soft_delete'}]`. Open the Destination step and expect the note. It never deploys.
 
 **Gate:** `make verify-quick`, then `make e2e-quick SPECS="tests/27-transforms.spec.ts tests/32-flink-cdc.spec.ts tests/04-pipeline-ui.spec.ts tests/33-engine-settings.spec.ts"`.
+
+#### Commit 3a, found by E22: a new keep-events filter saves
+
+The Flink CDC test for journey 3 found that a newly added "Keep only some rows/events" filter could never be saved, on either engine. `defaultStep('filter')` set `match: 'all'` with no rules, which the decoder refuses ("match needs rules", `backend/internal/domain/transforms.go:334`; the server leaves `match` out when there are no rules, `:755-766`). The default filter now has no `match`, and removing a filter's last rule drops it. Files: `transforms/model.ts`, `transforms/editors.tsx`, a `model.test.ts` case, the `transforms/README.md` invariant and a changelog line. It lands before the Keep deleted rows commit, whose Flink test depends on it.
 
 ### Verification plan
 
@@ -455,8 +469,8 @@ The three changes to `27-transforms.spec.ts`:
 | E1 | Refused raw key typed in Review (Expert) | Row red; at most one `PATCH` in 4 s | 1 | `33` "never loops" |
 | E2 | Remove the refused row | "All changes saved"; no further `PATCH` | 1 | `33` "never loops" |
 | E3 | Server-only refusal (batch = queue) | One `PATCH`; server message; no Try again; fixing it saves | 1 | `33` "pauses" |
-| E4 | Network error or 5xx | Try again shown; one attempt per click | 1 | `review.test` (loop test); `InlineError` already gates on `isRetryable` |
-| E5 | 412 `version_conflict` | Paused; the server's message | 1 | `review.test` (any failure pauses) |
+| E4 | Network error or 5xx | Try again shown; one attempt per click | 1 | `33` "Try again saves once more" (one aborted `PATCH`, then exactly two); `review.test` (Try again) |
+| E5 | 412 `version_conflict` | Paused, like any failure (the message is the server's) | 1 | `review.test` (any refused save pauses); the message itself is not asserted (see Future improvements) |
 | E6 | Stored refused key, same value | Not blocking; saves | 1 | `settings.test` |
 | E7 | Stored refused key, changed value | Blocking | 1 | `settings.test` |
 | E8 | Draft becomes valid with no further edit | Saves (`invalid` is a dependency) | 1 | `review.test` (`blocked` → `schedule`) |
@@ -467,21 +481,22 @@ The three changes to `27-transforms.spec.ts`:
 | E13 | Flink streaming size equal to the copy size | Errors on both streaming fields | 2 | `cluster.test`, `32` (`:191`) |
 | E14 | Flink manual shape | No streaming problem | 2 | `cluster.test`, `review.test` |
 | E15 | Guided mode, hidden tuning key | "Settings that block saving"; Remove saves | 2 | `33` Guided case |
-| E16 | Expert, nothing typed to offer, unknown tuning key | Blocking rows inside the card | 2 | `review.test` (problem has `key`); drawn by the `tunable.length === 0` branch |
+| E16 | Expert, nothing typed to offer, unknown tuning key | Blocking rows inside the card | 2 | `review.test` (the problem carries its `key`); the `tunable.length === 0` branch itself is not rendered in a test (see Future improvements) |
 | E17 | Placement profile missing | Not a problem; preflight reports it | 2 | `review.test` |
-| E18 | Badge at 390 px; axe | No overflow; the button has a name | 2 | `28`, `16` (the pipeline in `33` reaches the state; `16` and `28` cover the button in its idle state) |
+| E18 | Badge at 390 px; axe | No overflow; no serious axe violation on the badge or the Memory field | 2 | `33` "the badge names the field" (`layoutProblems`, `AxeBuilder`) |
 | E19 | Debezium envelope + Keep deleted rows | Row under Event shape; locked line; envelope button and menu disabled | 3 | `27` extended |
 | E20 | `unwrap(drop)` + Keep deleted rows | Select disabled "Set by Keep deleted rows"; stored `drop` kept | 3 | `27` extended, `model.test` |
 | E21 | Remove after E20 | Select enabled showing "Drop delete events" | 3 | `27` extended |
-| E22 | Flink: Keep deleted rows, then a filter | `[filter, soft_delete]` under Keep rows; saves | 3 | `model.test`, `32` (`:89`) |
+| E22 | Flink: Keep deleted rows, then a filter | `[filter, soft_delete]` under Keep rows; saves | 3 | `model.test`, `32` (new draft-only test) |
 | E23 | `[soft_delete, filter]` / `[rename, soft_delete]` | Client error, the same as the server | 3 | `model.test` |
 | E24 | `[soft_delete, rename]` saved through the API | No client error | 3 | `model.test` |
 | E25 | Saved `[soft_delete]` and two `soft_delete` steps | Drawn with Remove; zero `PATCH`; version, spec and compiled config equal | 3 | `27` "never re-saved" |
 | E26 | `[outbox]` + Keep deleted rows | `[outbox, soft_delete]` | 3 | `model.test` |
 | E27 | JDBC destination + Keep deleted rows | Note on the Destination step | 3 | `27` "Destination step notes" |
 | E28 | JDBC `deletes: delete`, no `soft_delete` | ShapeEditor and summary say tombstone (destination) | 3 | `model.test` |
-| E29 | Adding Keep deleted rows to an envelope pipeline: deploy impact | The soft-delete line only | 3 | `model.test` |
+| E29 | Adding Keep deleted rows to an envelope pipeline: deploy impact | "Events become the row…" and the soft-delete line; no "Deletes change" | 3 | `model.test` |
 | E30 | Overview of a `[soft_delete]` pipeline | Row + deletes kept | 3 | `overview.test` |
+| E31 | A new keep-events filter with no rules, either engine | Saves (no `match` until there are rules) | 3a | `model.test`, `32` (Keep rows test) |
 
 ## Consequences
 
@@ -497,7 +512,7 @@ The three changes to `27-transforms.spec.ts`:
 ### Future improvements
 
 - **Name fields from the server's error locations** (`problem.errors[].loc`), as label-only problems that don't count as client-side invalid. Deferred because folding them into `invalid` defeats the pause.
-- **A ReviewStep component test**, the first one for that component.
+- **A ReviewStep component test**, the first one for that component: it would also assert the 412 message (E5) and render the `tunable.length === 0` branch (E16).
 - **A compiler fix for the ordering issue**, with a `config_hash` migration note.
 - **A "put steps in run order" action** for older specs.
 

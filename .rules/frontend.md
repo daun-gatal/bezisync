@@ -182,8 +182,9 @@ src/
   the ones before it are done (`stepState`); each step registers a `StepHandle` (`dirty`, `commit`)
   so leaving it by any route saves it, and Review saves its settings as they change. The Transform step
   (`features/pipelines/transforms/`) groups steps by the stage they run in (value formats, keep
-  events, event shape, field changes, message key); `model.ts` holds the pure rules (stage-aware
-  `addStep`/`moveStep`, `stepErrors` mirroring the backend decoder, `fieldsBefore` for pickers,
+  events, event shape, field changes, message key), drawn by `sectionOf`/`drawOrder` and ordered by
+  `shapeIndex` (the server's boundary: the first unwrap or Keep deleted rows); `model.ts` holds the
+  pure rules (stage-aware `addStep`/`moveStep`, `effectiveDeletes` for what deletes really become, `stepErrors` mirroring the backend decoder, `fieldsBefore` for pickers,
   `outputImpact` for Review and approvals), each type has one editor in `editors.tsx`, and
   `PreviewPanel` calls `…/transforms:preview` with the draft spec and the discovered columns
   (pure on the server). Field names are pickers fed by discovery; only new names and rule values

@@ -136,10 +136,10 @@ remove the entry.
 | 11 | The Docker helper install waits up to 2 minutes, but `ContainerWait` runs on the client with the 30 s request timeout (not `pullCli`), so a slow install is cut off at about 30 s | `runtime/docker_flink.go` (`installHelper`) |
 | 12 | `Agent.Report` reads `a.desired[id]` after releasing `a.mu`, racing with `Poll` and converge | `agent/agent.go` (`Report`) |
 | 13 | A boolean engine setting pinned by project policy is drawn with `Segmented`, which can't be disabled, so the pinned value can still be changed in the UI | `frontend/src/components/SettingsEditor.tsx` |
-| 14 | A `soft_delete` transform step is never drawn: the event-shape slot shows only `unwrap`, so once added the step can't be seen, edited or removed | `frontend/src/features/pipelines/transforms/TransformStep.tsx` |
 | 15 | Custom transform steps return before the project's `allowed_transforms` check, so the allow-list doesn't gate them in the UI | `frontend/src/features/pipelines/transforms/TransformStep.tsx` (`locked`) |
 | 16 | The session-expired handler skips every URL ending in `/auth/me`, so a 401 on `PATCH /auth/me` never opens the sign-in dialog | `frontend/src/lib/api.ts` |
 | 17 | The wizard's Review step runs preflight and deploy with `version: null`, so the server deploys the pipeline's current version, which may hold another person's edit saved after the review, not the one the user reviewed | `frontend/src/features/pipelines/wizard/ReviewStep.tsx`, `frontend/src/lib/pipelines.ts` (`useDeploy`, `usePreflight`) |
+| 18 | With a destination that requires the event shape (Iceberg), a chain with Keep deleted rows (`soft_delete`) and a field step but no explicit unwrap compiles the field step before the unwrap: `withSinkUnwrap` appends the required unwrap at the end, then `withSoftDelete` drops the `soft_delete`. The wizard never builds such a chain (a field step needs an explicit Row after change first); the API accepts it | `compiler/sinkcaps.go` (`withSinkUnwrap`, `withSoftDelete`), `compiler/compiler.go` |
 
 Paths are under `backend/internal/` unless they start with `frontend/`.
 

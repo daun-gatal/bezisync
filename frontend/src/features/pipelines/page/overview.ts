@@ -3,7 +3,7 @@ import { plural } from '@/components/ui/text';
 import { formatBytes } from '@/lib/format';
 import type { FlinkStatus, SourceImpact } from '@/lib/status';
 import type { FullSpec, TransformType } from '../spec';
-import { METADATA, metadataField, summarize, summarizeValues, TYPE_TITLE } from '../transforms/model';
+import { effectiveDeletes, METADATA, metadataField, summarize, summarizeValues, TYPE_TITLE, type ShapeCtx } from '../transforms/model';
 
 /** One fact in Source protection. `note` is a short second line. */
 export interface Fact {
@@ -196,15 +196,17 @@ export interface Row {
 }
 
 /** The deployed spec as what consumers receive (output) and the steps that change events on the way. */
-export function transformView(spec: FullSpec, flink?: { sinkType?: string }): { output: Row[]; steps: Row[] } {
+export function transformView(spec: FullSpec, flink?: { sinkType?: string }, ctx: ShapeCtx = {}): { output: Row[]; steps: Row[] } {
   const output: Row[] = [];
   if (flink) return flinkTransformView(spec, flink.sinkType);
   const unwrap = spec.transforms.find((t) => t.type === 'unwrap');
+  // As the compiler runs it: Keep deleted rows (or the destination) adds the row shape and decides deletes.
+  const effective = effectiveDeletes(spec.transforms, spec.sink.options, { ...ctx, flink: false });
   if (spec.transforms.some((t) => t.type === 'outbox')) {
     output.push({ icon: 'outbox', title: 'Outbox events', detail: 'Each row added to the outbox table becomes one message' });
-  } else if (unwrap) {
+  } else if (effective.mode !== 'envelope') {
     output.push({ icon: 'shape', title: 'The row after the change', detail: 'Not the full change envelope' });
-    const deletes = unwrap.delete_handling ?? 'rewrite';
+    const deletes = effective.mode;
     output.push(
       deletes === 'rewrite'
         ? { icon: 'delete', title: 'Deletes are kept', detail: 'As the last row, flagged', code: ['__deleted = true'] }
@@ -212,7 +214,7 @@ export function transformView(spec: FullSpec, flink?: { sinkType?: string }): { 
           ? { icon: 'delete', title: 'Deletes become tombstones', detail: 'An empty message with the row’s key' }
           : { icon: 'delete', title: 'Deletes are dropped', detail: 'Consumers never see them' },
     );
-    const extra = unwrap.add_fields ?? [];
+    const extra = unwrap ? (unwrap.add_fields ?? []) : spec.transforms.some((t) => t.type === 'soft_delete') ? ['op', 'source.ts_ms'] : (ctx.unwrap?.add_fields ?? []);
     if (extra.length) {
       output.push({
         icon: 'fields',
@@ -242,7 +244,9 @@ export function transformView(spec: FullSpec, flink?: { sinkType?: string }): { 
 
 /** A Flink CDC pipeline writes tables, not events: rows by key, columns left out, chosen keys. */
 function flinkTransformView(spec: FullSpec, sinkType?: string): { output: Row[]; steps: Row[] } {
-  const keepDeletes = sinkType === 'iceberg' && (spec.sink.options.write_mode ?? 'upsert_keep_deletes') === 'upsert_keep_deletes';
+  // Keep deleted rows marks every delete (__op = -D), whatever the destination.
+  const softDelete = spec.transforms.some((t) => t.type === 'soft_delete');
+  const keepDeletes = softDelete || (sinkType === 'iceberg' && (spec.sink.options.write_mode ?? 'upsert_keep_deletes') === 'upsert_keep_deletes');
   const output: Row[] = [{ icon: 'shape', title: 'Tables kept in sync', detail: 'Each row is written by its primary key' }];
   output.push(
     keepDeletes

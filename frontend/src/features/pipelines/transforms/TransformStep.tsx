@@ -9,9 +9,10 @@ import { sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/c
 import { usePolicies } from '@/lib/policies';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { fullSpec, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
+import { fullSpec, optionsSchemaFor, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
+import { defaultsOf, type JsonSchema } from '@/components/SchemaForm';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
-import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor, ComputedEditor } from './editors';
+import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, SoftDeleteEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor, ComputedEditor } from './editors';
 import { FlinkPreviewPanel } from './FlinkPreviewPanel';
 import { PreviewPanel } from './PreviewPanel';
 import {
@@ -27,10 +28,15 @@ import {
   NO_CAPS,
   stepCaps,
   stepErrors,
+  drawOrder,
+  sectionOf,
   summarize,
+  summarizeShape,
   summarizeValues,
   TYPE_TITLE,
   type Caps,
+  type Section,
+  type ShapeCtx,
   type TableInfo,
 } from './model';
 
@@ -109,9 +115,15 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
     dirty: () => dirty,
     commit: async () => (errors.size ? false : dirty ? save({ spec: draft }) : true),
   }));
+  // The unwrap row (drawn and edited); ordering uses shapeIndex, the server's boundary.
   const shapeAt = steps.findIndex((t) => t.type === 'unwrap');
+  const softAt = steps.findIndex((t) => t.type === 'soft_delete');
+  // What the compiler reads for deletes: the destination's unwrap rule and its options with defaults.
+  const sinkSchema = optionsSchemaFor(sinkCaps.options_schema as JsonSchema | null, pipeline.engine);
+  const shapeCtx: ShapeCtx = { flink, unwrap: sinkCaps.unwrap ?? null, optionDefaults: sinkSchema ? defaultsOf(sinkSchema) : {} };
+  const order = drawOrder(steps, flink);
   const keyOf = (t: Step, i: number) => t.id ?? `step-${i}`;
-  const ctxFor = (index: number): EditorContext => ({ sourceType, sink: sinkCaps, tables, caps, spec: draft, steps, index, expert, flink });
+  const ctxFor = (index: number): EditorContext => ({ sourceType, sink: sinkCaps, tables, caps, spec: draft, steps, index, expert, flink, shape: shapeCtx });
   const update = (i: number, next: Step) => setSteps(steps.map((t, j) => (j === i ? next : t)));
   const remove = (i: number) => {
     setSteps(steps.filter((_, j) => j !== i));
@@ -146,6 +158,8 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
       return null;
     }
     if (policies?.allowed_transforms && !policies.allowed_transforms.includes(type)) return 'Not allowed in this project.';
+    // One is enough: a second compiles to nothing.
+    if (type === 'soft_delete' && softAt >= 0) return flink ? 'Already added: see Keep rows.' : 'Already added: see Event shape.';
     // On Flink CDC rows are always written whole: the shape step is added for these steps (add).
     if (!flink && stageOf({ type }) === 2 && shapeAt < 0) return 'Needs the “Row after change” event shape.';
     return null;
@@ -185,20 +199,14 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
       truncate: <TruncateEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       route: <RouteEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       computed: <ComputedEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
-      soft_delete: (
-        <p className="m-0 text-sm text-ink-2">
-          {flink
-            ? 'Deletes arrive as rows with __op = -D; other rows carry their change type (+I, +U). The destination keeps every row.'
-            : 'Deletes arrive as rows with __deleted = true, and no tombstone follows them. Consumers that remove rows on a delete now keep them.'}
-        </p>
-      ),
+      soft_delete: <SoftDeleteEditor ctx={ctx} />,
     };
     return (
       <StepRow
         key={k}
-        n={flink ? steps.slice(0, i + 1).filter((x) => x.type !== 'unwrap').length : i + 1}
+        n={order.indexOf(i) + 1}
         title={t.type === 'unwrap' ? 'Row after change' : titleOf(t.type)}
-        summary={t.type === 'unwrap' ? summarize(t).split(' · ').slice(1).join(' · ') : summarize(t)}
+        summary={t.type === 'unwrap' ? (summarizeShape(steps, draft.sink.options, shapeCtx) ?? summarize(t)).split(' · ').slice(1).join(' · ') : summarize(t)}
         technical={expert && !flink ? (t.type === 'custom' ? t.class : DEBEZIUM_CLASS[t.type]) : undefined}
         open={isOpen}
         error={err}
@@ -211,18 +219,26 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
         {editor[t.type]}
         {t.type === 'unwrap' && !shapeRequired ? (
           <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2">
-            <Button size="sm" variant="ghost" disabled={fieldSteps.length > 0} onClick={() => setShape(false)}>
+            <Button size="sm" variant="ghost" disabled={fieldSteps.length > 0 || softAt >= 0} onClick={() => setShape(false)}>
               Use the full change envelope instead
             </Button>
-            {fieldSteps.length ? <span className="text-xs text-muted">Remove the field changes first: they need the row.</span> : null}
+            {fieldSteps.length && softAt >= 0 ? (
+              <span className="text-xs text-muted">Remove the field changes and Keep deleted rows first: they need the row.</span>
+            ) : fieldSteps.length ? (
+              <span className="text-xs text-muted">Remove the field changes first: they need the row.</span>
+            ) : softAt >= 0 ? (
+              <span className="text-xs text-muted">Keep deleted rows needs the row: remove it first.</span>
+            ) : null}
           </div>
         ) : null}
       </StepRow>
     );
   };
 
-  const stage = (label: string, filter: (t: Step) => boolean) => {
-    const rows = steps.map((t, i) => [t, i] as const).filter(([t]) => filter(t));
+  // Steps of one section, in drawn order (drawOrder): every step in the spec is drawn somewhere.
+  const inSection = (section: Section) => order.filter((i) => sectionOf(steps[i]!, flink) === section);
+  const stage = (label: string, section: Section) => {
+    const rows = inSection(section).map((i) => [steps[i]!, i] as const);
     return rows.length ? (
       <>
         <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">{label}</div>
@@ -290,10 +306,12 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               </StepRow>
             </>
           ) : null}
-          {stage(flink ? 'Keep rows' : 'Keep events', (t) => stageOf(t) === 0)}
+          {stage(flink ? 'Keep rows' : 'Keep events', 'keep')}
           {flink ? null : <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">Event shape</div>}
           {flink ? null : shapeAt >= 0 ? (
-            row(steps[shapeAt]!, shapeAt)
+            inSection('shape')
+              .filter((i) => steps[i]!.type === 'unwrap')
+              .map((i) => row(steps[i]!, i))
           ) : shapeRequired ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-subtle px-3 py-2.5 text-sm">
               <Lock className="size-4 text-muted" aria-hidden />
@@ -303,6 +321,15 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               <Button size="sm" className="ml-auto" onClick={() => setShape(true)}>
                 Adjust
               </Button>
+            </div>
+          ) : softAt >= 0 ? (
+            // The compiler adds the row shape for Keep deleted rows. No Adjust here: an unwrap added
+            // by the browser would sit elsewhere and carry other fields than the compiled one.
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-subtle px-3 py-2.5 text-sm">
+              <Lock className="size-4 text-muted" aria-hidden />
+              <span>
+                <strong className="font-semibold">Row after change</strong> <span className="text-muted">· Keep deleted rows needs it; BeziSync adds it</span>
+              </span>
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-subtle px-3 py-2.5 text-sm">
@@ -314,8 +341,13 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               </Button>
             </div>
           )}
-          {stage(flink ? 'Columns · order matters' : 'Field changes · order matters', (t) => stageOf(t) === 2)}
-          {stage('Other steps', (t) => stageOf(t) === -1 && t.type !== 'unwrap')}
+          {flink
+            ? null
+            : inSection('shape')
+                .filter((i) => steps[i]!.type === 'soft_delete')
+                .map((i) => row(steps[i]!, i))}
+          {stage(flink ? 'Columns · order matters' : 'Field changes · order matters', 'fields')}
+          {stage('Other steps', 'other')}
           {caps.key_columns ? (
             <>
               <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">{flink ? 'Primary key' : 'Message key'}</div>

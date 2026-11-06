@@ -1,8 +1,18 @@
 import { Pill as Badge } from '@/components/ui/feedback';
+import { defaultsOf, type JsonSchema } from '@/components/SchemaForm';
+import { sinkCapsOf, useConnectorTypes } from '@/lib/connections';
 import { useVersions, type Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { fullSpec, type FullSpec } from '../spec';
-import { outputImpact, summarize, summarizeValues, TYPE_TITLE } from './model';
+import { fullSpec, optionsSchemaFor, type FullSpec } from '../spec';
+import { outputImpact, summarize, summarizeShape, summarizeValues, TYPE_TITLE, type ShapeCtx } from './model';
+
+/** What a pipeline's destination says about the event shape, for describing deletes as they run. */
+export function useShapeCtx(pipeline: Pick<Pipeline, 'engine' | 'sink'>): ShapeCtx {
+  const { project } = useProject();
+  const caps = sinkCapsOf(useConnectorTypes(project.id).data, pipeline.sink?.type);
+  const schema = optionsSchemaFor(caps.options_schema as JsonSchema | null, pipeline.engine);
+  return { flink: pipeline.engine === 'flink-cdc', unwrap: caps.unwrap ?? null, optionDefaults: schema ? defaultsOf(schema) : {} };
+}
 
 const LABEL = {
   breaking: { tone: 'risk', text: 'Breaking' },
@@ -14,13 +24,14 @@ const LABEL = {
 export function OutputImpact({ pipeline, version, spec }: { pipeline: Pipeline; version?: number; spec?: FullSpec }) {
   const { project } = useProject();
   const versions = useVersions(project.id, pipeline.id);
+  const ctx = useShapeCtx(pipeline);
   if (!pipeline.deployed_version || !versions.data) return null;
   const deployed = versions.data.find((v) => v.number === pipeline.deployed_version);
   const target = spec ? null : versions.data.find((v) => v.number === (version ?? pipeline.current_version));
   // Never compare against a version that is not loaded yet: that would report wrong changes.
   if (!deployed || (!spec && !target)) return null;
   const next = spec ?? fullSpec(target!.spec);
-  const impact = outputImpact(fullSpec(deployed.spec), next);
+  const impact = outputImpact(fullSpec(deployed.spec), next, ctx);
   return (
     <section aria-label="What changes for consumers" className="flex flex-col gap-2">
       <strong className="text-base">What changes for consumers</strong>
@@ -48,7 +59,7 @@ export function OutputImpact({ pipeline, version, spec }: { pipeline: Pipeline; 
 }
 
 /** The steps in plain language (Review and Overview). */
-export function StepsSummary({ spec, flink = false }: { spec: FullSpec; flink?: boolean }) {
+export function StepsSummary({ spec, flink = false, ctx = {} }: { spec: FullSpec; flink?: boolean; ctx?: ShapeCtx }) {
   const values = summarizeValues(spec.values);
   const keys = Object.entries(spec.keys ?? {});
   if (flink) {
@@ -68,10 +79,20 @@ export function StepsSummary({ spec, flink = false }: { spec: FullSpec; flink?: 
   }
   const items = [
     ...(values ? [`Value formats: ${values}.`] : []),
-    ...spec.transforms.map((t) => `${t.type === 'unwrap' ? 'Event shape' : TYPE_TITLE[t.type]}: ${summarize(t)}.`),
+    ...spec.transforms.map((t) => `${t.type === 'unwrap' ? 'Event shape' : TYPE_TITLE[t.type]}: ${t.type === 'unwrap' ? (summarizeShape(spec.transforms, spec.sink.options, ctx) ?? summarize(t)) : summarize(t)}.`),
     ...keys.map(([t, c]) => `Message key of ${t}: ${c.join(', ')}.`),
   ];
-  if (!spec.transforms.some((t) => t.type === 'unwrap')) items.unshift('Events are the full change envelope (before, after and source).');
+  if (!spec.transforms.some((t) => t.type === 'unwrap')) {
+    // The compiler adds the row shape for Keep deleted rows (and for a destination that needs it).
+    const shape = summarizeShape(spec.transforms, spec.sink.options, { ...ctx, flink: false });
+    items.unshift(
+      shape === null
+        ? 'Events are the full change envelope (before, after and source).'
+        : spec.transforms.some((t) => t.type === 'soft_delete')
+          ? 'Event shape: Row after change, added by BeziSync for Keep deleted rows.'
+          : `Event shape: ${shape}, added by BeziSync for the destination.`,
+    );
+  }
   return (
     <ol className="m-0 flex flex-col gap-1 pl-5 text-sm">
       {items.map((s) => (

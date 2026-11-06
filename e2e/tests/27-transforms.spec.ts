@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { Api, choose, defaultProject, signIn, unique } from './helpers';
-import { KAFKA, SOURCE_PG } from './fixtures';
+import { KAFKA, SOURCE_PG, TARGET_PG } from './fixtures';
+import { walkWizard } from './walk';
 import { ownerSql, sql, waitFor } from './data';
 
 /**
@@ -332,6 +333,32 @@ test('an editor keeps deleted rows and cuts long text; the preview shows both', 
   await signIn(page);
   await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
   await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
+  // The row shape drops deletes; Keep deleted rows then decides them instead, without changing that choice.
+  const shape = page.getByRole('region', { name: /Row after change/ });
+  await shape.getByRole('button', { name: 'Edit' }).click();
+  await choose(shape.getByLabel(/^Deletes/), 'Drop delete events');
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Keep deleted rows/ }).click();
+  // It is drawn under Event shape, after the row shape (step 2).
+  const soft = page.getByRole('region', { name: 'Step 2: Keep deleted rows' });
+  await expect(soft).toBeVisible();
+  await shape.getByRole('button', { name: 'Edit' }).click();
+  await expect(shape.getByLabel(/^Deletes/)).toBeDisabled();
+  await expect(shape.getByText('Set by Keep deleted rows (step 2). Remove that step to choose.')).toBeVisible();
+  await expect(shape.getByRole('button', { name: 'Use the full change envelope instead' })).toBeDisabled();
+  await expect(shape.getByText('Keep deleted rows needs the row: remove it first.')).toBeVisible();
+  // One is enough.
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await expect(page.getByRole('button', { name: /^Keep deleted rows/ })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /^Keep deleted rows/ })).toContainText('Already added: see Event shape.');
+  await page.keyboard.press('Escape');
+  // Removing it gives the row shape its own choice back.
+  await soft.getByRole('button', { name: 'More for step 2' }).click();
+  await page.getByRole('menuitem', { name: 'Remove' }).click();
+  await expect(soft).toHaveCount(0);
+  await shape.getByRole('button', { name: 'Edit' }).click();
+  await expect(shape.getByLabel(/^Deletes/)).toBeEnabled();
+  await expect(shape.getByLabel(/^Deletes/)).toContainText('Drop delete events');
   await page.getByRole('button', { name: 'Add transform' }).click();
   await page.getByRole('button', { name: /^Keep deleted rows/ }).click();
   await page.getByRole('button', { name: 'Add transform' }).click();
@@ -350,7 +377,64 @@ test('an editor keeps deleted rows and cuts long text; the preview shows both', 
   const saved = await api.get<{ spec: { transforms: { type: string; columns?: unknown[] }[] } }>(url);
   expect(saved.spec.transforms.map((t) => t.type)).toEqual(expect.arrayContaining(['soft_delete', 'truncate']));
   expect(saved.spec.transforms.find((t) => t.type === 'truncate')?.columns).toEqual([{ table: 'shop.orders', column: 'status', length: 3 }]);
+  // The row shape kept its own choice: Keep deleted rows decides deletes without rewriting it.
+  expect((saved.spec.transforms as { type: string; delete_handling?: string }[]).find((t) => t.type === 'unwrap')?.delete_handling).toBe('drop');
   await api.send('DELETE', url);
+});
+
+test('a saved Keep deleted rows without a row shape is drawn and never re-saved', async ({ page }) => {
+  test.setTimeout(240_000);
+  const api = await Api.signIn();
+  const tag = unique('tfsoft');
+  const { project, base, rt, source, sink } = await setup(api, tag);
+  await signIn(page);
+  for (const transforms of [[{ type: 'soft_delete', id: 'sd01' }], [{ type: 'soft_delete', id: 'sd01' }, { type: 'soft_delete', id: 'sd02' }]]) {
+    const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+      name: `p-${tag}-${transforms.length}`, source_id: source.id, sink_id: sink.id, runtime_id: rt.id,
+      spec: { source: { tables: { include: ['shop.orders'] } }, transforms },
+    }, 201);
+    const url = `${base}/pipelines/${p.id}`;
+    const before = { pipeline: await api.get<{ version: number; current_version: number; spec: unknown }>(url), config: await api.get<unknown>(`${url}/config`) };
+    let saves = 0;
+    const onRequest = (r: { method(): string; url(): string }) => {
+      if (r.method() === 'PATCH' && r.url().endsWith(url)) saves++;
+    };
+    page.on('request', onRequest);
+    await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+    await expect(page.getByText('Keep deleted rows needs it; BeziSync adds it')).toBeVisible();
+    await expect(page.getByRole('region', { name: /Keep deleted rows/ })).toHaveCount(transforms.length);
+    for (let n = 1; n <= transforms.length; n++) {
+      await page.getByRole('region', { name: `Step ${n}: Keep deleted rows` }).getByRole('button', { name: `More for step ${n}` }).click();
+      await expect(page.getByRole('menuitem', { name: 'Remove' })).toBeEnabled();
+      await page.keyboard.press('Escape');
+    }
+    await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+    page.off('request', onRequest);
+    expect(saves, 'opening the steps saved the pipeline').toBe(0);
+    const after = { pipeline: await api.get<{ version: number; current_version: number; spec: unknown }>(url), config: await api.get<unknown>(`${url}/config`) };
+    expect(after.pipeline.version).toBe(before.pipeline.version);
+    expect(after.pipeline.current_version).toBe(before.pipeline.current_version);
+    expect(after.pipeline.spec).toEqual(before.pipeline.spec);
+    expect(after.config).toEqual(before.config);
+    await api.send('DELETE', url);
+  }
+});
+
+test('the Destination step says Keep deleted rows decides deletes', async ({ page }) => {
+  test.setTimeout(120_000);
+  const api = await Api.signIn();
+  const tag = unique('tfjdbc');
+  const { project, base, rt, source } = await setup(api, tag);
+  const { password, ...target } = TARGET_PG;
+  const jdbc = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'jdbc', name: `jdbc-${tag}`, config: target, secrets: { password } }, 201);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: source.id, sink_id: jdbc.id, runtime_id: rt.id,
+    spec: { source: { tables: { include: ['shop.orders'] } }, transforms: [{ type: 'unwrap', id: 'uw01' }, { type: 'soft_delete', id: 'sd01' }] },
+  }, 201);
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=sink`);
+  await expect(page.getByText('Deletes: kept, marked deleted. Set by Keep deleted rows in Transform.')).toBeVisible();
+  await api.send('DELETE', `${base}/pipelines/${p.id}`);
 });
 
 test('an editor routes tables to one destination; preflight refuses unlike tables, and Debezium delivers to the route', async ({ page }) => {

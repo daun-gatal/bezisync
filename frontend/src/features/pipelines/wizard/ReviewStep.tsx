@@ -25,7 +25,7 @@ import { useDeploy, usePipelines, usePreflight, useSavedPositions, type Pipeline
 import { clusterFromPreset, manualError, manualErrors, streamingError, streamingErrors, usePackCluster } from '@/lib/cluster';
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
-import { OutputImpact, StepsSummary } from '../transforms/Impact';
+import { OutputImpact, StepsSummary, useShapeCtx } from '../transforms/Impact';
 import { CUSTOM_CPUS, CUSTOM_MEMORIES, deriveSinkOptions, fullSpec, heapMiB, memoryMiB, optionsSchemaFor, PRESET_AMOUNTS, RESOURCES, SNAPSHOT_MODES, type FullSpec, flinkSinkOptions } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
 import { FlinkClusterEditor } from './FlinkClusterEditor';
@@ -74,6 +74,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const deployed = Boolean(pipeline.deployed_version);
   const flink = pipeline.engine === 'flink-cdc';
   const flinkEngine = useEngines().data?.find((e) => e.id === 'flink-cdc');
+  const shapeCtx = useShapeCtx(pipeline);
   const [fc, setFc] = useState<FlinkChoices>(flinkChoices(spec.flink_cdc));
   const [name, setName] = useState(pipeline.name);
   const [owner, setOwner] = useState(pipeline.owner);
@@ -590,7 +591,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
           </ButtonLink>
         }
       >
-        <StepsSummary spec={spec} flink={flink} />
+        <StepsSummary spec={spec} flink={flink} ctx={shapeCtx} />
         {deployed ? <OutputImpact pipeline={pipeline} spec={spec} /> : null}
       </Card>
 
