@@ -6,11 +6,16 @@
 #   scripts/e2e.sh down       # delete everything this script created
 #   E2E_GREP="pipeline" scripts/e2e.sh   # run a subset
 #   scripts/e2e.sh quick tests/23-admin.spec.ts …   # iterate: reuse the cluster and deployment
+#   E2E_FLINK_IMAGE=bezisync-local/flink-cdc:e2e scripts/e2e.sh …   # also run the Flink CDC journeys
 #
 # Quick mode tags images by the content of their source, so only changed images are rebuilt
 # and imported; it upgrades the running release in place (its database and the data-plane
 # fixtures are kept) and runs only the given specs. Data from earlier runs remains, so a spec
 # that needs a clean database still wants a full run.
+#
+# BeziSync publishes no Flink CDC image: build one from the reference Dockerfile (see the guide's
+# "Flink CDC engine" section) into the Docker daemon and name it in E2E_FLINK_IMAGE; it is imported
+# into the cluster and 32-flink-cdc registers it. Without it those journeys are skipped.
 #
 # Works with a local or remote Docker daemon. When the daemon's published ports are
 # reachable on another address than localhost, set BZ_DOCKER_HOST_IP.
@@ -103,6 +108,15 @@ build() {
       docker exec "$K3S" crictl pull "$image" >/dev/null
     fi
   done
+  if [[ -n "${E2E_FLINK_IMAGE:-}" ]]; then
+    docker image inspect "$E2E_FLINK_IMAGE" >/dev/null 2>&1 || { log "E2E_FLINK_IMAGE $E2E_FLINK_IMAGE is not in the Docker daemon"; exit 1; }
+    local ref=$E2E_FLINK_IMAGE
+    [[ "${ref%%/*}" == *.* || "${ref%%/*}" == *:* ]] || ref=docker.io/$ref
+    if ! docker exec "$K3S" ctr -n k8s.io images ls -q | grep -qx "$ref"; then
+      log "importing $E2E_FLINK_IMAGE into k3s"
+      docker save "$E2E_FLINK_IMAGE" | docker exec -i "$K3S" ctr -n k8s.io images import - >/dev/null
+    fi
+  fi
   # A "custom image" (same Debezium build under its own name) for the version-management
   # journey; tagged inside containerd, so nothing is transferred.
   local base
@@ -205,7 +219,7 @@ run_tests() {
   sed "s#https://${HOST_IP}:${API_PORT}#https://${K3S}:6443#" "$KUBECONFIG" > "$STATE/kube/config"
   docker create --name "$name" --label "$LABEL" --network "$NET" \
     -e BASE_URL="http://${K3S}:30080" -e ADMIN_PASSWORD=e2e-admin-password -e CI=1 \
-    -e KUBECONFIG=/e2e/.kube/config -e AGENT_NS="$AGENT_NS" -e DATA_NS="$DATA_NS" -e E2E_TAG="$BACKEND_TAG" -e CUSTOM_IMAGE="$CUSTOM_IMAGE" \
+    -e KUBECONFIG=/e2e/.kube/config -e AGENT_NS="$AGENT_NS" -e DATA_NS="$DATA_NS" -e E2E_TAG="$BACKEND_TAG" -e CUSTOM_IMAGE="$CUSTOM_IMAGE" -e E2E_FLINK_IMAGE="${E2E_FLINK_IMAGE:-}" \
     "bezisync-local/e2e:$RUNNER_TAG" ${E2E_GREP:+--grep "$E2E_GREP"} "${SPECS[@]}" >/dev/null
   docker cp "$STATE/kube" "$name:/e2e/.kube" >/dev/null
   docker cp "$ROOT/deploy" "$name:/e2e/deploy" >/dev/null
@@ -219,7 +233,8 @@ run_tests() {
 
 prune_old_images() {
   local keep=":($BACKEND_TAG|$WEB_TAG|$RUNNER_TAG)$"
-  docker images --format '{{.Repository}}:{{.Tag}}' | grep '^bezisync-local/' | grep -Ev "$keep" | xargs -r docker rmi -f >/dev/null 2>&1 || true
+  # Only the images this script builds: an E2E_FLINK_IMAGE build stays for the next run.
+  docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^bezisync-local/(backend|frontend|e2e):' | grep -Ev "$keep" | xargs -r docker rmi -f >/dev/null 2>&1 || true
   # Only stale BeziSync builds: Debezium images stay cached (pruning them made every run re-pull).
   docker exec "$K3S" ctr -n k8s.io images ls -q | grep '^docker.io/bezisync-local/\(backend\|frontend\):' \
     | grep -Ev "$keep" | xargs -r docker exec "$K3S" ctr -n k8s.io images rm >/dev/null 2>&1 || true

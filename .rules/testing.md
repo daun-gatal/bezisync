@@ -53,6 +53,14 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   `bezisync-e2e-agent` (recreated); the Playwright runner has `kubectl`/`helm`, an in-network
   kubeconfig and the repo's `deploy/` directory, so tests install agents as users would.
 - `E2E_GREP="pattern" scripts/e2e.sh` runs a subset while iterating; commit only after a full run.
+- Flink CDC journeys (`32-flink-cdc.spec.ts`) need an image BeziSync doesn't publish: build the
+  reference Dockerfile into the Docker daemon and run with `E2E_FLINK_IMAGE=<image>` (imported into
+  k3s, registered by the spec; skipped without it). Postgres sources on Flink CDC need
+  `REPLICA IDENTITY FULL`, so Flink specs create their own tables with `ownerSql`.
+- `walkWizard` (`e2e/tests/walk.ts`) opens every wizard step of a pipeline and fails on a save
+  error, on Review not settling on "All changes saved", on a save after it settled (an autosave
+  loop) or on the last save's spec differing from the server's. Use it whenever a change touches a
+  wizard step, on each engine.
 - The e2e suite runs locally, not in CI (its ~15 data-plane services need more time and disk than a
   CI runner offers, ~8 GB free); CI type-checks the suite (`e2e` tsc) only. See *Who runs what*.
 - Layout is a gate: `e2e/tests/28-layout.spec.ts` seeds names at their longest (63-character slugs,
