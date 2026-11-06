@@ -341,6 +341,9 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	if err := ValidateEngineSpec(eng, n.Spec); err != nil {
 		return nil, err
 	}
+	if err := RefuseNewAdvanced(nil, n.Spec); err != nil {
+		return nil, err
+	}
 	if err := enforceEnginePolicy(ctx, q, a.Project.ID, eng); err != nil {
 		return nil, err
 	}
@@ -517,6 +520,14 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		if err != nil {
 			return nil, err
 		}
+		var prev *domain.PipelineSpec
+		if current != nil {
+			s := domain.MustSpec(map[string]any(current.Spec))
+			prev = &s
+		}
+		if err := RefuseNewAdvanced(prev, *e.Spec); err != nil {
+			return nil, err
+		}
 		switch {
 		case current != nil && current.SpecHash == domain.SpecHash(*e.Spec):
 		case current != nil && !e.Separate && isDraftOf(current, a):
@@ -597,6 +608,56 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 	_, err = Record(ctx, q, AuditEvent{Kind: "pipeline.updated", Summary: summary, ProjectID: &a.Project.ID, Principal: a.Principal,
 		ResourceType: "pipeline", ResourceID: &p.ID})
 	return created, err
+}
+
+// RefuseNewAdvanced refuses advanced properties a save adds or changes that BeziSync can't pass
+// on (ClassifyAdvanced). Ones the stored spec already holds with the same value still save, so an
+// older pipeline can be edited elsewhere: preflight blocks deploying them until they are removed.
+func RefuseNewAdvanced(prev *domain.PipelineSpec, next domain.PipelineSpec) error {
+	keys := make([]string, 0, len(next.Advanced))
+	for k := range next.Advanced {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var errs []map[string]any
+	for _, k := range keys {
+		value := next.Advanced[k]
+		if prev != nil {
+			if old, ok := prev.Advanced[k]; ok && old == value {
+				continue
+			}
+		}
+		if v := compiler.ClassifyAdvanced(k, value, nil); v.Refused() {
+			errs = append(errs, map[string]any{"loc": []string{"advanced", k}, "message": v.Message})
+		}
+	}
+	if len(errs) > 0 {
+		return problem.New(422, "managed_property", "Some advanced properties cannot be set.").WithErrors(errs)
+	}
+	return nil
+}
+
+// advancedCheck blocks a deploy whose advanced properties BeziSync can't pass on, including ones
+// that would change what it compiled for this pipeline. It is a configuration check, so a forced
+// deploy can't skip it.
+func advancedCheck(spec domain.PipelineSpec, managed map[string]bool) *checks.Check {
+	refused := compiler.AdvancedRefusals(spec.Advanced, managed)
+	if len(refused) == 0 {
+		return nil
+	}
+	keys := make([]string, len(refused))
+	why := make([]string, len(refused))
+	for i, r := range refused {
+		keys[i] = r.Key
+		why[i] = r.Key + ": " + r.Message
+	}
+	what, them := "property", "it"
+	if len(refused) > 1 {
+		what, them = "properties", "them"
+	}
+	return &checks.Check{Code: "advanced_properties", Title: "Advanced properties", Category: checks.CatDestination, Status: checks.Fail,
+		Blocking: true, Message: fmt.Sprintf("%d advanced %s can't be set: %s. Remove %s in Review.", len(refused), what, strings.Join(keys, ", "), them),
+		Technical: strings.Join(why, " ")}
 }
 
 // CompileFor compiles a pipeline with a spec ("" image = resolve it).
@@ -889,10 +950,28 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		}
 		cfgCheck = checks.Check{Code: "config_valid", Title: "Configuration", Category: checks.CatDestination, Status: checks.Fail,
 			Blocking: true, Message: prob.Detail, Technical: strings.Join(msgs, "; ")}
+		if prob.Code == "managed_property" {
+			// The same refusal, naming every property at once: what BeziSync compiles without them
+			// tells which of the others it sets itself.
+			clean := spec.Clone()
+			clean.Advanced = map[string]string{}
+			var managed map[string]bool
+			if c, err := CompileFor(ctx, q, p, clean, ""); err == nil {
+				managed = c.Managed
+			}
+			if c := advancedCheck(spec, managed); c != nil {
+				cfgCheck = *c
+			}
+		}
 	default:
 		return nil, err
 	}
 	configChecks := []checks.Check{cfgCheck}
+	if compiled != nil && compiled.Flink == nil {
+		if c := advancedCheck(spec, compiled.Managed); c != nil {
+			configChecks = append(configChecks, *c)
+		}
+	}
 	flink := EngineOf(p) == engine.FlinkCDC
 	var image string
 	if flink {

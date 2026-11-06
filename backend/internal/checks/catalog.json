@@ -1881,6 +1881,19 @@
    "whys": []
   },
   {
+   "code": "advanced_properties",
+   "fixes": [
+    "Remove the listed properties under Review → Advanced Debezium properties, or set what they did where the message says."
+   ],
+   "section": "Deploy",
+   "titles": [
+    "Advanced properties"
+   ],
+   "whys": [
+    "{n} advanced properties can't be set: {keys}. BeziSync owns identity, state, credentials and routing, and every choice the wizard makes, so a raw property may only add what BeziSync doesn't set. Unsafe options (SQL on the source, dropping the slot, skipping changes, weakening TLS, loading classes) and credentials are never passed on."
+   ]
+  },
+  {
    "code": "config_valid",
    "fixes": [],
    "section": "Deploy",

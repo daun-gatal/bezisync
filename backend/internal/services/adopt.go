@@ -294,7 +294,7 @@ func Adopt(text string) AdoptReport {
 			r.Managed = append(r.Managed, key)
 		case generatedRe.MatchString(key):
 			r.Replaced = append(r.Replaced, key)
-		case strings.HasPrefix(key, "debezium.source.") && !strings.Contains(key, "password") && !strings.HasPrefix(value, "${"):
+		case strings.HasPrefix(key, "debezium.source.") && !compiler.ClassifyAdvanced(key, value, nil).Refused():
 			advanced.Set(key, value)
 			r.Kept = append(r.Kept, key)
 		default:

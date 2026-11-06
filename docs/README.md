@@ -201,6 +201,22 @@ the pipeline's Overview shows it with a **Fix** link and the *Transform needs at
 fires. Every step is in the spec (`transforms`, `values`, `keys`), so YAML, templates, promote and
 rollback carry it; `debezium.transforms*` cannot be set as advanced properties.
 
+**Advanced Debezium properties** (Review, Expert mode) pass raw `debezium.source.*` and
+`debezium.sink.*` keys to Debezium Server for options BeziSync doesn't offer. They may only add what
+BeziSync doesn't set: a key BeziSync compiles for the pipeline, or one a wizard choice sets (tables,
+columns and personal data, keys, transforms, the event format, where events go, connection and TLS
+details, heartbeats and signals, the error policy), is refused with where to set it instead.
+Credentials (any key naming a password, secret, token, key store or SASL) belong on the connection.
+Unsafe options are never passed: SQL on the source (`database.initial.statements`,
+`heartbeat.action.query`, `replica.identity.autoset.values`), dropping or skipping changes
+(`slot.drop.on.stop`, `offset.mismatch.strategy`, `lsn.flush.*`), weaker TLS
+(`database.sslfactory`), classes loaded into the connector (`converters`, `*.custom.name`,
+`post.processors`, `topic.naming.strategy`), `snapshot.select.statement.overrides`, logging
+changes that could reveal secrets, and every `quarkus.*` key. Values can't hold `${…}` (Debezium
+Server would fill it in from the pod's environment) or line breaks. Saving refuses a key it adds or
+changes; one an older pipeline already has still saves, and its deploy is blocked by the
+*Advanced properties* check until it is removed (a forced deploy can't skip it).
+
 ## Destinations
 
 Each destination states what it needs from a pipeline, and the wizard only offers that: the names

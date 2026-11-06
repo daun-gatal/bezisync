@@ -157,11 +157,10 @@ func TestScriptedTransformsNeedThePolicy(t *testing.T) {
 	if !found {
 		t.Fatal("switching scripted transforms off was not audited")
 	}
-	// Advanced properties cannot rebuild the chain instead.
-	admin.patch(u, map[string]any{"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}},
-		"advanced": map[string]any{"debezium.transforms": "unwrap"}}}, ifMatch(admin.get(u).At("version"))...).expect(200)
-	cfg := admin.post(u+"/preflight", nil).expect(200)
-	if cfg.At("ok") != false || !strings.Contains(string(cfg.Raw), "managed by BeziSync") {
+	// Advanced properties cannot rebuild the chain instead: refused when saved.
+	cfg := admin.patch(u, map[string]any{"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}},
+		"advanced": map[string]any{"debezium.transforms": "unwrap"}}}, ifMatch(admin.get(u).At("version"))...).expect(422)
+	if cfg.Code() != "managed_property" || !strings.Contains(string(cfg.Raw), "Transform step") {
 		t.Fatal(string(cfg.Raw))
 	}
 }

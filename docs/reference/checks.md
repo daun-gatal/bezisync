@@ -1965,6 +1965,19 @@ bin/pulsar-admin namespaces create <tenant>/<namespace>
 
 ## Deploy
 
+<a id="advanced-properties"></a>
+### `advanced_properties`
+
+**Advanced properties**
+
+- Why: {n} advanced properties can't be set: {keys}. BeziSync owns identity, state, credentials and routing, and every choice the wizard makes, so a raw property may only add what BeziSync doesn't set. Unsafe options (SQL on the source, dropping the slot, skipping changes, weakening TLS, loading classes) and credentials are never passed on.
+
+Fix:
+
+```
+Remove the listed properties under Review → Advanced Debezium properties, or set what they did where the message says.
+```
+
 <a id="agent-upgrade-required"></a>
 ### `agent_upgrade_required`
 

@@ -139,9 +139,10 @@ debezium.transforms.add.static.value=${HOME}
 		strings.Contains(spec, "HOME") {
 		t.Errorf("%s", spec)
 	}
-	// Key columns of tables that are not captured stay as advanced properties.
+	// Key columns of tables that are not captured are left out: keys are chosen on the Transform
+	// step, so they can't be passed as an advanced property.
 	spec, _ = adopt(t, "debezium.source.message.key.columns=other.t:id\n")
-	if strings.Contains(spec, `"keys"`) || !strings.Contains(spec, `"debezium.source.message.key.columns":"other.t:id"`) {
+	if strings.Contains(spec, `"keys"`) || strings.Contains(spec, "message.key.columns") {
 		t.Errorf("%s", spec)
 	}
 }

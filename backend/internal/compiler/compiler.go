@@ -72,6 +72,9 @@ type Compiled struct {
 	HealthPort int
 	// Flink is set for a pipeline that runs on Flink CDC (Properties is then empty).
 	Flink *FlinkCompiled
+	// Managed are the properties BeziSync set before the spec's advanced ones: no advanced
+	// property may change them (ClassifyAdvanced). Not part of the config hash.
+	Managed map[string]bool
 }
 
 // Render is application.properties, or a Flink CDC pipeline's pipeline.yaml.
@@ -377,9 +380,14 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 	props["debezium.transforms.bzroute.replacement"] = replacement
 	chain = append(chain, "bzroute")
 	props["debezium.transforms"] = strings.Join(chain, ",")
+	managed := make(map[string]bool, len(props)+1)
+	for k := range props {
+		managed[k] = true
+	}
 	merge(props, spec.Advanced)
 
 	if caps.NoTombstones {
+		managed["debezium.source.tombstones.on.delete"] = true
 		// The sink fails on empty events; an advanced override must not bring them back.
 		props["debezium.source.tombstones.on.delete"] = "false"
 	}
@@ -437,5 +445,6 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 		Files:        files,
 		Tunnel:       tunnel,
 		HealthPort:   connectors.HealthPort(sink.Type, image),
+		Managed:      managed,
 	}, nil
 }

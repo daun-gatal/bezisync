@@ -319,7 +319,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   (`services.SealVersion`), after which it never changes; deploy points `deployed_version_id` at one.
   A change that must be its own version (a Debezium image move) sets `PipelineEdit.Separate`.
 - `compiler.Compile` is pure: spec + resolved connections → `application.properties`
-  (secrets only as `${ENV}`) + env. Experts may add `advanced` properties except the managed patterns.
+  (secrets only as `${ENV}`) + env. Experts may add `advanced` properties: `compiler.ClassifyAdvanced`
+  is the only judge of a raw key (saving refuses keys it adds or changes, preflight's
+  `advanced_properties` config check refuses the rest, adopt keeps only allowed ones). It refuses
+  every key the compiler set for the pipeline (`Compiled.Managed`), wizard-modelled options,
+  credentials, unsafe options and `${`/control characters in values; extend its tables, never add a
+  second list.
   Offsets/schema history use Debezium's JDBC store in the state DB (`debezium_state` schema,
   tables `offsets_<id>` / `history_<id>`). `config_hash` is computed with Python's `json.dumps`
   semantics (`pyjson`) so it matches what the Python releases stored: a hash change restarts connectors.
@@ -419,7 +424,7 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `kind: Pipeline` manifests reference connections and the runtime **by name**. `:apply` is
   all-or-nothing across documents, supports `dry_run` (unified diff + change notes, rolled back) and
   `deploy` (respects approvals). `:adopt` maps an `application.properties` without writing
-  (mapped / kept as advanced / managed / replaced + warnings; never keeps plain passwords).
+  (mapped / kept as advanced / managed / replaced + warnings; keeps only keys `ClassifyAdvanced` allows).
   `/promote` applies the latest version into another project with that project's permissions,
   policies and approvals. Personal API tokens (`/auth/tokens`, `bzt_…`) are hashed, shown once,
   project-scoped, optionally read-only, expiring, and can only be minted from a session.
