@@ -83,3 +83,57 @@ test('Flink CDC: Postgres → Iceberg streams, and every wizard step round-trips
   await waitFor('Flink CDC pipeline deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
   await ownerSql(`DROP TABLE IF EXISTS ${table}`);
 });
+
+test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips', async ({ page }) => {
+  test.setTimeout(1_200_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('flinkc');
+  const table = `shop.flink_${tag.replace(/-/g, '_')}`;
+  await ownerSql(`CREATE TABLE ${table} (id serial PRIMARY KEY, status text, total int); ALTER TABLE ${table} REPLICA IDENTITY FULL`);
+  const { password, ...pg } = SOURCE_PG;
+  const { secret_access_key, ...iceberg } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  // Three readers: not a preset's shape (two slots per TaskManager).
+  const cluster = { parallelism: 3, slot: { cpu: '0.5', memory: '768Mi' }, job_manager: { cpu: '0.5', memory: '1Gi' }, shape: 'auto' };
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
+    spec: { source: { tables: { include: [table] } }, sink: { naming: `f_${tag.replace(/-/g, '_')}_{table}` }, snapshot: { mode: 'no_data' },
+      policies: { resources: 'custom' }, flink_cdc: { cluster } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+
+  // The wizard keeps the cluster on every step (Custom shown in Review).
+  await signIn(page);
+  await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+  expect((await api.get<{ spec: { flink_cdc: { cluster: unknown } } }>(url)).spec.flink_cdc.cluster).toEqual(cluster);
+
+  // The k3s runtime reports its nodes: the fit is checked, never left unknown.
+  const pre = await api.send<{ sections: { key: string; report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
+  const fit = pre.sections.find((s) => s.key === 'runtime')?.report.checks.find((c) => c.code === 'flink_cluster_fit');
+  expect(fit?.status, fit?.message).toBe('pass');
+  expect(fit?.message).toContain('1 TaskManager × 3 slots');
+
+  await api.send('POST', `${url}/deploy`, {});
+  const deployed = await api.get<{ artifacts: { flink_shape?: { size: { slots: number; readers: number } } } }>(url);
+  expect(deployed.artifacts.flink_shape?.size).toMatchObject({ slots: 3, readers: 3 });
+  await waitFor('custom Flink CDC cluster streaming', async () => {
+    const cur = await api.get<{ lifecycle: string; status: unknown }>(url);
+    if (cur.lifecycle === 'failed') throw new Error(JSON.stringify(cur.status));
+    return cur.lifecycle === 'streaming';
+  }, 900_000);
+  const marker = `FLINKC-${tag}`;
+  await ownerSql(`INSERT INTO ${table} (status, total) VALUES ('${marker}', 1)`);
+  await waitFor('row readable in Iceberg', async () => {
+    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
+    return e.records.some((r) => r.value.status === marker);
+  }, 420_000);
+
+  await api.send('DELETE', `${url}?drop_destinations=true`);
+  await waitFor('custom Flink CDC pipeline deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
+  await ownerSql(`DROP TABLE IF EXISTS ${table}`);
+});

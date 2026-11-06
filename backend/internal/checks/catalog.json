@@ -2875,6 +2875,20 @@
    ]
   },
   {
+   "code": "flink_cluster_fit",
+   "section": "Flink CDC",
+   "titles": [
+    "Cluster fits the nodes"
+   ],
+   "whys": [
+    "A custom Flink CDC cluster is packed into TaskManagers the runtime's largest node can hold. When even one slot needs more CPU or memory than that node offers, or a manual TaskManager is bigger than it, its pods would never be scheduled. When the runtime doesn't report its nodes' size, BeziSync can't check and says so."
+   ],
+   "fixes": [
+    "Give each slot less CPU or memory in Review → Size, or add bigger nodes to the runtime.",
+    "Use the automatic shape, or smaller TaskManagers, in Review → Size."
+   ]
+  },
+  {
    "code": "starrocks_config",
    "section": "StarRocks",
    "titles": [

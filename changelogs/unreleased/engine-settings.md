@@ -1,6 +1,7 @@
 type: minor
 
 ### Added
+- **Custom Flink CDC clusters** - a Flink CDC pipeline can name how many readers it runs and what each one needs; BeziSync packs them into TaskManagers that fit the runtime's nodes when it deploys (or takes the TaskManagers you set) and keeps that shape until the next deploy. Preflight blocks a cluster no node can hold, and says so when the runtime doesn't report its nodes.
 - **Custom sizes for Debezium pipelines** - in Expert mode a pipeline can run at its own CPU (0.25 to 8) and memory (512 MiB to 16 GiB); BeziSync works out the Java heap so the JVM always keeps room. A project's largest size and a destination's smallest size apply to it by CPU and memory.
 - **What a deploy changes in the settings** - Review's final checks, a deploy or rollback confirmation, the version diff and an approval request list each setting a deploy changes, from what to what, grouped by what it does to the running pipeline (restart, first copy, next copy, starts over), heaviest first.
 - **Engine settings in Review** - Expert mode gets an Engine settings card: typed settings grouped by when they matter, each with its bounds, default and what changing it does, and advanced Debezium properties as one row per key, each checked by the server as you type (with the reason and where to set it instead when refused, or the offer to use the typed setting).

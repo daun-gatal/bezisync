@@ -26,6 +26,8 @@ import (
 
 // FlinkInput is what a Flink CDC compile needs besides the spec and the connections.
 type FlinkInput struct {
+	// Cluster is a custom cluster's resolved shape (services.FlinkSizeOf); nil for the presets.
+	Cluster *engine.FlinkSize
 	// RuntimeKind ("docker" or "kubernetes") decides the JobManager's address.
 	RuntimeKind string
 	// Columns are each spec table's columns as they were at deploy (nil when unknown). A table
@@ -137,6 +139,12 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	size, ok := engine.FlinkSizes[spec.Policies.Resources]
 	if !ok {
 		size = engine.FlinkSizes["small"]
+	}
+	if spec.Policies.Resources == "custom" {
+		if in.Cluster == nil {
+			return nil, problem.New(422, "flink_cluster", "A custom Flink CDC cluster needs its shape resolved for the runtime.")
+		}
+		size = *in.Cluster
 	}
 	parallelism := size.Parallelism()
 
@@ -340,7 +348,7 @@ func flinkConf(c connectors.CompileContext, runtimeKind string, size engine.Flin
 		{"rest.bind-address", "127.0.0.1"},
 		{"jobmanager.memory.process.size", memSize(size.JobManagerMemory)},
 		{"taskmanager.memory.process.size", memSize(size.TaskManagerMemory)},
-		{"taskmanager.numberOfTaskSlots", strconv.Itoa(engine.FlinkSlots)},
+		{"taskmanager.numberOfTaskSlots", strconv.Itoa(size.SlotsPerTaskManager())},
 		{"parallelism.default", strconv.Itoa(size.Parallelism())},
 		{"pipeline.max-parallelism", "128"},
 		{"execution.checkpointing.interval", strconv.Itoa(fc.CommitSeconds) + " s"},

@@ -144,7 +144,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       ...(resources === 'custom' && !flink ? { custom_resources: custom } : {}),
     },
     advanced: flink ? {} : advancedValues,
-    ...(flink ? { flink_cdc: flinkSpecBlock(fc) } : {}),
+    // A custom cluster is kept only while the size is custom (the server refuses it otherwise).
+    ...(flink ? { flink_cdc: flinkSpecBlock(resources === 'custom' ? fc : { ...fc, cluster: undefined }) } : {}),
   };
   // tuning is dumped last, and only when set: the same here, or the draft never matches.
   delete nextSpec.tuning;
@@ -323,7 +324,9 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                 })),
                 ...(expert && !flink
                   ? [{ value: 'custom' as const, label: 'Custom', description: 'Your own CPU and memory; BeziSync works out the Java heap.' }]
-                  : []),
+                  : flink && fc.cluster
+                    ? [{ value: 'custom' as const, label: 'Custom', description: `${fc.cluster.parallelism} readers, each ${fc.cluster.slot.cpu} CPU and ${fc.cluster.slot.memory}.` }]
+                    : []),
               ]}
             />
           )}

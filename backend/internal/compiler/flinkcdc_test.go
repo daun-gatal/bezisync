@@ -16,6 +16,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
@@ -370,5 +371,42 @@ func TestCompileFlinkSQLServer(t *testing.T) {
 	}
 	if strings.Contains(got.Pipeline, "heartbeat") {
 		t.Fatal(got.Pipeline)
+	}
+}
+
+// A custom cluster compiles to the shape the services resolved (packed, or stored at deploy), and
+// never without one.
+func TestCompileFlinkCustomCluster(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"policies": map[string]any{"resources": "custom"},
+		"flink_cdc": map[string]any{"cluster": map[string]any{"parallelism": 6, "slot": map[string]any{"cpu": "1", "memory": "2Gi"},
+			"job_manager": map[string]any{"cpu": "0.5", "memory": "1536Mi"}}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "customer_id", "total"}}
+	if _, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); code(err) != "flink_cluster" {
+		t.Fatal(err)
+	}
+	size := engine.Pack(6, 1000, 2048, "0.5", "1536Mi", engine.Node{CPUMilli: 4000, MemoryMiB: 8192}).Size
+	in.Cluster = &size
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"taskmanager.numberOfTaskSlots: 3", "parallelism.default: 6", "taskmanager.memory.process.size: 6656m", "jobmanager.memory.process.size: 1536m"} {
+		if !strings.Contains(got.FlinkConf, line) {
+			t.Errorf("%s not in\n%s", line, got.FlinkConf)
+		}
+	}
+	if got.Size.TaskManagers != 2 || !strings.Contains(got.Pipeline, `parallelism: "6"`) {
+		t.Fatalf("%+v\n%s", got.Size, got.Pipeline)
+	}
+	// Another shape is another config (the controller replaces the cluster only on a redeploy,
+	// which packs again).
+	other := engine.Pack(6, 1000, 2048, "0.5", "1536Mi", engine.Node{CPUMilli: 16000, MemoryMiB: 65536}).Size
+	in.Cluster = &other
+	again, _ := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if again.ConfigHash() == got.ConfigHash() || again.Size.TaskManagers != 1 {
+		t.Fatal("the shape must be part of what runs")
 	}
 }

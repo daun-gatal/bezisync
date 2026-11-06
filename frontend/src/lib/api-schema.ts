@@ -3274,6 +3274,8 @@ export interface components {
          * @description Choices of a pipeline that runs on Flink CDC. Unset fields take their default; returned only when something is set.
          */
         FlinkCDCSpec: {
+            /** @description A custom cluster, with policies.resources: custom. */
+            cluster?: components["schemas"]["FlinkCluster"] | null;
             /**
              * Commit Seconds
              * @description How often the position is saved and, for Iceberg, new data becomes visible (default 60).
@@ -3301,6 +3303,30 @@ export interface components {
              * @description What happens when a source table changes shape (default apply).
              */
             schema_changes?: ("apply" | "ignore" | "stop") | null;
+        };
+        /**
+         * FlinkCluster
+         * @description A custom Flink CDC cluster (with policies.resources: custom): how many readers, what each needs and, by default, BeziSync packs the slots into TaskManagers the runtime's nodes can hold when the pipeline is deployed.
+         */
+        FlinkCluster: {
+            /** @description The JobManager's CPU (0.25 to 2) and memory (768Mi to 8Gi). */
+            job_manager: components["schemas"]["SlotSize"];
+            /**
+             * Parallelism
+             * @description How many readers copy and stream at once (1 to 128). Fixed once deployed: changing it starts over.
+             */
+            parallelism: number;
+            /**
+             * Shape
+             * @description auto: BeziSync packs the slots for the runtime's nodes at deploy; manual: task_managers as written.
+             * @default auto
+             * @enum {string}
+             */
+            shape: "auto" | "manual";
+            /** @description What each reader's slot needs: CPU 0.25 to 4, memory 512Mi to 8Gi. */
+            slot: components["schemas"]["SlotSize"];
+            /** @description A manual shape's TaskManagers (only with shape: manual). */
+            task_managers?: components["schemas"]["ManualTaskManagers"] | null;
         };
         /**
          * FlinkSetting
@@ -3582,6 +3608,26 @@ export interface components {
             }[];
             /** Yaml */
             yaml: string;
+        };
+        /**
+         * ManualTaskManagers
+         * @description TaskManagers of a manual Flink CDC cluster shape: count × slots must cover the parallelism, each slot at least 512Mi.
+         */
+        ManualTaskManagers: {
+            /** Count */
+            count: number;
+            /**
+             * Cpu
+             * @description Each TaskManager's CPU: 0.5 to 16, in quarters.
+             */
+            cpu: string;
+            /**
+             * Memory
+             * @description Each TaskManager's memory: 1Gi to 64Gi in steps of 256Mi; whole GiB written as Gi.
+             */
+            memory: string;
+            /** Slots */
+            slots: number;
         };
         /** MeRead */
         MeRead: {
@@ -4144,6 +4190,7 @@ export interface components {
             latency_target_seconds: number;
             /**
              * Resources
+             * @description A preset size, or custom: custom_resources (Debezium) or flink_cdc.cluster (Flink CDC).
              * @default small
              * @enum {string}
              */
@@ -5230,6 +5277,19 @@ export interface components {
             } | null;
             /** Required */
             required: boolean;
+        };
+        /** SlotSize */
+        SlotSize: {
+            /**
+             * Cpu
+             * @description CPU in quarters ("1.5").
+             */
+            cpu: string;
+            /**
+             * Memory
+             * @description Memory in steps of 256Mi; whole GiB written as Gi ("2Gi").
+             */
+            memory: string;
         };
         /** SnapshotRequest */
         SnapshotRequest: {

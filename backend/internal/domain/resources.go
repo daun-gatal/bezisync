@@ -42,6 +42,15 @@ var (
 
 // ParseCPU reads a custom CPU ("1.5" → 1500); false unless canonical and in bounds.
 func ParseCPU(s string) (int, bool) {
+	milli, ok := ParseCPUAny(s)
+	if !ok || milli < MinCustomCPUMilli || milli > MaxCustomCPUMilli {
+		return 0, false
+	}
+	return milli, true
+}
+
+// ParseCPUAny reads a canonical CPU of any size (quarters; no leading zero).
+func ParseCPUAny(s string) (int, bool) {
 	m := cpuRe.FindStringSubmatch(s)
 	if m == nil {
 		return 0, false
@@ -56,7 +65,7 @@ func ParseCPU(s string) (int, bool) {
 	case "75":
 		milli += 750
 	}
-	if (whole > 0 && m[1][0] == '0') || milli < MinCustomCPUMilli || milli > MaxCustomCPUMilli {
+	if (whole > 0 && m[1][0] == '0') || milli == 0 {
 		return 0, false
 	}
 	return milli, true
@@ -79,6 +88,15 @@ func FormatCPU(milli int) string {
 // ParseMemory reads a custom memory ("1536Mi" → 1536, "2Gi" → 2048); false unless canonical and in
 // bounds.
 func ParseMemory(s string) (int, bool) {
+	mib, ok := ParseMemoryAny(s)
+	if !ok || mib < MinCustomMemory || mib > MaxCustomMemory {
+		return 0, false
+	}
+	return mib, true
+}
+
+// ParseMemoryAny reads a canonical memory of any size (steps of 256 MiB).
+func ParseMemoryAny(s string) (int, bool) {
 	m := memoryRe.FindStringSubmatch(s)
 	if m == nil {
 		return 0, false
@@ -90,7 +108,7 @@ func ParseMemory(s string) (int, bool) {
 	} else if n%1024 == 0 {
 		return 0, false // whole GiB are written as Gi
 	}
-	if mib%256 != 0 || mib < MinCustomMemory || mib > MaxCustomMemory {
+	if mib%256 != 0 {
 		return 0, false
 	}
 	return mib, true

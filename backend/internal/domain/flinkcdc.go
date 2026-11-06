@@ -26,6 +26,8 @@ type FlinkCDCSpec struct {
 	CommitSeconds int `json:"commit_seconds"`
 	// FlinkConf are Flink settings chosen from the catalogue (engine/flinkcdc), key → value.
 	FlinkConf map[string]string `json:"flink_conf"`
+	// Cluster is the custom cluster (policies.resources "custom"). Dumped only when set.
+	Cluster *FlinkCluster `json:"cluster"`
 }
 
 // Flink CDC choices and their defaults.
@@ -39,7 +41,7 @@ var (
 
 // Empty reports a block with nothing chosen.
 func (f FlinkCDCSpec) Empty() bool {
-	return f.SchemaChanges == "" && f.NewColumns == "" && f.FreshnessSeconds == 0 && f.CommitSeconds == 0 && len(f.FlinkConf) == 0
+	return f.SchemaChanges == "" && f.NewColumns == "" && f.FreshnessSeconds == 0 && f.CommitSeconds == 0 && len(f.FlinkConf) == 0 && f.Cluster == nil
 }
 
 // Effective fills every unset choice with its default.
@@ -66,6 +68,7 @@ func (f FlinkCDCSpec) Effective() FlinkCDCSpec {
 
 func (f FlinkCDCSpec) clone() FlinkCDCSpec {
 	out := f
+	out.Cluster = f.Cluster.clone()
 	if f.FlinkConf != nil {
 		out.FlinkConf = make(map[string]string, len(f.FlinkConf))
 		for k, v := range f.FlinkConf {
@@ -97,6 +100,9 @@ func decodeFlinkCDC(v *val.V, loc val.Loc, raw any) FlinkCDCSpec {
 		if m, ok := v.StrDict(f.Loc, f.Raw); ok && len(m) > 0 {
 			out.FlinkConf = m
 		}
+	}
+	if f := o.Get("cluster"); f.Present && !f.IsNull() {
+		out.Cluster = decodeCluster(v, f.Loc, f.Raw)
 	}
 	o.Forbid()
 	return out
@@ -145,6 +151,9 @@ func dumpFlinkCDC(f FlinkCDCSpec) *om.Map {
 			conf.Set(k, f.FlinkConf[k])
 		}
 		m.Set("flink_conf", conf)
+	}
+	if f.Cluster != nil {
+		m.Set("cluster", dumpCluster(f.Cluster))
 	}
 	return m
 }

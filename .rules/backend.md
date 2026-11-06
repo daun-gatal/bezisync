@@ -344,8 +344,15 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   key). A registry key BeziSync compiles must be `Derived`; `TestRegistryKeysAreNotCompiledByBeziSync`
   holds that. Sizes: `domain.ResourcePresets` are the presets in numbers (`ResourceAmount`), and
   `policies.resources: custom` with `custom_resources` (canonical CPU quarters and 256 MiB memory
-  steps, `ParseCPU`/`ParseMemory`) is a Debezium-only custom size; `compiler.ResourceFor` is the
-  container's request (heap `domain.HeapMiB`), and limits compare amounts (`Within`). `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  steps, `ParseCPU`/`ParseMemory`) is a Debezium custom size; `compiler.ResourceFor` is the
+  container's request (heap `domain.HeapMiB`), and limits compare amounts (`Within`). A Flink CDC
+  custom size is `flink_cdc.cluster` (`domain.FlinkCluster`; `decodeSpec` holds custom ⇔ exactly
+  one of the two): `engine.Pack` (pure) packs it for the largest node the drivers report
+  (`node_cpu_max`, `node_memory_max`), and `services.FlinkSizeOf` is the one way to its shape —
+  preset, manual, the `flink_shape` artifact Deploy stores for the spec's hash (I3: a running
+  pipeline's config hash never follows the nodes), or packed now for a draft. Checks and the
+  compiler (`FlinkInput.Cluster`) take that resolved `FlinkSize`; `flink_cluster_fit` lives in
+  the runtime section, so a forced deploy can't skip it. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

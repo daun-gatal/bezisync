@@ -457,6 +457,17 @@ func decodeSpec(v *val.V, loc val.Loc, raw any) PipelineSpec {
 			v.ValueError(loc, "column rules for tables that are not captured: "+strings.Join(unknown, ", "))
 		}
 	}
+	// A custom size is custom_resources (Debezium) or flink_cdc.cluster (Flink CDC), never both,
+	// and only with resources: custom.
+	custom, cluster := spec.Policies.Custom != nil, spec.FlinkCDC.Cluster != nil
+	switch {
+	case spec.Policies.Resources == "custom" && !custom && !cluster:
+		v.ValueError(loc.Add("policies", "custom_resources"), "a custom size needs custom_resources (Debezium) or flink_cdc.cluster (Flink CDC)")
+	case custom && cluster:
+		v.ValueError(loc.Add("policies", "custom_resources"), "custom_resources is for Debezium and flink_cdc.cluster for Flink CDC: use one")
+	case spec.Policies.Resources != "custom" && (custom || cluster):
+		v.ValueError(loc.Add("policies", "resources"), "a custom size needs resources: custom")
+	}
 	return spec
 }
 
@@ -738,9 +749,7 @@ func decodePolicies(v *val.V, loc val.Loc, raw any) Policies {
 			out.Custom = &custom
 		}
 	}
-	if (out.Resources == "custom") != (out.Custom != nil) {
-		v.Fail(o.Loc().Add("custom_resources"), "value_error", "Value error, a custom size (resources: custom) needs custom_resources, and only it")
-	}
+
 	if f := o.Get("errors"); f.Present {
 		e := v.Model(f.Loc, f.Raw, "ErrorPolicy")
 		if !e.Failed {

@@ -986,15 +986,18 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		{Key: "runtime", Title: "Runtime · " + rt.Name, Report: rtReport},
 	}
 	capacity := CapacityCheck(rt.Capacity, spec.Policies)
+	var fit *checks.Check
 	if EngineOf(p) == engine.FlinkCDC {
-		capacity = FlinkCapacityCheck(rt.Capacity, spec.Policies.Resources)
+		packed := FlinkSizeOf(p, spec, rt.Capacity)
+		capacity = FlinkCapacityCheck(rt.Capacity, packed.Size)
+		fit = flinkClusterFitCheck(spec, packed, rt.Capacity)
 	}
 	if c := capacity; c != nil {
 		// Appended after summarizing, like the Python report (no doc link, summary unchanged).
 		sections[2].Report.Checks = append(sections[2].Report.Checks, *c)
 	}
 	sinkDescriptor, _ := connectors.Describe("sink", sinkConn.Type)
-	for _, c := range []*checks.Check{PlatformCheck(rt.Capacity, sinkDescriptor), AgentHealthPortCheck(rt, sinkDescriptor)} {
+	for _, c := range []*checks.Check{PlatformCheck(rt.Capacity, sinkDescriptor), AgentHealthPortCheck(rt, sinkDescriptor), fit} {
 		if c != nil {
 			sections[2].Report = checks.Summarize(append(sections[2].Report.Checks, *c), started)
 		}
@@ -1220,6 +1223,13 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 		}
 	}
 	p.Artifacts = artifacts
+	if EngineOf(p) == engine.FlinkCDC {
+		var capacity map[string]any
+		if rt != nil {
+			capacity = rt.Capacity
+		}
+		applyFlinkShape(p, domain.MustSpec(map[string]any(v.Spec)), capacity)
+	}
 	p.DeployedVersionID = &v.ID
 	p.DesiredState = "running"
 	now := db.Now()

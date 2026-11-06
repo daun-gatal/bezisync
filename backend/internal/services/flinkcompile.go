@@ -135,6 +135,14 @@ func flinkInput(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 	if rt != nil {
 		in.RuntimeKind = rt.Kind
 	}
+	if spec.Policies.Resources == "custom" {
+		var capacity map[string]any
+		if rt != nil {
+			capacity = rt.Capacity
+		}
+		size := FlinkSizeOf(p, spec, capacity).Size
+		in.Cluster = &size
+	}
 	if startup, ok := p.Artifacts[ArtifactStartup].(map[string]any); ok {
 		in.Startup = startup
 	}

@@ -2234,6 +2234,25 @@ Fix:
 Upgrade the agent to BeziSync 0.3.0 or later (Settings → Runtimes shows the install command).
 ```
 
+<a id="flink-cluster-fit"></a>
+### `flink_cluster_fit`
+
+**Cluster fits the nodes**
+
+- Why: A custom Flink CDC cluster is packed into TaskManagers the runtime's largest node can hold. When even one slot needs more CPU or memory than that node offers, or a manual TaskManager is bigger than it, its pods would never be scheduled. When the runtime doesn't report its nodes' size, BeziSync can't check and says so.
+
+Fix:
+
+```
+Give each slot less CPU or memory in Review → Size, or add bigger nodes to the runtime.
+```
+
+Fix:
+
+```
+Use the automatic shape, or smaller TaskManagers, in Review → Size.
+```
+
 <a id="flink-kubernetes-services"></a>
 ### `flink_kubernetes_services`
 

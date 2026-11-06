@@ -108,6 +108,19 @@ type FlinkSize struct {
 	JobManagerCPU, JobManagerMemory   string
 	TaskManagers                      int
 	TaskManagerCPU, TaskManagerMemory string
+	// Slots per TaskManager and Readers (the parallelism) of a custom cluster; 0 for the presets
+	// (FlinkSlots, and TaskManagers × slots). Omitted when 0: the config hash of the presets must
+	// not change.
+	Slots   int `json:",omitempty"`
+	Readers int `json:",omitempty"`
+}
+
+// SlotsPerTaskManager is how many slots each TaskManager has.
+func (s FlinkSize) SlotsPerTaskManager() int {
+	if s.Slots > 0 {
+		return s.Slots
+	}
+	return FlinkSlots
 }
 
 // FlinkSlots is the task slots of each TaskManager.
@@ -115,13 +128,18 @@ const FlinkSlots = 2
 
 // FlinkSizes are the presets, by the spec's policies.resources.
 var FlinkSizes = map[string]FlinkSize{
-	"small":  {"500m", "1Gi", 1, "1", "2Gi"},
-	"medium": {"500m", "1Gi", 2, "1", "2Gi"},
-	"large":  {"1", "1536Mi", 4, "1", "2Gi"},
+	"small":  {JobManagerCPU: "500m", JobManagerMemory: "1Gi", TaskManagers: 1, TaskManagerCPU: "1", TaskManagerMemory: "2Gi"},
+	"medium": {JobManagerCPU: "500m", JobManagerMemory: "1Gi", TaskManagers: 2, TaskManagerCPU: "1", TaskManagerMemory: "2Gi"},
+	"large":  {JobManagerCPU: "1", JobManagerMemory: "1536Mi", TaskManagers: 4, TaskManagerCPU: "1", TaskManagerMemory: "2Gi"},
 }
 
 // Parallelism is how many readers and writers the size runs.
-func (s FlinkSize) Parallelism() int { return s.TaskManagers * FlinkSlots }
+func (s FlinkSize) Parallelism() int {
+	if s.Readers > 0 {
+		return s.Readers
+	}
+	return s.TaskManagers * FlinkSlots
+}
 
 // TotalMemoryMiB is what the whole cluster asks for.
 func (s FlinkSize) TotalMemoryMiB() int {

@@ -639,8 +639,16 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   or 30 s). Expert mode adds Flink settings from a fixed list (checkpoint timeouts, restart
   strategy, memory fractions, timeouts), each with its range; BeziSync keeps the rest.
 - **Size**: small runs one TaskManager (2 readers), medium two (4), large four (8); each
-  TaskManager asks for 1 CPU and 2 GiB, the JobManager 1 to 1.5 GiB. Preflight checks the runtime
-  has room (`runtime_capacity`). Every reader copies in parallel, but streaming reads the binlog or
+  TaskManager asks for 1 CPU and 2 GiB, the JobManager 1 to 1.5 GiB. A **custom cluster**
+  (`policies: {resources: custom}` with `flink_cdc: {cluster: {parallelism, slot: {cpu, memory},
+  job_manager: {cpu, memory}}}`) names how many readers run (1 to 128) and what each reader's slot
+  needs (CPU 0.25 to 4, memory 512 MiB to 8 GiB); when it deploys, BeziSync packs the slots into the
+  fewest TaskManagers the runtime's largest node holds (at most 8 slots each, plus 512 MiB per
+  TaskManager) and keeps that shape until the next deploy, so nodes coming and going never restart
+  it. `shape: manual` with `task_managers: {count, slots, cpu, memory}` sets the TaskManagers
+  yourself. `flink_cluster_fit` blocks a cluster whose slot or TaskManager is bigger than any node,
+  even when forced, and is *unknown* when the runtime doesn't report its nodes. Preflight checks the
+  runtime has room (`runtime_capacity`). Every reader copies in parallel, but streaming reads the binlog or
   WAL with one. On PostgreSQL each reader opens its own temporary replication slot while it copies,
   so a first copy needs 1 + readers free slots and WAL senders: `flink_replication_slots` blocks a
   deploy that would run out part-way. Kubernetes runtimes need the Role to allow Services

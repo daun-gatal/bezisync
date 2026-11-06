@@ -554,15 +554,20 @@ func (k *KubernetesDriver) Capacity(ctx context.Context) map[string]any {
 	if err != nil {
 		return nil
 	}
-	var allocCPU float64
-	var allocMem int64
+	var allocCPU, nodeCPU float64
+	var allocMem, nodeMem int64
 	var archs []string
 	for _, n := range nodes.Items {
 		archs = append(archs, n.Status.NodeInfo.Architecture)
 		cpu := n.Status.Allocatable[corev1.ResourceCPU]
 		mem := n.Status.Allocatable[corev1.ResourceMemory]
-		allocCPU += QuantityCPU(cpu.String())
-		allocMem += QuantityMem(mem.String())
+		c, m := QuantityCPU(cpu.String()), QuantityMem(mem.String())
+		allocCPU += c
+		allocMem += m
+		// The largest node a pod can still land on: what a Flink CDC TaskManager must fit.
+		if !n.Spec.Unschedulable {
+			nodeCPU, nodeMem = max(nodeCPU, c), max(nodeMem, m)
+		}
 	}
 	pods, err := k.cs.CoreV1().Pods(k.namespace).List(ctx, metav1.ListOptions{LabelSelector: ManagedBy + "=bezisync"})
 	if err != nil {
@@ -580,7 +585,8 @@ func (k *KubernetesDriver) Capacity(ctx context.Context) map[string]any {
 		}
 	}
 	return map[string]any{"cpu_allocatable": allocCPU, "memory_allocatable": allocMem, "cpu_requested": reqCPU,
-		"memory_requested": reqMem, "workloads": len(pods.Items), "architectures": Architectures(archs...)}
+		"memory_requested": reqMem, "workloads": len(pods.Items), "architectures": Architectures(archs...),
+		"node_cpu_max": nodeCPU, "node_memory_max": nodeMem}
 }
 
 // --- managed-cluster bearer tokens (GKE, EKS) ---

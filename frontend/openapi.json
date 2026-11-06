@@ -2876,6 +2876,17 @@
         "additionalProperties": false,
         "description": "Choices of a pipeline that runs on Flink CDC. Unset fields take their default; returned only when something is set.",
         "properties": {
+          "cluster": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlinkCluster"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A custom cluster, with policies.resources: custom."
+          },
           "commit_seconds": {
             "anyOf": [
               {
@@ -2953,6 +2964,55 @@
           }
         },
         "title": "FlinkCDCSpec",
+        "type": "object"
+      },
+      "FlinkCluster": {
+        "additionalProperties": false,
+        "description": "A custom Flink CDC cluster (with policies.resources: custom): how many readers, what each needs and, by default, BeziSync packs the slots into TaskManagers the runtime's nodes can hold when the pipeline is deployed.",
+        "properties": {
+          "job_manager": {
+            "$ref": "#/components/schemas/SlotSize",
+            "description": "The JobManager's CPU (0.25 to 2) and memory (768Mi to 8Gi)."
+          },
+          "parallelism": {
+            "description": "How many readers copy and stream at once (1 to 128). Fixed once deployed: changing it starts over.",
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Parallelism",
+            "type": "integer"
+          },
+          "shape": {
+            "default": "auto",
+            "description": "auto: BeziSync packs the slots for the runtime's nodes at deploy; manual: task_managers as written.",
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "title": "Shape",
+            "type": "string"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/SlotSize",
+            "description": "What each reader's slot needs: CPU 0.25 to 4, memory 512Mi to 8Gi."
+          },
+          "task_managers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManualTaskManagers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A manual shape's TaskManagers (only with shape: manual)."
+          }
+        },
+        "required": [
+          "parallelism",
+          "slot",
+          "job_manager"
+        ],
+        "title": "FlinkCluster",
         "type": "object"
       },
       "FlinkSetting": {
@@ -3648,6 +3708,42 @@
           "documents"
         ],
         "title": "ManifestRead",
+        "type": "object"
+      },
+      "ManualTaskManagers": {
+        "additionalProperties": false,
+        "description": "TaskManagers of a manual Flink CDC cluster shape: count \u00d7 slots must cover the parallelism, each slot at least 512Mi.",
+        "properties": {
+          "count": {
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "cpu": {
+            "description": "Each TaskManager's CPU: 0.5 to 16, in quarters.",
+            "title": "Cpu",
+            "type": "string"
+          },
+          "memory": {
+            "description": "Each TaskManager's memory: 1Gi to 64Gi in steps of 256Mi; whole GiB written as Gi.",
+            "title": "Memory",
+            "type": "string"
+          },
+          "slots": {
+            "maximum": 8,
+            "minimum": 1,
+            "title": "Slots",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "slots",
+          "cpu",
+          "memory"
+        ],
+        "title": "ManualTaskManagers",
         "type": "object"
       },
       "MeRead": {
@@ -5168,6 +5264,7 @@
           },
           "resources": {
             "default": "small",
+            "description": "A preset size, or custom: custom_resources (Debezium) or flink_cdc.cluster (Flink CDC).",
             "enum": [
               "small",
               "medium",
@@ -7931,6 +8028,27 @@
           "delete_handling_from"
         ],
         "title": "SinkUnwrap",
+        "type": "object"
+      },
+      "SlotSize": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu": {
+            "description": "CPU in quarters (\"1.5\").",
+            "title": "Cpu",
+            "type": "string"
+          },
+          "memory": {
+            "description": "Memory in steps of 256Mi; whole GiB written as Gi (\"2Gi\").",
+            "title": "Memory",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory"
+        ],
+        "title": "SlotSize",
         "type": "object"
       },
       "SnapshotRequest": {
