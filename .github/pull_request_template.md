@@ -28,7 +28,7 @@ Closes #
 
 <!-- Describe how you tested your changes. See `.rules/testing.md` ("Who runs what"). -->
 
-- [ ] `make verify` passes locally
+- [ ] `make verify` passes locally (includes `make contracts-check`)
 - [ ] Helm charts: `make chart-test` when a chart changed
 - [ ] Docker build or compose flow tested when relevant
 - [ ] Security-sensitive paths reviewed when relevant
@@ -70,7 +70,8 @@ Use `major` for breaking changes, `minor` for new features, and `patch` for bug 
 
 ## Checklist
 
-- [ ] I read `AGENTS.md` or `CLAUDE.md`
+- [ ] I read `AGENTS.md` and went through `.rules/pre-pr.md`
+- [ ] I updated the `README.md` contracts of directories I changed (`make contracts-check` passes)
 - [ ] I kept secrets out of logs, API responses, compiled previews, and test fixtures
 - [ ] I added or updated tests for behavior changes
 - [ ] I updated docs or guides for build/run/test/release changes

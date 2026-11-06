@@ -1,0 +1,46 @@
+# lib
+
+## Overview
+The web UI's data and domain layer: the typed API client, the session and project context, one TanStack Query hook module per API area, and pure helpers (formatting, status, errors, secret references). Screens in `features/` and the shell in `app/` call these hooks instead of talking to the API themselves, so server state lives only in TanStack Query and every request goes through one client.
+
+## Interface
+- `[api.ts:client]` — the `openapi-fetch` client typed by `[api-schema.ts:paths]`; `[api.ts:unwrap]` turns a result into data or throws `[api.ts:ApiError]` (wrapping a `[api.ts:Problem]`); `[api.ts:problemMessage]`, `[api.ts:readCookie]`, `[api.ts:setUnauthorizedHandler]`, `[api.ts:Schemas]` (the component schemas).
+- `[api-schema.ts:paths]`, `[api-schema.ts:components]`, `[api-schema.ts:operations]` — generated from `frontend/openapi.json`; never edited by hand.
+- `[session.tsx:useMeQuery]` (`[session.tsx:meKey]`), `[session.tsx:useProviders]`, `[session.tsx:useLogin]`, `[session.tsx:useLogout]`, `[session.tsx:useUpdateMe]` — the signed-in person and sign-in options.
+- `[session.tsx:ProjectProvider]` / `[session.tsx:useProject]` — the current project, `can(permission)` and `expert` mode for everything inside a project route.
+- API-area hooks: `[pipelines.ts:usePipelines]` / `[pipelines.ts:usePipeline]` and the rest of `pipelines.ts` (create/update, preflight, deploy, lifecycle, delete, snapshots, versions, config, logs, events, activity, metrics, offsets and saved positions, diff, change-request decisions, schema review); `[connections.ts:useConnections]` with `[connections.ts:useConnectorTypes]`, the create/update/delete/check mutations, `[connections.ts:useDraftCheck]`, `[connections.ts:useDiscovery]` and the capability helpers `[connections.ts:sinkCapsOf]` / `[connections.ts:captureOf]` (`[connections.ts:TYPE_LABEL]`); `[alerts.ts:useAlerts]`, `[alerts.ts:useAcknowledge]`, rules and channels (`[alerts.ts:useRules]`, `[alerts.ts:useChannels]`, `[alerts.ts:useTestChannel]`, …), `[alerts.ts:useInbox]` / `[alerts.ts:useReadAll]`; `[debezium.ts:useCatalog]` / `[debezium.ts:useDebeziumImages]` (with `[debezium.ts:imageByPipeline]`, `[debezium.ts:shortImage]`); `[engines.ts:useEngines]` / `[engines.ts:useEngineCatalog]`; `[policies.ts:usePolicies]`; `[templates.ts:useTemplates]` (create, delete, `[templates.ts:templateSummary]`); `[copy.ts:useCopyTargets]` / `[copy.ts:useCopyConnections]` (`[copy.ts:savedSecrets]`, `[copy.ts:missingLabel]`); `[secretRefs.ts:useSecretStores]`, `[secretRefs.ts:useStoreSecrets]`, `[secretRefs.ts:useSecretKeys]`, `[secretRefs.ts:useRefCheck]`; `[transforms.ts:useTransformPreview]`; `[about.ts:useSystemInfo]` (plus `[about.ts:REPO_URL]`, `[about.ts:WEB_LICENSES_URL]`, `[about.ts:SERVER_LICENSES_URL]`); `[useAlertCount.ts:useAlertCount]` (firing alerts among the open ones).
+- `[paging.ts:useCursorPages]` — pages a cursor-paged endpoint at the viewer's page size.
+- `[useLiveUpdates.ts:useLiveUpdates]` — the project's server-sent event stream, refreshing pipeline queries.
+- Pipeline status: `[status.tsx:statusOf]`, `[status.tsx:isStale]`, `[status.tsx:HealthBadge]`, `[status.tsx:LifecycleBadge]`, `[status.tsx:needsAttention]`, `[status.tsx:pipelineTone]`, `[status.tsx:fleetGroup]` (`[status.tsx:FLEET]`), `[status.tsx:snapshotProgress]`, the label tables `[status.tsx:LIFECYCLE]` / `[status.tsx:HEALTH]`.
+- Errors: `[errors.ts:describeError]` (what happened, why, what to do, request ID), `[errors.ts:isRetryable]`, `[errors.ts:wrongPassword]`.
+- Engines: `[engines.ts:engineGate]`, `[engines.ts:runs]`, `[engines.ts:engineChoices]`, `[engines.ts:pickEngine]`, `[engines.ts:flinkChoices]`, `[engines.ts:flinkSpecBlock]`, `[engines.ts:ENGINE_TITLE]`, `[engines.ts:ENGINE_PITCH]`.
+- Settings: `[settings.ts:Setting]` and `[settings.ts:Impact]` (the server registry's types), `[settings.ts:IMPACT]` / `[settings.ts:IMPACT_ORDER]` / `[settings.ts:heaviest]`, `[settings.ts:STAGES]`, `[settings.ts:tuningSettings]`, `[settings.ts:settingError]` / `[settings.ts:canonicalSetting]` (mirror `engine.CheckSetting` / `CanonicalSetting`), `[settings.ts:jsonbSorted]`, `[settings.ts:useClassify]`.
+- Flink CDC clusters: `[cluster.ts:usePackCluster]` (the server's `cluster:pack`), `[cluster.ts:clusterFromPreset]`, `[cluster.ts:streamingFrom]`, `[cluster.ts:streamingError]`, `[cluster.ts:manualError]`, bounds (`[cluster.ts:SLOT_CPUS]`, `[cluster.ts:MAX_PARALLELISM]`, `[cluster.ts:MAX_TASK_MANAGERS]`, `[cluster.ts:MAX_SLOTS]` …), `[cluster.ts:mib]`, `[cluster.ts:memoryLabel]`.
+- Secret references: `[secretRefs.ts:parseRef]`, `[secretRefs.ts:formatRef]`, `[secretRefs.ts:guessKey]`.
+- Policies: `[policies.ts:allows]`, `[policies.ts:sizeAllowed]`, `[policies.ts:SIZES]`.
+- Preferences: `[theme.ts:useTheme]` / `[theme.ts:setTheme]` / `[theme.ts:readTheme]` / `[theme.ts:applyTheme]` (`[theme.ts:THEMES]`), `[tour.ts:readTourSeen]` / `[tour.ts:writeTourSeen]`.
+- Pure helpers: `[format.ts:formatDateTime]`, `[format.ts:formatTime]`, `[format.ts:ago]`, `[format.ts:formatBytes]`, `[format.ts:formatCount]`, `[format.ts:formatDuration]`, `[format.ts:slugify]`; `[series.ts:readoutAt]`, `[series.ts:peaks]`; `[feedback.ts:FEEDBACK_KINDS]`, `[feedback.ts:feedbackKind]`, `[feedback.ts:MAX_FEEDBACK]`, `[feedback.ts:describeBrowser]`.
+
+## Invariants
+- Every API call goes through `[api.ts:client]` + `[api.ts:unwrap]` (the event stream in `[useLiveUpdates.ts:useLiveUpdates]` is the one exception): the `csrf` middleware adds `x-csrf-token` from the `bz_csrf` cookie on POST, PUT, PATCH and DELETE, and failures become `[api.ts:ApiError]` (a fetch that throws becomes status 0 `network_error`).
+- A 401 calls the handler set with `[api.ts:setUnauthorizedHandler]`, except for `/auth/login` and `/auth/me`, so a failed sign-in or the initial session probe never triggers the expiry flow.
+- `api-schema.ts` is regenerated with `make openapi` after any backend API change (`bun run check:api` fails on drift).
+- `[session.tsx:useProject]` throws outside a `[session.tsx:ProjectProvider]`; `can` is exactly membership in `project.permissions`.
+- Health is evidence-based: `[status.tsx:isStale]` treats a status older than `[status.tsx:STALE_AFTER_MS]` (60 s) as stale, and `[status.tsx:HealthBadge]` shows Stale (grey) before any health value; an unknown health falls back to Unknown.
+- `[secretRefs.ts:parseRef]` uses the same `ref+<store>://<path>#<key>` grammar as the backend's `internal/secrets` ParseRef; keep them in step.
+- `[feedback.ts:FEEDBACK_KINDS]` mirrors the backend's feedback kinds and `[feedback.ts:MAX_FEEDBACK]` is 5000.
+- `[policies.ts:allows]` treats a null or missing list as "everything allowed"; `[policies.ts:sizeAllowed]` compares against `[policies.ts:SIZES]` order.
+- `[settings.ts:settingError]` and `[settings.ts:canonicalSetting]` must agree with the backend's `engine.CheckSetting` and `CanonicalSetting`; the server re-checks every save. Maps the wizard compares with a stored spec are put in JSONB key order first (`[settings.ts:jsonbSorted]`), or a draft looks changed forever and keeps saving.
+- Clusters are packed by the server (`[cluster.ts:usePackCluster]`), never in the browser, so the preview matches what a deploy packs.
+- `[paging.ts:useCursorPages]` restarts from the newest page when its key or page size changes, and only the newest page polls.
+- Local storage access is wrapped so blocked storage never throws (`[tour.ts:readTourSeen]`; `[theme.ts:readTheme]` via `components/ui/hooks`).
+
+## Side Effects
+- HTTP to `/api/v1/**` (same-origin, cookies) through `[api.ts:client]`; reads the `bz_csrf` cookie.
+- Polling via `refetchInterval`: pipelines 5 s (2 s while deploying, deleting or snapshotting, `[pipelines.ts:usePipeline]`) and 5–30 s for other pipeline views, alerts 10 s, inbox 15 s, Debezium images 10 s.
+- `[useLiveUpdates.ts:useLiveUpdates]` opens an `EventSource` on `/api/v1/projects/{id}/stream` (with credentials), invalidates the project's `pipelines` list and the named `pipeline` on each `pipeline` event, and closes it on unmount.
+- `localStorage`: `bz.theme` (`[theme.ts:THEME_KEY]`), `bz.tour.seen` (`tour.ts`); `[theme.ts:setTheme]` sets or removes `data-theme` on `<html>` and dispatches a `bz:theme` window event.
+- `[session.tsx:useLogout]` clears the whole query cache and navigates to `/login` with `window.location.assign`, whether or not the logout request succeeded.
+
+## Verification
+- Run: `cd frontend && bun run test src/lib`

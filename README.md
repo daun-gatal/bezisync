@@ -80,8 +80,11 @@ it is also the job queue.
 
 Contributions are welcome! Open pull requests against the **`preview`** branch. Run `make verify`
 (CI runs it too) and, if you can, the end-to-end specs your change touches (`make e2e-quick SPECS=…`);
-the full end-to-end suite needs a large local cluster, so a maintainer runs it before merging. [CLAUDE.md](CLAUDE.md) and [`.rules/`](.rules/) explain the
-layout, the conventions and how to test. Please report security issues privately, as described in
+the full end-to-end suite needs a large local cluster, so a maintainer runs it before merging. [AGENTS.md](AGENTS.md) and [`.rules/`](.rules/) explain the
+layout, the conventions and how to test; [ARCHITECTURE.md](ARCHITECTURE.md) maps the code, and every code
+directory has a `README.md` contract to read before you change it. Big designs are recorded as
+[ADRs](docs/adr/README.md). Working with an AI agent? [`.rules/egm.md`](.rules/egm.md) is the path from
+an idea to a validated PR (the [EGM skills](https://github.com/google/elephant-goldfish-model) are optional). Please report security issues privately, as described in
 [SECURITY.md](SECURITY.md).
 
 ## License

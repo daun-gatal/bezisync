@@ -5,11 +5,11 @@ before it merges (who runs which is under *Who runs what* below):
 
 ```bash
 # per commit (minutes)
-make verify-quick GO_PKGS="./internal/api/ …"     # golangci-lint + vet + tsc everywhere, scripts, vitest, only these Go packages, licence files
+make verify-quick GO_PKGS="./internal/api/ …"     # golangci-lint + vet + tsc everywhere, scripts, vitest, only these Go packages, licence files, directory contracts
 make e2e-quick SPECS="tests/23-admin.spec.ts …"   # reuse the cluster, rebuild only changed images, run these specs
 
 # per pull request
-make verify   # backend: golangci-lint, vet, go test -race (+ schema, corpus and check-reference drift); tools: golangci-lint, vet, go test; frontend: API drift, tsc, vitest, build; e2e tsc; licence files
+make verify   # backend: golangci-lint, vet, go test -race (+ schema, corpus and check-reference drift); tools: golangci-lint, vet, go test; frontend: API drift, tsc, vitest, build; e2e tsc; licence files; directory contracts
 make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, runs the Playwright suite
 ```
 
@@ -83,6 +83,11 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   endpoints for authz (404 concealment, 403 permissions), validation and secret non-disclosure;
   every user journey end-to-end in `e2e/tests/` against real Postgres, Kafka and Debezium Server.
 - A bug fix starts with a failing test.
+- Directory contracts are a gate: `make contracts-check` (`tools/cmd/contracts`, also in CI) fails
+  when a code directory outside `.egmignore` has no `README.md`, a section is missing, a link is
+  broken, a cited `[file:Symbol]` no longer exists, or a verification command names a path without
+  tests. Update the contract in the same change as the code ([egm.md](egm.md#directory-contracts)).
+- Before opening a PR, pass [pre-pr.md](pre-pr.md).
 
 ## Who runs what
 

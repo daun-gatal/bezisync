@@ -1,0 +1,13 @@
+# Trees egm-bootstrap, egm-drift-report and `make contracts-check` skip, on top of .gitignore,
+# test folders (__tests__, testdata, …) and hidden folders. See .rules/egm.md.
+
+# Test-only code: the Playwright suite and the per-package test database helper.
+e2e/
+backend/internal/testdb/
+
+# Charts, compose stack, fixtures and AppArmor profiles: configuration, not code contracts.
+deploy/
+
+# Generated or data-only trees.
+changelogs/
+docs/

@@ -1,4 +1,4 @@
-.PHONY: help verify verify-quick verify-backend verify-backend-quick verify-tools verify-frontend e2e e2e-quick e2e-down openapi openapi-check licenses licenses-check dev-db migration demo demo-down demo-smoke chart-test chart-docs
+.PHONY: help verify verify-quick verify-backend verify-backend-quick verify-tools verify-frontend e2e e2e-quick e2e-down openapi openapi-check licenses licenses-check contracts-check dev-db migration demo demo-down demo-smoke chart-test chart-docs
 
 export PATH := $(HOME)/.local/bin:$(HOME)/.local/go/bin:$(HOME)/.local/node/bin:$(PATH)
 TEST_DB = $${BEZISYNC_TEST_DATABASE_URL:-$$(../scripts/dev-db.sh)}
@@ -11,6 +11,7 @@ help:
 	@echo "make e2e-down       remove everything the e2e run created"
 	@echo "make openapi        render frontend/openapi.json from backend/internal/api/openapi.json + typed client"
 	@echo "make licenses       regenerate the licence files the binary and the web image ship (after a dependency change)"
+	@echo "make contracts-check  directory contracts (README.md per code directory, ARCHITECTURE.md) match the code"
 	@echo "make migration m=…  start the next goose migration (SQL)"
 	@echo "make dev-db         start the disposable test Postgres and print its URL"
 	@echo "make demo           start the demo stack (deploy/compose) on http://localhost:8080"
@@ -21,10 +22,10 @@ help:
 dev-db:
 	@scripts/dev-db.sh
 
-verify: verify-backend verify-tools verify-frontend licenses-check
+verify: verify-backend verify-tools verify-frontend licenses-check contracts-check
 
 # While iterating: everything but the race detector and the production build.
-verify-quick: openapi-check verify-backend-quick verify-tools licenses-check
+verify-quick: openapi-check verify-backend-quick verify-tools licenses-check contracts-check
 	cd frontend && bun run typecheck && bun run test
 	cd e2e && npx tsc --noEmit
 
@@ -62,6 +63,10 @@ licenses:
 
 licenses-check:
 	cd tools && go run ./cmd/licenses --check
+
+# README.md per code directory and ARCHITECTURE.md: sections, links, cited symbols, test targets (.rules/egm.md).
+contracts-check:
+	cd tools && go run ./cmd/contracts
 
 migration:
 	scripts/new-migration.sh "$(m)"

@@ -69,9 +69,14 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with: { version: v2.15.0, working-directory: tools }
-      - name: Vet and test (release tool, demo smoke test)
+      - name: Vet and test (release tool, licences, contracts, demo smoke test)
         working-directory: tools
         run: go vet ./... && go test ./...
+      # README.md per code directory and ARCHITECTURE.md: sections, links and cited symbols
+      # match the code (.rules/egm.md).
+      - name: Directory contracts are current
+        working-directory: tools
+        run: go run ./cmd/contracts
       - name: Scripts are clean
         run: shellcheck -S warning scripts/*.sh
 
