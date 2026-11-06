@@ -108,11 +108,41 @@ func TestAdvancedPropertiesFromBeforeKeepSavingButCantDeploy(t *testing.T) {
 	if !strings.Contains(string(forced.Raw), "cannot be skipped") {
 		t.Fatal(string(forced.Raw))
 	}
-	// Removing them deploys.
+	// Removing them leaves the allowed one, which still needs the project policy.
 	cur = admin.get(u).expect(200)
 	clean := map[string]any{"source": edited["source"], "advanced": map[string]any{"debezium.source.poll.interval.ms": "250"}}
 	admin.patch(u, map[string]any{"spec": clean}, ifMatch(cur.At("version"))...).expect(200)
-	if ok := admin.post(u+"/preflight", nil).expect(200).At("ok"); ok != true {
-		t.Fatal(ok)
+	codes := func() map[string]map[string]any {
+		out := map[string]map[string]any{}
+		for _, s := range admin.post(u+"/preflight", nil).expect(200).List("sections") {
+			for _, c := range at(t, s, "report", "checks").([]any) {
+				out[at(t, c, "code").(string)] = c.(map[string]any)
+			}
+		}
+		return out
+	}
+	off := codes()
+	if off["policy_advanced_properties"]["status"] != "fail" || !strings.Contains(off["policy_advanced_properties"]["message"].(string), "debezium.source.poll.interval.ms") {
+		t.Fatal(off["policy_advanced_properties"])
+	}
+	// Allowed by policy: preflight passes, with the property shown as not verified (unknown).
+	admin.put("/api/v1/projects/"+e.pid+"/policies", map[string]any{"allow_advanced_properties": true}).expect(200)
+	pre = admin.post(u+"/preflight", nil).expect(200)
+	if pre.At("ok") != true {
+		t.Fatal(string(pre.Raw))
+	}
+	on := codes()
+	if on["advanced_unverified"]["status"] != "unknown" || on["advanced_unverified"]["blocking"] != false || on["policy_advanced_properties"] != nil {
+		t.Fatal(on["advanced_unverified"])
+	}
+	for _, s := range pre.List("sections") {
+		if at(t, s, "key") == "config" && at(t, s, "report", "summary") != "Ready · 1 not verified" {
+			t.Fatal(at(t, s, "report", "summary"))
+		}
+	}
+	// Turning the policy off again is returned without the key (stored dumps stay unchanged).
+	got := admin.put("/api/v1/projects/"+e.pid+"/policies", map[string]any{}).expect(200)
+	if _, present := got.JSON().(map[string]any)["allow_advanced_properties"]; present {
+		t.Fatal(string(got.Raw))
 	}
 }

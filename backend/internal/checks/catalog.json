@@ -1894,6 +1894,17 @@
    ]
   },
   {
+   "code": "advanced_unverified",
+   "fixes": [],
+   "section": "Deploy",
+   "titles": [
+    "Advanced properties"
+   ],
+   "whys": [
+    "Advanced properties are passed to Debezium Server as typed. BeziSync can't check what they do, so this check is Unknown, never a pass: review them in Review, and approvers see them listed."
+   ]
+  },
+  {
    "code": "config_valid",
    "fixes": [],
    "section": "Deploy",
@@ -2080,6 +2091,19 @@
    ],
    "whys": [
     "This project does not allow {steps}. Admins choose which transform types pipelines may use."
+   ]
+  },
+  {
+   "code": "policy_advanced_properties",
+   "fixes": [
+    "Remove the advanced properties in Review, or ask an Admin to allow them under Settings → Policies."
+   ],
+   "section": "Project policies",
+   "titles": [
+    "Advanced properties"
+   ],
+   "whys": [
+    "This pipeline sets {n} advanced Debezium properties ({keys}); this project does not allow them. BeziSync can't verify raw properties, so an Admin decides whether a project may use them."
    ]
   },
   {

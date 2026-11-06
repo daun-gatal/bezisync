@@ -19,6 +19,8 @@ const (
 	Warn = "warn"
 	Fail = "fail"
 	Skip = "skip"
+	// Unknown is a check BeziSync can't verify (grey, never healthy, not blocking).
+	Unknown = "unknown"
 )
 
 // Categories.
@@ -78,7 +80,7 @@ func Summarize(list []Check, started time.Time) Report {
 	if list == nil {
 		list = []Check{}
 	}
-	fails, warns := 0, 0
+	fails, warns, unknowns := 0, 0, 0
 	for i := range list {
 		if list[i].Doc == "" {
 			list[i].Doc = DocURL(list[i].Code)
@@ -88,6 +90,8 @@ func Summarize(list []Check, started time.Time) Report {
 			fails++
 		case Warn:
 			warns++
+		case Unknown:
+			unknowns++
 		}
 	}
 	var summary string
@@ -104,6 +108,8 @@ func Summarize(list []Check, started time.Time) Report {
 			s = ""
 		}
 		summary = fmt.Sprintf("Ready · %d warning%s", warns, s)
+	case unknowns > 0:
+		summary = fmt.Sprintf("Ready · %d not verified", unknowns)
 	default:
 		summary = "Ready"
 	}

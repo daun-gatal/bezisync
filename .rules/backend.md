@@ -324,7 +324,10 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `advanced_properties` config check refuses the rest, adopt keeps only allowed ones). It refuses
   every key the compiler set for the pipeline (`Compiled.Managed`), wizard-modelled options,
   credentials, unsafe options and `${`/control characters in values; extend its tables, never add a
-  second list.
+  second list. Allowed ones need the policy `allow_advanced_properties` (`policy_advanced_properties`)
+  and show as the `advanced_unverified` check.
+- A check BeziSync can't verify has `Status: checks.Unknown` ("unknown"): never blocking, never a
+  pass; `Summarize` reports "Ready · N not verified" and the UI shows it grey.
   Offsets/schema history use Debezium's JDBC store in the state DB (`debezium_state` schema,
   tables `offsets_<id>` / `history_<id>`). `config_hash` is computed with Python's `json.dumps`
   semantics (`pyjson`) so it matches what the Python releases stored: a hash change restarts connectors.

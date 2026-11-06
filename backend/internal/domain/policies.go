@@ -36,6 +36,9 @@ type ProjectPolicies struct {
 	AllowCustomTransforms   bool     `json:"allow_custom_transforms"`
 	AllowedTransforms       []string `json:"allowed_transforms"` // nil = every built-in type
 	AllowedEngines          []string `json:"allowed_engines"`    // nil = every engine
+	// AllowAdvancedProperties lets Experts pass raw Debezium properties (refused by preflight
+	// otherwise). Dumped only when set.
+	AllowAdvancedProperties bool `json:"allow_advanced_properties"`
 }
 
 // DefaultPolicies is ProjectPolicies().
@@ -87,6 +90,9 @@ func (p ProjectPolicies) Dump() *om.Map {
 	}
 	if p.AllowedEngines != nil {
 		out.Set("allowed_engines", strList(p.AllowedEngines))
+	}
+	if p.AllowAdvancedProperties {
+		out.Set("allow_advanced_properties", true)
 	}
 	return out
 }
@@ -160,6 +166,11 @@ func ParsePolicies(v *val.V, loc val.Loc, raw any) (ProjectPolicies, bool) {
 	if f := o.Get("allow_custom_transforms"); f.Present {
 		if b, ok := v.Bool(f.Loc, f.Raw); ok {
 			p.AllowCustomTransforms = b
+		}
+	}
+	if f := o.Get("allow_advanced_properties"); f.Present {
+		if b, ok := v.Bool(f.Loc, f.Raw); ok {
+			p.AllowAdvancedProperties = b
 		}
 	}
 	if f := o.Get("allowed_transforms"); f.Present && !f.IsNull() {
@@ -274,6 +285,16 @@ func EvaluatePoliciesOn(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UU
 			fmt.Sprintf("Choose %s or smaller.", *p.MaxResources)))
 	}
 	out = append(out, transformPolicyChecks(p, spec)...)
+	if !p.AllowAdvancedProperties && len(spec.Advanced) > 0 {
+		keys := make([]string, 0, len(spec.Advanced))
+		for k := range spec.Advanced {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		out = append(out, policyFail("policy_advanced_properties", "Advanced properties",
+			fmt.Sprintf("This pipeline sets %d advanced Debezium propert%s (%s); this project does not allow them.",
+				len(keys), map[bool]string{true: "y", false: "ies"}[len(keys) == 1], strings.Join(keys, ", ")), AskAdmin))
+	}
 	if !p.AllowScriptedTransforms {
 		if steps := ScriptedSteps(spec); len(steps) > 0 {
 			out = append(out, policyFail("policy_scripted_transform", "Scripted transforms",

@@ -1978,6 +1978,13 @@ Fix:
 Remove the listed properties under Review → Advanced Debezium properties, or set what they did where the message says.
 ```
 
+<a id="advanced-unverified"></a>
+### `advanced_unverified`
+
+**Advanced properties**
+
+- Why: Advanced properties are passed to Debezium Server as typed. BeziSync can't check what they do, so this check is Unknown, never a pass: review them in Review, and approvers see them listed.
+
 <a id="agent-upgrade-required"></a>
 ### `agent_upgrade_required`
 
@@ -2298,6 +2305,19 @@ Create this pipeline again: a new pipeline gets other server ids.
 - Why: The connection takes a secret from an external store, and reading it failed.
 
 ## Project policies
+
+<a id="policy-advanced-properties"></a>
+### `policy_advanced_properties`
+
+**Advanced properties**
+
+- Why: This pipeline sets {n} advanced Debezium properties ({keys}); this project does not allow them. BeziSync can't verify raw properties, so an Admin decides whether a project may use them.
+
+Fix:
+
+```
+Remove the advanced properties in Review, or ask an Admin to allow them under Settings → Policies.
+```
 
 <a id="policy-custom-transform"></a>
 ### `policy_custom_transform`

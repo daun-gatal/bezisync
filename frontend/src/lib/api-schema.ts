@@ -4163,6 +4163,11 @@ export interface components {
         /** ProjectPolicies */
         ProjectPolicies: {
             /**
+             * Allow Advanced Properties
+             * @description Lets Experts pass raw Debezium properties (Review → Advanced Debezium properties). BeziSync can't verify them; preflight shows them as Unknown. Returned only when true.
+             */
+            allow_advanced_properties?: boolean;
+            /**
              * Allow Custom Transforms
              * @description Lets Experts add custom transform steps (any SMT class in the pipeline's Debezium image). Returned only when true.
              */
@@ -5130,7 +5135,7 @@ export interface components {
          * Status
          * @enum {string}
          */
-        Status: "pass" | "warn" | "fail" | "skip";
+        Status: "pass" | "warn" | "fail" | "skip" | "unknown";
         /** StoreChoice */
         StoreChoice: {
             /**

@@ -5308,6 +5308,11 @@
       "ProjectPolicies": {
         "additionalProperties": false,
         "properties": {
+          "allow_advanced_properties": {
+            "description": "Lets Experts pass raw Debezium properties (Review \u2192 Advanced Debezium properties). BeziSync can't verify them; preflight shows them as Unknown. Returned only when true.",
+            "title": "Allow Advanced Properties",
+            "type": "boolean"
+          },
           "allow_custom_transforms": {
             "description": "Lets Experts add custom transform steps (any SMT class in the pipeline's Debezium image). Returned only when true.",
             "title": "Allow Custom Transforms",
@@ -7732,7 +7737,8 @@
           "pass",
           "warn",
           "fail",
-          "skip"
+          "skip",
+          "unknown"
         ],
         "title": "Status",
         "type": "string"

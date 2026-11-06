@@ -96,7 +96,7 @@ src/
   (and `typeToConfirm` for irreversible ones; the typed text clears on every open); secrets shown
   once use a closable={false} modal with "I've copied it"; forms with unsaved input pass `dirty`
   to `Modal`, and pages with unsaved work use the router's `useBlocker`; status = `Pill` (glyph +
-  text, never colour alone); choose, don't type (Select, Combobox, Stepper, TimeRange, ChipsInput,
+  text, never colour alone); a report with an `unknown` check is a grey pill, never "Ready"; choose, don't type (Select, Combobox, Stepper, TimeRange, ChipsInput,
   SlugInput which shows the saved slug and never rewrites what is typed). Each fact appears once
   per page.
 - Sign-in (`features/settings/SignInSection.tsx`, pure rules in `signin.ts`): providers start

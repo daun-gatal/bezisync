@@ -660,6 +660,21 @@ func advancedCheck(spec domain.PipelineSpec, managed map[string]bool) *checks.Ch
 		Technical: strings.Join(why, " ")}
 }
 
+// unverifiedCheck says which advanced properties are passed through as typed: BeziSync can't
+// check what they do, so they are Unknown (grey), never a pass.
+func unverifiedCheck(spec domain.PipelineSpec) *checks.Check {
+	if len(spec.Advanced) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(spec.Advanced))
+	for k := range spec.Advanced {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return &checks.Check{Code: "advanced_unverified", Title: "Advanced properties", Category: checks.CatDestination, Status: checks.Unknown,
+		Message: fmt.Sprintf("Passed to Debezium as typed, not verified by BeziSync: %s.", strings.Join(keys, ", "))}
+}
+
 // CompileFor compiles a pipeline with a spec ("" image = resolve it).
 func CompileFor(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec, image string) (*compiler.Compiled, error) {
 	cctx := connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec}
@@ -969,6 +984,8 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	configChecks := []checks.Check{cfgCheck}
 	if compiled != nil && compiled.Flink == nil {
 		if c := advancedCheck(spec, compiled.Managed); c != nil {
+			configChecks = append(configChecks, *c)
+		} else if c := unverifiedCheck(spec); c != nil {
 			configChecks = append(configChecks, *c)
 		}
 	}

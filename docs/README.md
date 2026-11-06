@@ -217,7 +217,9 @@ local files, load classes, call out, log to files or change TLS and sign-in (suc
 changes that could reveal secrets, and every `quarkus.*` key. Values can't hold `${…}` (Debezium
 Server would fill it in from the pod's environment) or line breaks. Saving refuses a key it adds or
 changes; one an older pipeline already has still saves, and its deploy is blocked by the
-*Advanced properties* check until it is removed (a forced deploy can't skip it).
+*Advanced properties* check until it is removed (a forced deploy can't skip it). They need the
+project policy *Allow advanced properties*; the ones that pass show in preflight as **Unknown**
+(grey, "not verified by BeziSync"), never as passed.
 
 ## Destinations
 
@@ -694,7 +696,10 @@ modes; the largest size; pipelines per source (each
 holds a replication slot or log reader); whether "Deploy anyway" exists; whether deploys need
 **approval**; which transform types pipelines may use; and whether **custom transforms** (any SMT
 class in the image) and **scripted transforms** (Groovy/JavaScript filter scripts, which run next to
-the connector's credentials) are allowed — both are off by default. The section groups these by what
+the connector's credentials) are allowed, and whether **advanced Debezium properties** (raw
+properties BeziSync can't verify) are allowed — all three are off by default. Upgrading to the
+release that added the advanced-properties policy turned it on for every project that already had a
+pipeline using them, with an audit entry, so nothing that deployed before is blocked. The section groups these by what
 you decide, refuses an empty allow-list, and before you save lists the running pipelines whose next
 deploy the change would block. The wizard applies policies up front (disallowed options stay visible
 and say why); the server enforces them at save and deploy.
