@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { InlineError, Notice, Pill, Skeleton } from '@/components/ui/feedback';
 import { Field, RadioCards, SlugInput, slugError, Stepper, Switch, Textarea } from '@/components/ui/form';
+import { RawProperties, type RawRow } from '@/components/RawProperties';
+import { SettingsEditor } from '@/components/SettingsEditor';
 import { Card, KeyValue } from '@/components/ui/layout';
 import { CodeBlock, Modal } from '@/components/ui/overlays';
 import { Select, TimeRange } from '@/components/ui/select';
@@ -15,12 +17,13 @@ import { CheckList } from '@/components/CheckList';
 import { useRuntimes } from '@/features/settings/RuntimesSection';
 import { ApiError } from '@/lib/api';
 import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
+import { canonicalSetting, jsonbSorted, settingError, tuningSettings, useClassify } from '@/lib/settings';
 import { slugify } from '@/lib/format';
 import { useDeploy, usePipelines, usePreflight, type Pipeline, type Preflight } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
-import { deriveSinkOptions, fullSpec, optionsSchemaFor, parseAdvanced, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
+import { deriveSinkOptions, fullSpec, optionsSchemaFor, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
 import { FlinkRunSettings } from './FlinkSettings';
 import { OwnerPicker } from './OwnerPicker';
@@ -74,15 +77,34 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const [latency, setLatency] = useState(spec.policies.latency_target_seconds);
   const [snapshotWindow, setSnapshotWindow] = useState<string | null>(spec.snapshot.window ?? null);
   const [canary, setCanary] = useState(spec.policies.delivery_canary);
-  const [advanced, setAdvanced] = useState(
-    Object.entries(spec.advanced)
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n'),
-  );
+  const [rawRows, setRawRows] = useState<RawRow[]>(Object.entries(spec.advanced).map(([key, value]) => ({ key, value })));
+  const [tuning, setTuning] = useState<Record<string, string>>(spec.tuning ?? {});
   const [force, setForce] = useState(false);
   const [reason, setReason] = useState('');
   const { save, pending: saving, error: saveError } = useSaveSpec(pipeline);
-  const adv = parseAdvanced(advanced);
+  const tunable = tuningSettings(
+    (useEngines().data ?? []).flatMap((e) => e.settings ?? []),
+    pipeline.engine,
+    pipeline.source.type,
+    pipeline.sink?.type,
+  );
+  const verdicts = useClassify(project.id, pipeline.id, rawRows, expert && !flink);
+  const rawKeys = rawRows.map((r) => r.key.trim()).filter(Boolean);
+  const rawError = rawKeys.length !== new Set(rawKeys).size ? 'A property is set twice: remove one.' : null;
+  // Stored maps come back in JSONB order: build them the same way, or the draft never matches.
+  const advancedValues = jsonbSorted(Object.fromEntries(rawRows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value])));
+  const tuningError = Object.entries(tuning).some(([k, v]) => {
+    const s = tunable.find((t) => t.key === k);
+    return !s || settingError(s, v) !== null;
+  })
+    ? 'Fix or remove the highlighted engine settings.'
+    : null;
+  const useTypedSetting = (row: RawRow) => {
+    const s = tunable.find((t) => t.key === row.key.trim());
+    if (!s) return;
+    setTuning({ ...tuning, [s.key]: canonicalSetting(s, row.value) ?? s.default });
+    setRawRows(rawRows.filter((r) => r !== row));
+  };
   const nameErr = deployed ? null : !name.trim() ? 'Give the pipeline a name.' : slugError(name, others);
 
   const discovery = useDiscovery(project.id, pipeline.source.id);
@@ -102,9 +124,12 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     sink: { ...spec.sink, options: sinkOptions },
     snapshot: { ...spec.snapshot, mode, window: flink ? null : snapshotWindow || null },
     policies: { ...spec.policies, resources, latency_target_seconds: latency, delivery_canary: flink ? false : canary },
-    advanced: flink ? {} : adv.values,
+    advanced: flink ? {} : advancedValues,
     ...(flink ? { flink_cdc: flinkSpecBlock(fc) } : {}),
   };
+  // tuning is dumped last, and only when set: the same here, or the draft never matches.
+  delete nextSpec.tuning;
+  if (Object.keys(tuning).length) nextSpec.tuning = jsonbSorted(tuning);
   const body: SaveBody = {
     ...(slugify(name) !== pipeline.name && !deployed ? { name: slugify(name) } : {}),
     owner,
@@ -116,7 +141,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     owner !== pipeline.owner ||
     runtimeId !== pipeline.runtime?.id ||
     JSON.stringify(nextSpec) !== JSON.stringify(spec);
-  const invalid = nameErr ?? adv.error;
+  const invalid = nameErr ?? rawError ?? tuningError;
 
   // Save shortly after the last change; one save at a time, so versions never conflict.
   const latest = useRef({ body, dirty, invalid, saving });
@@ -345,30 +370,47 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             description="Backfills and re-syncs wait for this daily window (UTC) to spare the source. The first copy is not delayed."
           />
         )}
-        {expert && !flink ? (
-          <Field
-            label="Advanced Debezium properties"
-            optional
-            error={adv.error}
-            hint={
-              policies?.allow_advanced_properties
-                ? 'One key=value per line, for options BeziSync doesn’t offer. Keys BeziSync sets, credentials and unsafe options are refused; the rest show in preflight as not verified.'
-                : 'This project doesn’t allow advanced properties: a pipeline with any can’t deploy. An Admin can allow them in Settings → Policies.'
-            }
-          >
-            {(id) => (
-              <Textarea
-                id={id}
-                mono
-                spellCheck={false}
-                value={advanced}
-                onChange={(e) => setAdvanced(e.target.value)}
-                placeholder="debezium.source.poll.interval.ms=200"
-              />
-            )}
-          </Field>
-        ) : null}
       </Card>
+
+      {expert ? (
+        <Card title="Engine settings">
+          <div className="flex min-w-0 flex-col gap-6">
+            <Field label={flink ? 'Flink CDC source, destination and pipeline options' : 'Debezium options'} optional group error={tuningError}>
+              {() =>
+                tunable.length ? (
+                  <SettingsEditor idBase="tuning" value={tuning} onChange={setTuning} settings={tunable} />
+                ) : (
+                  <Meta>BeziSync offers no typed settings for this source and destination yet.</Meta>
+                )
+              }
+            </Field>
+            {flink ? null : (
+              <Field
+                label="Advanced Debezium properties"
+                optional
+                group
+                error={rawError}
+                hint={
+                  policies?.allow_advanced_properties
+                    ? 'For options BeziSync doesn’t offer, passed to Debezium as typed. Keys BeziSync sets, credentials and unsafe options are refused; the rest show in preflight as not verified.'
+                    : 'This project doesn’t allow advanced properties: a pipeline with any can’t deploy. An Admin can allow them in Settings → Policies.'
+                }
+              >
+                {() => (
+                  <RawProperties
+                    idBase="raw"
+                    rows={rawRows}
+                    onChange={setRawRows}
+                    verdicts={verdicts}
+                    onUseSetting={useTypedSetting}
+                    keyPlaceholder="debezium.source.…"
+                  />
+                )}
+              </Field>
+            )}
+          </div>
+        </Card>
+      ) : null}
 
       <Card
         title={flink ? "What reaches the destination" : "Events"}

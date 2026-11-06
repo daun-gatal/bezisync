@@ -1,4 +1,7 @@
-import type { Schemas } from './api';
+import { useMemo } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useDebounced } from '@/components/ui/hooks';
+import { client, unwrap, type Schemas } from './api';
 
 /** A typed setting of the registry (GET /engines, per engine). */
 export type Setting = Schemas['FlinkSetting'];
@@ -92,4 +95,41 @@ export function canonicalSetting(s: Setting, value: string): string | null {
 export function jsonbSorted<V>(o: Record<string, V>): Record<string, V> {
   const keys = Object.keys(o).sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
   return Object.fromEntries(keys.map((k) => [k, o[k]!]));
+}
+
+/** The settings a pipeline's tuning may hold: its engine's, for its source and destination, in the
+ *  scopes tuning holds (a Flink CDC pipeline's Flink settings live in flink_cdc.flink_conf).
+ *  Mirrors engine.SettingsFor and TuningScopes. */
+export function tuningSettings(all: Setting[] | undefined, engine: string, sourceType: string, sinkType: string | undefined): Setting[] {
+  return (all ?? []).filter(
+    (s) =>
+      s.engine === engine &&
+      !(engine === 'flink-cdc' && s.scope === 'engine') &&
+      (s.scope !== 'source' || !s.connectors || s.connectors.includes(sourceType)) &&
+      (s.scope !== 'sink' || !s.connectors || (sinkType !== undefined && s.connectors.includes(sinkType))),
+  );
+}
+
+/** What BeziSync makes of raw property keys for a pipeline (POST …/settings:classify), by key.
+ *  Asked once the keys have stopped changing for a moment. */
+export function useClassify(projectId: string, pipelineId: string, rows: { key: string; value: string }[], enabled: boolean) {
+  // Debounce a string: a fresh array each render would never settle.
+  const asked = useDebounced(JSON.stringify(rows.filter((r) => r.key.trim()).map((r) => ({ key: r.key.trim(), value: r.value }))), 300);
+  const items = useMemo(() => JSON.parse(asked) as { key: string; value: string }[], [asked]);
+  const q = useQuery({
+    queryKey: ['classify', projectId, pipelineId, items],
+    enabled: enabled && items.length > 0,
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    queryFn: () =>
+      unwrap(
+        client.POST('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings:classify', {
+          params: { path: { project_id: projectId, pipeline_id: pipelineId } },
+          body: { items },
+        }),
+      ),
+  });
+  const byKey: Record<string, Schemas['ClassifyRead']> = {};
+  for (const v of q.data?.items ?? []) byKey[v.key] = v;
+  return byKey;
 }

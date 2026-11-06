@@ -115,8 +115,10 @@ src/
   registry and any project cap, a two-way choice for booleans, a Select for choices), each with its
   `ImpactPill`; `settingError`/`canonicalSetting` mirror `engine.CheckSetting`/`CanonicalSetting`.
   `RawProperties` edits raw properties as key/value rows and shows the server's verdict per key
-  (`settings:classify`), never its own rules. Maps the server stores (`advanced`, `tuning`) are
-  compared in JSONB order (`jsonbSorted`), or autosave never settles.
+  (`settings:classify`, `useClassify`), never its own rules. Maps the server stores (`advanced`,
+  `tuning`) are compared in JSONB order (`jsonbSorted`), or autosave never settles. Review's Engine
+  settings card (Expert) holds both: `tuningSettings` picks the pipeline's settings (Flink settings
+  stay in `FlinkRunSettings`), and a raw key that is a setting converts with "Use the typed setting".
 - `SchemaForm` renders descriptor JSON Schemas (connections, a sink's pipeline options): `ui.group`,
   `ui.expert`, `ui.labels` / `ui.descriptions` for enum values and `ui.when` (shown only while other
   fields hold listed values; hidden fields are dropped by `cleanValues`; `context` passes the sibling

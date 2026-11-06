@@ -201,7 +201,12 @@ the pipeline's Overview shows it with a **Fix** link and the *Transform needs at
 fires. Every step is in the spec (`transforms`, `values`, `keys`), so YAML, templates, promote and
 rollback carry it; `debezium.transforms*` cannot be set as advanced properties.
 
-**Advanced Debezium properties** (Review, Expert mode) pass raw `debezium.source.*` and
+**Engine settings** (Review, Expert mode) lists the typed settings BeziSync offers for the pipeline's
+engine, source and destination, grouped by when they matter (snapshot, streaming, delivery,
+engine): each has its bounds, default and what changing it does to a running pipeline. Add one from
+the searchable list; removing it restores the default.
+
+**Advanced Debezium properties** (Review, Expert mode, one row per key and value) pass raw `debezium.source.*` and
 `debezium.sink.*` keys to Debezium Server for options BeziSync doesn't offer. They may only add what
 BeziSync doesn't set: a key BeziSync compiles for the pipeline, or one a wizard choice sets (tables,
 columns and personal data, keys, transforms, the event format, where events go, connection and TLS
@@ -216,7 +221,8 @@ local files, load classes, call out, log to files or change TLS and sign-in (suc
 `allowLoadLocalInfile` and `autoDeserialize`, or a `socketFactory`), `snapshot.select.statement.overrides`, logging
 changes that could reveal secrets, and every `quarkus.*` key. Values can't hold `${…}` (Debezium
 Server would fill it in from the pod's environment) or line breaks. Saving refuses a key it adds or
-changes; one an older pipeline already has still saves, and its deploy is blocked by the
+changes, and each row says, as you type, whether BeziSync will pass it on or why not (a key that is
+also a typed setting offers to become one); one an older pipeline already has still saves, and its deploy is blocked by the
 *Advanced properties* check until it is removed (a forced deploy can't skip it). They need the
 project policy *Allow advanced properties*; the ones that pass show in preflight as **Unknown**
 (grey, "not verified by BeziSync"), never as passed.

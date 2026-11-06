@@ -1,6 +1,7 @@
 type: minor
 
 ### Added
+- **Engine settings in Review** - Expert mode gets an Engine settings card: typed settings grouped by when they matter, each with its bounds, default and what changing it does, and advanced Debezium properties as one row per key, each checked by the server as you type (with the reason and where to set it instead when refused, or the offer to use the typed setting).
 - **Typed engine settings** - a pipeline spec takes `tuning`: settings from BeziSync's registry, each checked against the pipeline's engine, source and destination and its bounds, and carried by YAML, the API and MCP. The first ones: snapshot threads and the poll interval (Debezium), the connection pool (Flink CDC). `GET /engines` lists every setting with what changing it does to a running pipeline, and preflight and the version diff list the settings a deploy changes with that impact (`settings_change`).
 - **A project policy for advanced Debezium properties** - Admins decide whether pipelines may pass raw properties (Settings → Policies, *Allow advanced properties*); without it their deploy is blocked. Upgrading turns it on for every project that already has a pipeline using them, with an audit entry.
 
@@ -12,3 +13,4 @@ type: minor
 - **JDBC driver options that can read files or load code are refused** - advanced `driver.*` and `database.*` properties that read local files, deserialize or load classes, call out, log to files, or change TLS and sign-in (for example MySQL's `allowLoadLocalInfile`) are no longer passed to the source's driver.
 - **Flink CDC on PostgreSQL checks replication slots for the copy** - during a first copy each reader opens its own temporary replication slot and WAL sender, so it needs 1 + readers of each; preflight only checked for one free slot, so a large pipeline could pass it and then stop part-way. The new check blocks such a deploy, with the SQL to fix it.
 - **Credential-looking advanced properties are hidden** - a pipeline saved before credentials were refused as advanced properties may still hold one; preflight, the Config view and change summaries now show its value as `(hidden)` instead of in plain text (the pipeline keeps working).
+- **Review settles with advanced properties in any order** - the server stores advanced properties shorter key first; Review compared them in the order they were typed, so some orders never matched and it kept saving. It now builds them in the stored order.
