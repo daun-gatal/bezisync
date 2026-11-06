@@ -29,6 +29,10 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
 - API tests (`internal/api/*_test.go`) run the real router against the database with an in-memory
   Kafka (`kfake`), a fake runtime driver (`installFake`), fake Vault and OIDC servers, and exercise the
   CLI and the agent end to end.
+- `backend/testdata/compile_matrix.json` pins the config hash (or refusal) of every source ×
+  destination × spec shape on both engines (`TestCompileMatrixUnchanged`). The controller replaces
+  running pipelines whose hash changed, so a diff there restarts real pipelines on upgrade: accept
+  one with `UPDATE_GOLDEN=1` only when that restart is intended, and say so in the changelog.
 - `testdata/contract/` is the contract corpus recorded from the Python implementation (properties,
   `config_hash`, validation messages, check reports, YAML, diffs): the Go code must keep matching it.
 - `make e2e` recreates the BeziSync and runtime namespaces every run (clean database) and keeps the
