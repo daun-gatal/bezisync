@@ -1,0 +1,37 @@
+# runtime
+
+## Overview
+The drivers for where pipeline workloads run: a Docker Engine (local or remote, optional TLS) and a Kubernetes namespace (in-cluster, kubeconfig, or GKE/EKS bearer tokens minted in process). Drivers are idempotent and level-based: `Apply` makes the runtime match a `Workload` (replacing it when the config hash changes) and `Observe` reports what is there, so the [controller](../controller/README.md) and the [agent](../agent/README.md) call them every tick. Drivers are built from runtime rows by `services.BuildDriver`; the agent-backed driver (`services.AgentDriver`) lives in [services](../services/README.md), not here.
+
+## Interface
+- `[runtime.go:Driver]` — `Apply`, `Delete`, `Observe`, `Logs`, `HTTPGet`, `Test`, `ListWorkloads`, `Capacity`; `[runtime.go:ComponentLogs]` adds `LogsOf` for Flink CDC components (`jobmanager`, `taskmanager-<n>`, `tunnel`).
+- `[runtime.go:Workload]` — the desired workload; its JSON tags are the agent wire protocol. `[runtime.go:FlinkTopology]` is a Flink CDC cluster (JobManager, TaskManagers, helper image, config files, state size).
+- `[runtime.go:Observation]`, `[runtime.go:TestResult]`, phase constants (`[runtime.go:PhaseRunning]` …), labels `[runtime.go:Label]`, `[runtime.go:ManagedBy]`, `[runtime.go:Owner]`, `[runtime.go:RoleLabel]`, Flink paths (`[runtime.go:FlinkOptDir]`, `[runtime.go:FlinkUID]`), `[runtime.go:FeatureFlinkCDC]`.
+- `[runtime.go:Error]` / `[runtime.go:Errorf]` — runtime failures whose message is safe to show users.
+- `[runtime.go:JVMEnv]` — workload env plus `JAVA_OPTS` (`-Xmx<heap> -XX:+ExitOnOutOfMemoryError`), `JMX_EXPORTER_PORT=9404`, `ENABLE_DEBEZIUM_SCRIPTING=true`; `[runtime.go:Architectures]` normalizes `x86_64`/`aarch64`.
+- `[docker.go:DockerDriver]` / `[docker.go:NewDocker]` — one container `bz-<id>` per pipeline (plus `bz-<id>-tunnel`); helpers `[docker.go:CPUNano]`, `[docker.go:MemBytes]`, `[docker.go:ParseDockerTime]`, `[docker.go:DefaultPullTimeout]`.
+- `[docker_flink.go:DockerDriver.LogsOf]` — Flink CDC on Docker: private network, `-opt` and tmpfs `-state` volumes, JobManager, TaskManagers, optional tunnel.
+- `[kubernetes.go:KubernetesDriver]` / `[kubernetes.go:NewKubernetes]` / `[kubernetes.go:NewKubernetesFromClient]` — one Deployment + ConfigMap + Secrets per pipeline; `[kubernetes.go:TokenRESTConfig]` with a `[kubernetes.go:TokenSource]`; `[kubernetes.go:QuantityCPU]`, `[kubernetes.go:QuantityMem]`, `[kubernetes.go:TunnelProbeCommand]`.
+- `[kubernetes_flink.go:FlinkJobManagerHost]`, `[kubernetes_flink.go:FlinkRPCPort]`, `[kubernetes_flink.go:FlinkBlobPort]` — Flink CDC on Kubernetes (JobManager and TaskManager Deployments, `bz-<id>-jm` Service).
+- `[cloudauth.go:GKETokenSource]`, `[cloudauth.go:EKSToken]`, `[cloudauth.go:EKSTokenSource]`, `[cloudauth.go:EKSTokenLifetime]` — managed-Kubernetes tokens without exec plugins.
+
+## Invariants
+- Workloads are found by labels: `Label` = short id, `ManagedBy` = `bezisync`, and `Owner` = runtime id when set (`[docker.go:labelsWithOwner]`, `[kubernetes.go:KubernetesDriver.labels]`), so agents sharing a host or namespace only list and prune their own (`ListWorkloads(owner)`).
+- Docker replaces a container only when its `app.bezisync.io/config-hash` label differs, and only after every image it needs is on the daemon (`[docker.go:DockerDriver.Apply]`); downloads run in the background once per ref, bounded by the pull timeout, and a failed pull is reported for `pullRetryAfter` (2 min) before retrying (`[docker.go:DockerDriver.ensureImage]`).
+- Kubernetes rolls the pod by the config-hash pod annotation with a `Recreate` strategy; `Running=false` scales to 0 replicas (`[kubernetes.go:KubernetesDriver.Apply]`).
+- Hardening: Docker containers get `no-new-privileges`; Flink CDC containers also drop all capabilities, run read-only with a private `/tmp` (`[docker_flink.go:DockerDriver.createFlinkContainer]`), secrets files 0600 (`[docker_flink.go:flinkTar]`). Kubernetes Debezium pods run as uid 185, non-root, all capabilities dropped, no privilege escalation, `RuntimeDefault` seccomp, no service links; Kubernetes Flink CDC pods run as uid/gid 9999 (`FlinkUID`, the helper copy as 10001) with a read-only root filesystem and size-limited emptyDirs, `/state` in memory (`[kubernetes_flink.go:KubernetesDriver.flinkDeployment]`). The SSH tunnel sidecar runs as uid 10001.
+- Flink CDC stop order: the JobManager first within `Workload.StopGrace` (default 30 s) so it saves its position, then TaskManagers and tunnel; on Docker this runs in the background and `Observe` reports it (`[docker_flink.go:DockerDriver.startStop]`), on Kubernetes the JobManager is scaled to 0 and TaskManagers are touched only once its pod is gone (`[kubernetes_flink.go:KubernetesDriver.applyFlink]`, `[kubernetes_flink.go:KubernetesDriver.jobManagerQuiet]`), keeping no state between calls; pods get `TerminationGracePeriodSeconds` = grace + 10, and `Delete` waits up to grace + 30 s for the JobManager pod to go (`[kubernetes_flink.go:KubernetesDriver.deleteFlink]`). A Debezium container on Docker stops with a fixed 30 s timeout (its tunnel 10 s), not `StopGrace` (`[docker.go:DockerDriver.stop]`).
+- Secrets: on Kubernetes the workload env (which carries secrets) lives in Secret `bz-<id>` and files in `bz-<id>-files`, never in the ConfigMap; for Flink CDC the env goes to the JobManager only (`[runtime.go:FlinkTopology]`).
+- Health/metrics are read without a network path: Docker runs `curl` in the container (`[docker.go:DockerDriver.HTTPGet]`), Kubernetes uses the API server's pod proxy (`[kubernetes.go:KubernetesDriver.HTTPGet]`).
+- `[kubernetes.go:KubernetesDriver.Test]` needs create on deployments/configmaps/secrets, list pods, get pods/log and pods/proxy; permission to create Services only decides `flink_cdc` in the details (Flink CDC needs a JobManager Service).
+- Bearer tokens are refreshed 120 s before expiry (`[kubernetes.go:refreshMargin]`); `TokenRESTConfig` mints the first token immediately so errors surface at once. Credential errors expose only an error class name (`[cloudauth.go:errName]`).
+
+## Side Effects
+- Docker Engine API: create/start/stop/remove containers, copy `application.properties` and secret files in, image pulls, networks and volumes (Flink CDC), a short-lived `bz-<id>-install` container that copies the helper into the `-opt` volume (2 min timeout, `[docker_flink.go:DockerDriver.installHelper]`), `docker exec curl`. Every call but image pulls and Flink CDC stops is bounded by a 30 s request timeout.
+- Kubernetes API: Secrets, ConfigMaps, Deployments, Services, SelfSubjectAccessReviews, pod logs and pod proxy; node reads for `Capacity`.
+- Cloud: Google OAuth token endpoint (GKE), AWS STS presign (EKS, signed locally; `sts.<region>.amazonaws.com`).
+- Goroutines: background image pulls and Flink CDC stops on Docker, detached from the caller's cancellation (`context.WithoutCancel`).
+- Env: Docker client `client.FromEnv` when no host is set; Kubernetes default kubeconfig loading rules; AWS/Google default credential chains when no key is given.
+
+## Verification
+- Run: `make verify-quick GO_PKGS="./internal/runtime/"`
