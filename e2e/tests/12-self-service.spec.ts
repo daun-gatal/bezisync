@@ -241,3 +241,45 @@ test('an admin sets resource limits; Policies counts the running pipelines they 
   expect(cleared.shrink_after_copy).toBeUndefined();
   await admin.send('DELETE', `${base}/pipelines/${p.id}?drop_destinations=true`);
 });
+
+test('an admin limits a setting; Policies counts who it blocks, and Review shows a pinned one', async ({ page }) => {
+  test.setTimeout(180_000);
+  const admin = await Api.signIn();
+  const tag = unique('slim');
+  const project = await admin.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `Slim ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  const { password, ...pg } = SOURCE_PG;
+  const src = await admin.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  // A complete draft (destination and runtime), so the wizard opens at Review.
+  const dst = await admin.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'kafka', name: `k-${tag}`, config: KAFKA }, 201);
+  const rt = await admin.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const p = await admin.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, spec: { source: { tables: { include: ['shop.orders'] } }, tuning: { 'debezium.source.snapshot.max.threads': '8' } },
+  }, 201);
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/settings/policies`);
+  await choose(page.getByLabel('Setting', { exact: true }), 'Snapshot threads');
+  await choose(page.getByLabel('Limit', { exact: true }), 'At most');
+  await page.getByLabel('Value', { exact: true }).fill('4');
+  await page.getByRole('button', { name: 'Add the limit' }).click();
+  await expect(page.getByText(`Would block 1 pipeline at the next deploy: p-${tag}`)).toBeVisible({ timeout: 20_000 });
+  await choose(page.getByLabel('Setting', { exact: true }), 'Poll interval');
+  await choose(page.getByLabel('Limit', { exact: true }), 'Always this value');
+  await page.getByLabel('Value', { exact: true }).fill('500');
+  await page.getByRole('button', { name: 'Add the limit' }).click();
+  await page.getByRole('button', { name: 'Save policies' }).click();
+  await expect(page.getByText('Policies saved')).toBeVisible();
+  const saved = await admin.get<{ setting_limits?: Record<string, unknown> }>(`${base}/policies`);
+  expect(saved.setting_limits).toEqual({ 'debezium.source.poll.interval.ms': { pin: '500' }, 'debezium.source.snapshot.max.threads': { max: '4' } });
+
+  // Review: the pinned setting is shown as the project's, and the limit bounds the control.
+  await admin.send('PATCH', '/api/v1/auth/me', { ui_mode: 'expert' });
+  try {
+    await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=review`);
+    const card = page.getByRole('region', { name: 'Engine settings' });
+    await expect(card.getByText(/Set by project policy/)).toBeVisible();
+    await expect(card.getByText(/This project allows at most 4/)).toBeVisible();
+  } finally {
+    await admin.send('PATCH', '/api/v1/auth/me', { ui_mode: 'guided' });
+  }
+});

@@ -99,11 +99,18 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const [force, setForce] = useState(false);
   const [reason, setReason] = useState('');
   const { save, pending: saving, error: saveError } = useSaveSpec(pipeline);
+  // The project's setting limits: hidden ones aren't offered, pinned ones are shown as set by
+  // the project, and a maximum bounds the control.
+  const limits = policies?.setting_limits ?? {};
   const tunable = tuningSettings(
     (useEngines().data ?? []).flatMap((e) => e.settings ?? []),
     pipeline.engine,
     pipeline.source.type,
     pipeline.sink?.type,
+  ).filter((s) => !limits[s.key]?.hide);
+  const pinned = Object.fromEntries(tunable.filter((s) => limits[s.key]?.pin).map((s) => [s.key, limits[s.key]!.pin!]));
+  const caps = Object.fromEntries(
+    tunable.filter((s) => s.type === 'int' && limits[s.key]?.max).map((s) => [s.key, Number(limits[s.key]!.max)]),
   );
   const verdicts = useClassify(project.id, pipeline.id, rawRows, expert && !flink);
   const rawKeys = rawRows.map((r) => r.key.trim()).filter(Boolean);
@@ -492,7 +499,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             <Field label={flink ? 'Flink CDC source, destination and pipeline options' : 'Debezium options'} optional group error={tuningError}>
               {() =>
                 tunable.length ? (
-                  <SettingsEditor idBase="tuning" value={tuning} onChange={setTuning} settings={tunable} />
+                  <SettingsEditor idBase="tuning" value={tuning} onChange={setTuning} settings={tunable} caps={caps} pinned={pinned} />
                 ) : (
                   <Meta>BeziSync offers no typed settings for this source and destination yet.</Meta>
                 )

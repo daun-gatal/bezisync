@@ -2514,6 +2514,19 @@ Fix:
 Ask an Admin to change the policy under Settings → Policies.
 ```
 
+<a id="policy-setting-limit"></a>
+### `policy_setting_limit`
+
+**Setting limits**
+
+- Why: The project bounds some settings (a range, fewer choices, a pinned value, or hidden). A pipeline saved before a limit keeps running; its next deploy is blocked until its settings fit.
+
+Fix:
+
+```
+Change or remove them in Review → Engine settings.
+```
+
 <a id="policy-sink-type"></a>
 ### `policy_sink_type`
 

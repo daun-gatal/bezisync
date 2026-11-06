@@ -1683,6 +1683,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/policies/setting-limits:impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Count what setting limits would refuse
+         * @description How many of the project's pipelines (their current versions) proposed setting limits would refuse, with a few names; nothing is saved. Admins.
+         */
+        post: operations["setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/runtime-kinds": {
         parameters: {
             query?: never;
@@ -3719,6 +3739,20 @@ export interface components {
             /** Unread */
             unread: number;
         };
+        /** LimitImpact */
+        LimitImpact: {
+            /** Key */
+            key: string;
+            /** Names */
+            names: string[];
+            /** Pipelines */
+            pipelines: number;
+        };
+        /** LimitImpactRead */
+        LimitImpactRead: {
+            /** Items */
+            items: components["schemas"]["LimitImpact"][];
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Email */
@@ -4652,6 +4686,13 @@ export interface components {
             /** @description Limits on each pipeline's peak footprint, beside max_resources. Returned only when set. */
             resource_limits?: components["schemas"]["ResourceLimits"] | null;
             /**
+             * Setting Limits
+             * @description Limits on typed settings, by key (returned only when set). A key the registry no longer has is kept and ignored.
+             */
+            setting_limits?: {
+                [key: string]: components["schemas"]["SettingLimit"];
+            };
+            /**
              * Shrink After Copy
              * @description What happens once a custom Flink CDC cluster with a streaming slot size finishes its first copy: auto (BeziSync shrinks it) or suggest (someone chooses Shrink now). Returned only when suggest.
              * @default auto
@@ -5493,6 +5534,37 @@ export interface components {
              * @description The key a renamed setting moves to.
              */
             to?: string;
+        };
+        /**
+         * SettingLimit
+         * @description A project's limit on one typed setting; each part optional.
+         */
+        SettingLimit: {
+            /**
+             * Choices
+             * @description Only these choices (a setting with choices).
+             */
+            choices?: string[];
+            /**
+             * Hide
+             * @description Pipelines can't set it.
+             */
+            hide?: boolean;
+            /**
+             * Max
+             * @description At most this (a number or a duration).
+             */
+            max?: string;
+            /**
+             * Min
+             * @description At least this.
+             */
+            min?: string;
+            /**
+             * Pin
+             * @description Every pipeline gets this value, written into its spec when it deploys.
+             */
+            pin?: string;
         };
         /**
          * SettingsChange
@@ -10119,6 +10191,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPolicies"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectPolicies"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitImpactRead"];
                 };
             };
             /** @description Validation Error */

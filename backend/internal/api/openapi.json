@@ -3806,6 +3806,48 @@
         "title": "InboxRead",
         "type": "object"
       },
+      "LimitImpact": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "pipelines": {
+            "title": "Pipelines",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "pipelines",
+          "names"
+        ],
+        "title": "LimitImpact",
+        "type": "object"
+      },
+      "LimitImpactRead": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LimitImpact"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LimitImpactRead",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -6249,6 +6291,14 @@
             ],
             "description": "Limits on each pipeline's peak footprint, beside max_resources. Returned only when set."
           },
+          "setting_limits": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SettingLimit"
+            },
+            "description": "Limits on typed settings, by key (returned only when set). A key the registry no longer has is kept and ignored.",
+            "title": "Setting Limits",
+            "type": "object"
+          },
           "shrink_after_copy": {
             "default": "auto",
             "description": "What happens once a custom Flink CDC cluster with a streaming slot size finishes its first copy: auto (BeziSync shrinks it) or suggest (someone chooses Shrink now). Returned only when suggest.",
@@ -8348,6 +8398,42 @@
           "blocking"
         ],
         "title": "SettingEffect",
+        "type": "object"
+      },
+      "SettingLimit": {
+        "additionalProperties": false,
+        "description": "A project's limit on one typed setting; each part optional.",
+        "properties": {
+          "choices": {
+            "description": "Only these choices (a setting with choices).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "hide": {
+            "description": "Pipelines can't set it.",
+            "title": "Hide",
+            "type": "boolean"
+          },
+          "max": {
+            "description": "At most this (a number or a duration).",
+            "title": "Max",
+            "type": "string"
+          },
+          "min": {
+            "description": "At least this.",
+            "title": "Min",
+            "type": "string"
+          },
+          "pin": {
+            "description": "Every pipeline gets this value, written into its spec when it deploys.",
+            "title": "Pin",
+            "type": "string"
+          }
+        },
+        "title": "SettingLimit",
         "type": "object"
       },
       "SettingsChange": {
@@ -18431,6 +18517,60 @@
           "debezium-images"
         ],
         "description": "What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes."
+      }
+    },
+    "/api/v1/projects/{project_id}/policies/setting-limits:impact": {
+      "post": {
+        "operationId": "setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectPolicies"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitImpactRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Count what setting limits would refuse",
+        "tags": [
+          "approvals"
+        ],
+        "description": "How many of the project's pipelines (their current versions) proposed setting limits would refuse, with a few names; nothing is saved. Admins."
       }
     }
   }

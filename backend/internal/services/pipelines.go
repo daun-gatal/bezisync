@@ -355,6 +355,11 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	if err := ValidateTuning(eng, source.Type, sinkType, n.Spec); err != nil {
 		return nil, err
 	}
+	if rules, err := PoliciesOf(ctx, q, a.Project.ID); err != nil {
+		return nil, err
+	} else if err := RefuseSettingLimits(rules, eng, n.Spec, nil); err != nil {
+		return nil, err
+	}
 	if err := enforceEnginePolicy(ctx, q, a.Project.ID, eng); err != nil {
 		return nil, err
 	}
@@ -552,6 +557,13 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 				return nil, err
 			}
 			if err := ValidateTuning(eng, src.Type, sinkType, *e.Spec); err != nil {
+				return nil, err
+			}
+			rules, err := PoliciesOf(ctx, q, p.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if err := RefuseSettingLimits(rules, eng, *e.Spec, prev); err != nil {
 				return nil, err
 			}
 		}
@@ -1094,6 +1106,12 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	if err != nil {
 		return nil, err
 	}
+	// What would deploy: the spec with the project's pinned settings (written at deploy, P7).
+	if rules, err := PoliciesOf(ctx, q, p.ProjectID); err != nil {
+		return nil, err
+	} else {
+		spec = withPins(spec, Pins(rules, EngineOf(p), sourceConn.Type, sinkConn.Type, spec))
+	}
 	source, err := Resolve(ctx, q, sourceConn)
 	if err != nil {
 		return nil, err
@@ -1337,6 +1355,9 @@ func CheckDeployable(ctx context.Context, q db.Querier, p *models.Pipeline, vers
 	}
 	if v == nil {
 		return nil, nil, false, problem.NotFound("Version")
+	}
+	if err := writePins(ctx, q, p, v); err != nil {
+		return nil, nil, false, err
 	}
 	report, err := Preflight(ctx, q, p, domain.MustSpec(map[string]any(v.Spec)))
 	if err != nil {
@@ -1689,6 +1710,15 @@ func PolicyChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec do
 		}
 	}
 	out := domain.EvaluatePolicies(rules, spec, p.RuntimeID, sourceConn.Type, sinkType, int(others))
+	if c := settingLimitCheck(rules, EngineOf(p), spec); c != nil {
+		kept := out[:0]
+		for _, x := range out {
+			if x.Code != "policy_ok" {
+				kept = append(kept, x)
+			}
+		}
+		out = append(kept, *c)
+	}
 	var capacity map[string]any
 	if p.RuntimeID != nil {
 		if rt, err := GetRuntime(ctx, q, *p.RuntimeID); err == nil && rt != nil {
@@ -1719,3 +1749,43 @@ func PolicyChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec do
 }
 
 var _ = sort.Strings
+
+// writePins writes the project's pinned settings into the version about to deploy (P7, I2): an
+// unsealed one takes them in place; a sealed one (deployed before, sent for approval) can't change,
+// so its deploy is refused until a new version is saved.
+func writePins(ctx context.Context, q db.Querier, p *models.Pipeline, v *models.PipelineVersion) error {
+	rules, err := PoliciesOf(ctx, q, p.ProjectID)
+	if err != nil {
+		return err
+	}
+	src, err := GetConnection(ctx, q, p.SourceID)
+	if err != nil || src == nil {
+		return err
+	}
+	sinkType, err := SinkTypeOf(ctx, q, p)
+	if err != nil {
+		return err
+	}
+	spec := domain.MustSpec(map[string]any(v.Spec))
+	pins := Pins(rules, EngineOf(p), src.Type, sinkType, spec)
+	if len(pins) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(pins))
+	for k := range pins {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if v.SealedAt != nil {
+		return problem.Conflict("pinned_setting", fmt.Sprintf("This project now sets %s; v%d was saved before. Save a new version (any edit) to deploy with the pinned values.",
+			strings.Join(keys, ", "), v.Number), nil)
+	}
+	pinned := withPins(spec, pins)
+	m, err := ToMap(pinned)
+	if err != nil {
+		return err
+	}
+	v.Spec, v.SpecHash = db.Map(m), domain.SpecHash(pinned)
+	_, err = q.Exec(ctx, `UPDATE pipeline_versions SET spec = $1, spec_hash = $2 WHERE id = $3`, v.Spec, v.SpecHash, v.ID)
+	return err
+}

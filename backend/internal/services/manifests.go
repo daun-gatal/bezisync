@@ -9,6 +9,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/auth"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
@@ -178,6 +179,31 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 	metaChanged := existing != nil && (existing.Description != parsed.Description || existing.Owner != parsed.Owner ||
 		!labelsEqual(existing.Labels, parsed.Labels) || uuidChanged(existing.SinkID, sinkID) || uuidChanged(existing.RuntimeID, runtimeID) || engineChanged)
 	if o.DryRun {
+		// What this project's setting limits make of it (Promote's and apply's plan).
+		rules, err := PoliciesOf(ctx, q, pid)
+		if err != nil {
+			return nil, err
+		}
+		eng := engine.Debezium
+		if parsed.Engine != "" {
+			eng = engine.ID(parsed.Engine)
+		} else if existing != nil {
+			eng = EngineOf(existing)
+		}
+		refused := SettingLimitViolations(rules, eng, parsed.Spec, nil)
+		for _, k := range tuningKeys(refused) {
+			notes = append(notes, fmt.Sprintf("Refused by this project's setting limits: %s (%s).", k, refused[k]))
+		}
+		limits := LimitsFor(rules, eng)
+		pinned := map[string]string{}
+		for k, l := range limits {
+			if _, set := parsed.Spec.Tuning[k]; l.Pin != "" && !set {
+				pinned[k] = l.Pin
+			}
+		}
+		for _, k := range tuningKeys(pinned) {
+			notes = append(notes, fmt.Sprintf("This project sets %s to %s when it deploys.", k, pinned[k]))
+		}
 		action := "would_create"
 		var id *uuid.UUID
 		if existing != nil {

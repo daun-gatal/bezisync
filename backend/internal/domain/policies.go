@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -46,6 +47,22 @@ type ProjectPolicies struct {
 	// ResourceLimits caps what one pipeline asks for at its peak (a Flink CDC cluster's first copy),
 	// on both engines, beside MaxResources. Dumped only when set.
 	ResourceLimits *ResourceLimits `json:"resource_limits"`
+	// SettingLimits bound typed settings per key (engine.Setting): a tighter range, fewer
+	// choices, a pinned value or hidden. Checked against the registry when Admins save them;
+	// read leniently, so a key a later registry drops is kept (shown obsolete) and ignored.
+	// Dumped only when set.
+	SettingLimits map[string]SettingLimit `json:"setting_limits"`
+}
+
+// SettingLimit is one setting's project limit (each part optional).
+type SettingLimit struct {
+	Min     string   `json:"min,omitempty"`
+	Max     string   `json:"max,omitempty"`
+	Choices []string `json:"choices,omitempty"`
+	// Pin is the value every pipeline gets: written into the spec when it deploys.
+	Pin string `json:"pin,omitempty"`
+	// Hide keeps the setting from being set at all.
+	Hide bool `json:"hide,omitempty"`
 }
 
 // ResourceLimits is a project's most CPU, memory and readers per pipeline (each optional).
@@ -122,6 +139,35 @@ func (p ProjectPolicies) Dump() *om.Map {
 	}
 	if p.ShrinkAfterCopy == "suggest" {
 		out.Set("shrink_after_copy", "suggest")
+	}
+	if len(p.SettingLimits) > 0 {
+		m := om.New()
+		keys := make([]string, 0, len(p.SettingLimits))
+		for k := range p.SettingLimits {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			l := p.SettingLimits[k]
+			e := om.New()
+			if l.Min != "" {
+				e.Set("min", l.Min)
+			}
+			if l.Max != "" {
+				e.Set("max", l.Max)
+			}
+			if l.Choices != nil {
+				e.Set("choices", strList(l.Choices))
+			}
+			if l.Pin != "" {
+				e.Set("pin", l.Pin)
+			}
+			if l.Hide {
+				e.Set("hide", true)
+			}
+			m.Set(k, e)
+		}
+		out.Set("setting_limits", m)
 	}
 	if l := p.ResourceLimits; l != nil {
 		m := om.New()
@@ -214,6 +260,9 @@ func ParsePolicies(v *val.V, loc val.Loc, raw any) (ProjectPolicies, bool) {
 		if b, ok := v.Bool(f.Loc, f.Raw); ok {
 			p.AllowAdvancedProperties = b
 		}
+	}
+	if f := o.Get("setting_limits"); f.Present && !f.IsNull() {
+		p.SettingLimits = decodeSettingLimits(v, f.Loc, f.Raw)
 	}
 	if f := o.Get("resource_limits"); f.Present && !f.IsNull() {
 		p.ResourceLimits = decodeLimits(v, f.Loc, f.Raw)
@@ -418,4 +467,59 @@ func (l *ResourceLimits) Amounts() (cpuMilli, memoryMiB, parallelism int) {
 	cpuMilli, _ = ParseCPUAny(l.MaxCPU)
 	memoryMiB, _ = ParseMemoryAny(l.MaxMemory)
 	return cpuMilli, memoryMiB, l.MaxParallelism
+}
+
+// decodeSettingLimits reads setting_limits' shape; whether each limit fits its setting is checked
+// by services.ValidateSettingLimits when Admins save them.
+func decodeSettingLimits(v *val.V, loc val.Loc, raw any) map[string]SettingLimit {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		v.Fail(loc, "dict_type", "Input should be a valid dictionary")
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := map[string]SettingLimit{}
+	for _, k := range keys {
+		e := v.Model(loc.Add(k), m[k], "SettingLimit")
+		if e.Failed {
+			continue
+		}
+		var l SettingLimit
+		str := func(name string) string {
+			if g := e.Get(name); g.Present && !g.IsNull() {
+				if s, ok := v.Str(g.Loc, g.Raw); ok {
+					return s
+				}
+			}
+			return ""
+		}
+		l.Min, l.Max, l.Pin = str("min"), str("max"), str("pin")
+		if g := e.Get("choices"); g.Present && !g.IsNull() {
+			if items, ok := v.List(g.Loc, g.Raw); ok {
+				l.Choices = []string{}
+				for i, it := range items {
+					if s, ok := v.Str(g.Loc.Add(i), it); ok {
+						l.Choices = append(l.Choices, s)
+					}
+				}
+			}
+		}
+		if g := e.Get("hide"); g.Present {
+			if b, ok := v.Bool(g.Loc, g.Raw); ok {
+				l.Hide = b
+			}
+		}
+		e.Forbid()
+		if l.Min != "" || l.Max != "" || l.Choices != nil || l.Pin != "" || l.Hide {
+			out[k] = l
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

@@ -141,6 +141,9 @@ src/
   chosen); Use sets the tuning value and autosave saves it.
 - The adopt dialog shows the server's `plan` (`ImportBuckets`) and creates the draft from
   `plan.spec`; Change Debezium version previews `debezium-images:effects` before confirming.
+- Setting limits (`settings/SettingLimits.tsx`) in Policies: add per setting, the impact count from
+  `setting-limits:impact`, obsolete keys flagged. Review hides hidden settings, bounds int maxima
+  (`caps`) and shows pins read-only (`SettingsEditor` `pinned`: "Set by project policy").
 - Placement (`settings/PlacementProfiles.tsx`): the Kubernetes runtime edit modal edits its profiles
   (`profileError` blocks names and templates the server refuses); Review offers the chosen
   runtime's profiles as Placement and writes `placement` after `tuning`, only when set.

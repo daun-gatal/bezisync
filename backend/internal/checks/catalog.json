@@ -2116,6 +2116,19 @@
    ]
   },
   {
+   "code": "policy_setting_limit",
+   "section": "Project policies",
+   "titles": [
+    "Setting limits"
+   ],
+   "whys": [
+    "The project bounds some settings (a range, fewer choices, a pinned value, or hidden). A pipeline saved before a limit keeps running; its next deploy is blocked until its settings fit."
+   ],
+   "fixes": [
+    "Change or remove them in Review → Engine settings."
+   ]
+  },
+  {
    "code": "policy_resource_limits",
    "section": "Project policies",
    "titles": [

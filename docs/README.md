@@ -768,7 +768,13 @@ modes; **Resources** — the largest preset size (a custom size is held to its C
 custom Flink CDC cluster to the totals of the Flink CDC preset of that name), the most CPU, memory
 and readers one pipeline may ask for at its peak (`resource_limits: {max_cpu, max_memory,
 max_parallelism}`; a Flink CDC cluster's peak is its first copy; no lower than Small, or nothing
-could deploy) and whether clusters shrink after their first copy or only offer Shrink now; pipelines per source (each
+could deploy) and whether clusters shrink after their first copy or only offer Shrink now;
+**Setting limits** — per typed setting, at most or at least a value, only some choices, always a
+value (written into each pipeline's version when it deploys; Review shows it as set by project
+policy), or hidden; checked against the setting when you add it, with the pipelines it would block
+counted before you save; a pipeline over a limit keeps running and its next deploy is blocked
+(`policy_setting_limit`), Promote's plan names what a target project's limits refuse, and a limit on
+a setting BeziSync no longer offers is shown obsolete and ignored; pipelines per source (each
 holds a replication slot or log reader); whether "Deploy anyway" exists; whether deploys need
 **approval**; which transform types pipelines may use; and whether **custom transforms** (any SMT
 class in the image) and **scripted transforms** (Groovy/JavaScript filter scripts, which run next to

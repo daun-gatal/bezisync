@@ -33,6 +33,7 @@ export function SettingsEditor({
   settings,
   disabled,
   caps,
+  pinned = {},
   addLabel = 'Add a setting',
   idBase,
 }: {
@@ -43,6 +44,8 @@ export function SettingsEditor({
   disabled?: boolean;
   /** Tighter bounds a project sets (key → max), shown in the hint. */
   caps?: Record<string, number>;
+  /** Values the project sets for every pipeline (key → value): shown, never edited. */
+  pinned?: Record<string, string>;
   addLabel?: string;
   idBase: string;
 }) {
@@ -52,9 +55,9 @@ export function SettingsEditor({
     delete next[k];
     onChange(next);
   };
-  const set = settings.filter((s) => s.key in value);
+  const set = settings.filter((s) => s.key in value || s.key in pinned);
   const unknown = Object.keys(value).filter((k) => !settings.some((s) => s.key === k));
-  const unused = settings.filter((s) => !(s.key in value));
+  const unused = settings.filter((s) => !(s.key in value) && !(s.key in pinned));
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {STAGES.map(({ id, title }) => {
@@ -68,9 +71,10 @@ export function SettingsEditor({
                 key={s.key}
                 idBase={idBase}
                 setting={s}
-                value={value[s.key] ?? s.default}
+                value={pinned[s.key] ?? value[s.key] ?? s.default}
                 cap={caps?.[s.key]}
-                disabled={disabled}
+                disabled={disabled || s.key in pinned}
+                note={s.key in pinned ? 'Set by project policy.' : undefined}
                 onChange={(v) => put(s.key, v)}
                 onRemove={() => drop(s.key)}
               />
@@ -116,6 +120,7 @@ function SettingRow({
   value,
   cap,
   disabled,
+  note,
   onChange,
   onRemove,
 }: {
@@ -124,13 +129,15 @@ function SettingRow({
   value: string;
   cap?: number;
   disabled?: boolean;
+  /** Why it can't be changed here ("Set by project policy."). */
+  note?: string;
   onChange: (v: string) => void;
   onRemove: () => void;
 }) {
   const error = settingError(s, value);
   const max = cap !== undefined ? Math.min(cap, Number(s.max)) : Number(s.max);
   const capped = cap !== undefined && cap < Number(s.max) ? ` This project allows at most ${cap}.` : '';
-  const hint = `${s.why} Default ${settingText(s, s.default)}.${capped}`;
+  const hint = `${note ? `${note} ` : ''}${s.why} Default ${settingText(s, s.default)}.${capped}`;
   const id = `${idBase}-${s.key}`;
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">

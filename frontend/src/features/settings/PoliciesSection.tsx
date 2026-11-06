@@ -19,6 +19,7 @@ import { useProject } from '@/lib/session';
 import { fullSpec, memoryMiB, PRESET_AMOUNTS, SNAPSHOT_MODES } from '@/features/pipelines/spec';
 import { TYPE_TITLE } from '@/features/pipelines/transforms/model';
 import { useRuntimes } from './RuntimesSection';
+import { SettingLimits } from './SettingLimits';
 import { memoryLabel } from '@/lib/cluster';
 
 const TRANSFORM_OPTIONS = (['unwrap', 'filter', 'rename', 'add_field', 'flatten', 'outbox'] as const).map((t) => ({ value: t, label: TYPE_TITLE[t] }));
@@ -293,6 +294,20 @@ export function PoliciesSection() {
                 )}
               </Field>
             </Group>
+            <Card title="Setting limits">
+              <SettingLimits
+                projectId={project.id}
+                value={draft.setting_limits ?? {}}
+                disabled={!manage}
+                onChange={(limits) => {
+                  // Returned only when set: an empty one is dropped, so "dirty" compares like with like.
+                  const rest = { ...draft };
+                  if (Object.keys(limits).length) rest.setting_limits = limits;
+                  else delete rest.setting_limits;
+                  setDraft(rest);
+                }}
+              />
+            </Card>
             <Group title="How pipelines may run">
               <div className="flex min-w-0 flex-col gap-2">
                 <Switch
