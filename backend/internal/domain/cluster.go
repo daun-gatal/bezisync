@@ -173,3 +173,9 @@ func dumpCluster(c *FlinkCluster) *om.Map {
 	}
 	return m
 }
+
+// ParseCluster reads a FlinkCluster on its own (the wizard's packing preview), with the same rules
+// as in a spec.
+func ParseCluster(v *val.V, loc val.Loc, raw any) *FlinkCluster {
+	return decodeCluster(v, loc, raw)
+}

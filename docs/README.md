@@ -650,7 +650,9 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   TaskManager asks for 1 CPU and 2 GiB, the JobManager 1 to 1.5 GiB. A **custom cluster**
   (`policies: {resources: custom}` with `flink_cdc: {cluster: {parallelism, slot: {cpu, memory},
   job_manager: {cpu, memory}}}`) names how many readers run (1 to 128) and what each reader's slot
-  needs (CPU 0.25 to 4, memory 512 MiB to 8 GiB); when it deploys, BeziSync packs the slots into the
+  needs (CPU 0.25 to 4, memory 512 MiB to 8 GiB) — in Review → Size → Custom (Expert mode), which
+  starts from the size the pipeline had and draws how the cluster would be packed now, with why it
+  splits and its total against the largest node; when it deploys, BeziSync packs the slots into the
   fewest TaskManagers the runtime's largest node holds (at most 8 slots each, plus 512 MiB per
   TaskManager) and keeps that shape until the next deploy, so nodes coming and going never restart
   it. `shape: manual` with `task_managers: {count, slots, cpu, memory}` sets the TaskManagers

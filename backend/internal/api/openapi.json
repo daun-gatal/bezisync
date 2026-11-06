@@ -1310,6 +1310,134 @@
         "title": "ClassifyResponse",
         "type": "object"
       },
+      "ClusterNeed": {
+        "description": "What the whole cluster asks for.",
+        "properties": {
+          "cpu": {
+            "title": "Cpu",
+            "type": "number"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory_mib"
+        ],
+        "title": "ClusterNeed",
+        "type": "object"
+      },
+      "ClusterNode": {
+        "properties": {
+          "cpu": {
+            "title": "Cpu",
+            "type": "number"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory_mib"
+        ],
+        "title": "ClusterNode",
+        "type": "object"
+      },
+      "ClusterPackRead": {
+        "properties": {
+          "check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Check"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The flink_cluster_fit check for this shape."
+          },
+          "job_manager_cpu": {
+            "title": "Job Manager Cpu",
+            "type": "string"
+          },
+          "job_manager_memory": {
+            "title": "Job Manager Memory",
+            "type": "string"
+          },
+          "need": {
+            "$ref": "#/components/schemas/ClusterNeed"
+          },
+          "node": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterNode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The runtime's largest node; null when it doesn't report one."
+          },
+          "readers": {
+            "title": "Readers",
+            "type": "integer"
+          },
+          "slots": {
+            "description": "Slots per TaskManager.",
+            "title": "Slots",
+            "type": "integer"
+          },
+          "task_manager_cpu": {
+            "title": "Task Manager Cpu",
+            "type": "string"
+          },
+          "task_manager_memory": {
+            "title": "Task Manager Memory",
+            "type": "string"
+          },
+          "task_managers": {
+            "title": "Task Managers",
+            "type": "integer"
+          },
+          "why": {
+            "description": "Why it has that many TaskManagers, naming the limit.",
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_managers",
+          "slots",
+          "readers",
+          "task_manager_cpu",
+          "task_manager_memory",
+          "job_manager_cpu",
+          "job_manager_memory",
+          "why",
+          "need",
+          "node",
+          "check"
+        ],
+        "title": "ClusterPackRead",
+        "type": "object"
+      },
+      "ClusterPackRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cluster": {
+            "$ref": "#/components/schemas/FlinkCluster"
+          }
+        },
+        "required": [
+          "cluster"
+        ],
+        "title": "ClusterPackRequest",
+        "type": "object"
+      },
       "Column": {
         "properties": {
           "name": {
@@ -17592,6 +17720,70 @@
         "summary": "Set Access",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack": {
+      "post": {
+        "description": "How a custom Flink CDC cluster would be packed on the pipeline's runtime now: TaskManagers, slots, CPU and memory, why it splits, what it asks for in all and whether it fits the largest node. Pure: the deploy packs again and keeps that shape.",
+        "operationId": "pack_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_pack_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterPackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterPackRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pack a Flink CDC cluster",
+        "tags": [
+          "pipelines"
         ]
       }
     }

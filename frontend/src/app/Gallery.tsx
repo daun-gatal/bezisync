@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { RawProperties, type RawRow } from '@/components/RawProperties';
 import { SettingsEditor } from '@/components/SettingsEditor';
+import { ClusterDiagram } from '@/components/ClusterDiagram';
 import { Button } from '@/components/ui/button';
 import { Empty, InlineError, Meter, Notice, Pill, Skeleton } from '@/components/ui/feedback';
 import { Check, ChipsInput, Field, Input, RadioCards, Search, Segmented, SlugInput, Stepper, Switch } from '@/components/ui/form';
@@ -176,6 +177,13 @@ export function Gallery() {
               onChange={setRaw}
               keyPlaceholder="debezium.source.…"
               verdicts={{ [`debezium.source.${LONG}`]: { key: `debezium.source.${LONG}`, class: 'modelled', message: `${LONG} is chosen elsewhere. `.repeat(2), fix: 'tables', setting: null } }}
+            />
+          </Card>
+          <Card title="Flink CDC cluster">
+            {/* The widest shape the server allows: 16 TaskManagers × 8 slots. It must wrap. */}
+            <ClusterDiagram
+              title="How it would be packed now"
+              shape={{ task_managers: 16, slots: 8, readers: 125, task_manager_cpu: '16', task_manager_memory: '64Gi', job_manager_cpu: '2', job_manager_memory: '8Gi' }}
             />
           </Card>
         </TabPanel>

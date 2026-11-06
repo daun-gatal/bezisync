@@ -124,3 +124,30 @@ func positionLeft(ctx context.Context, p *models.Pipeline) (left, known bool) {
 	}
 	return latest > restoreFloor(p), true
 }
+
+// ClusterPreview is how a custom cluster would be packed on a pipeline's runtime now: the shape,
+// why, what it asks for in all and whether it fits the largest node (the fit check).
+type ClusterPreview struct {
+	Size  engine.FlinkSize
+	Why   string
+	Need  Need
+	Node  engine.Node
+	Check *checks.Check
+}
+
+// PreviewCluster packs c for p's runtime as a deploy would now (pure: nothing is stored).
+func PreviewCluster(ctx context.Context, q db.Querier, p *models.Pipeline, c *domain.FlinkCluster) (*ClusterPreview, error) {
+	var capacity map[string]any
+	if p.RuntimeID != nil {
+		rt, err := GetRuntime(ctx, q, *p.RuntimeID)
+		if err != nil {
+			return nil, err
+		}
+		capacity = rt.Capacity
+	}
+	spec := domain.DefaultSpec()
+	spec.Policies.Resources, spec.FlinkCDC.Cluster = "custom", c
+	packed := FlinkSizeOf(&models.Pipeline{Artifacts: db.Map{}}, spec, capacity)
+	return &ClusterPreview{Size: packed.Size, Why: packed.Why, Need: FlinkNeed(packed.Size), Node: NodeOf(capacity),
+		Check: flinkClusterFitCheck(spec, packed, capacity)}, nil
+}

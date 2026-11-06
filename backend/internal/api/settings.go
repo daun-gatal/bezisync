@@ -8,8 +8,11 @@ import (
 
 	"github.com/daun-gatal/bezisync/backend/internal/auth"
 	"github.com/daun-gatal/bezisync/backend/internal/compiler"
+	"github.com/daun-gatal/bezisync/backend/internal/db"
+	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/httpapi"
+	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/services"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
@@ -85,6 +88,46 @@ func settingsRoutes(r chi.Router) {
 			out = append(out, res)
 		}
 		httpapi.JSON(w, http.StatusOK, map[string]any{"items": out})
+		return nil
+	}))
+
+	// Pure: how a custom Flink CDC cluster would be packed on the pipeline's runtime now, so the
+	// wizard never copies the packing. The deploy packs again and keeps that shape.
+	r.Post("/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		_, p, err := viewPipeline(r, auth.PipelineView, false)
+		if err != nil {
+			return err
+		}
+		if services.EngineOf(p) != engine.FlinkCDC {
+			return problem.New(422, "engine_settings", "A cluster is packed only for pipelines that run on Flink CDC.")
+		}
+		cluster, err := body(r, func(v *val.V, o *val.Object) *domain.FlinkCluster {
+			f := o.Get("cluster")
+			if !f.Present {
+				v.Fail(f.Loc, "missing", "Field required")
+				return nil
+			}
+			c := domain.ParseCluster(v, f.Loc, f.Raw)
+			o.Forbid()
+			return c
+		})
+		if err != nil {
+			return err
+		}
+		pv, err := services.PreviewCluster(r.Context(), db.MustPool(r.Context()), p, cluster)
+		if err != nil {
+			return err
+		}
+		s := pv.Size
+		var node any
+		if pv.Node.Known() {
+			node = map[string]any{"cpu": float64(pv.Node.CPUMilli) / 1000, "memory_mib": pv.Node.MemoryMiB}
+		}
+		httpapi.JSON(w, http.StatusOK, map[string]any{
+			"task_managers": s.TaskManagers, "slots": s.SlotsPerTaskManager(), "readers": s.Parallelism(),
+			"task_manager_cpu": s.TaskManagerCPU, "task_manager_memory": s.TaskManagerMemory,
+			"job_manager_cpu": s.JobManagerCPU, "job_manager_memory": s.JobManagerMemory,
+			"why": pv.Why, "need": map[string]any{"cpu": pv.Need.CPU, "memory_mib": pv.Need.MiB}, "node": node, "check": pv.Check})
 		return nil
 	}))
 }

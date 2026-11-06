@@ -1153,6 +1153,26 @@ export interface paths {
         patch: operations["update_pipeline_api_v1_projects__project_id__pipelines__pipeline_id__patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pack a Flink CDC cluster
+         * @description How a custom Flink CDC cluster would be packed on the pipeline's runtime now: TaskManagers, slots, CPU and memory, why it splits, what it asks for in all and whether it fits the largest node. Pure: the deploy packs again and keeps that shape.
+         */
+        post: operations["pack_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_pack_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/config": {
         parameters: {
             query?: never;
@@ -2571,6 +2591,57 @@ export interface components {
         ClassifyResponse: {
             /** Items */
             items: components["schemas"]["ClassifyRead"][];
+        };
+        /**
+         * ClusterNeed
+         * @description What the whole cluster asks for.
+         */
+        ClusterNeed: {
+            /** Cpu */
+            cpu: number;
+            /** Memory Mib */
+            memory_mib: number;
+        };
+        /** ClusterNode */
+        ClusterNode: {
+            /** Cpu */
+            cpu: number;
+            /** Memory Mib */
+            memory_mib: number;
+        };
+        /** ClusterPackRead */
+        ClusterPackRead: {
+            /** @description The flink_cluster_fit check for this shape. */
+            check: components["schemas"]["Check"] | null;
+            /** Job Manager Cpu */
+            job_manager_cpu: string;
+            /** Job Manager Memory */
+            job_manager_memory: string;
+            need: components["schemas"]["ClusterNeed"];
+            /** @description The runtime's largest node; null when it doesn't report one. */
+            node: components["schemas"]["ClusterNode"] | null;
+            /** Readers */
+            readers: number;
+            /**
+             * Slots
+             * @description Slots per TaskManager.
+             */
+            slots: number;
+            /** Task Manager Cpu */
+            task_manager_cpu: string;
+            /** Task Manager Memory */
+            task_manager_memory: string;
+            /** Task Managers */
+            task_managers: number;
+            /**
+             * Why
+             * @description Why it has that many TaskManagers, naming the limit.
+             */
+            why: string;
+        };
+        /** ClusterPackRequest */
+        ClusterPackRequest: {
+            cluster: components["schemas"]["FlinkCluster"];
         };
         /** Column */
         Column: {
@@ -8704,6 +8775,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pack_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_pack_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterPackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterPackRead"];
                 };
             };
             /** @description Validation Error */

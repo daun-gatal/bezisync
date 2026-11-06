@@ -122,6 +122,14 @@ src/
   `SettingsChangeList` (`components/SettingsChange.tsx`) shows preflight's or the diff's
   `settings_change` grouped by impact, heaviest first: in Review's final checks, History's diff and
   deploy confirmation (`settingsChangeLines`), and the approval banner.
+- Flink CDC custom clusters (`lib/cluster.ts`, `components/ClusterDiagram.tsx`,
+  `wizard/FlinkClusterEditor.tsx`): Review's Size offers Custom to Experts (and keeps one a
+  Guided user already has). It starts from the preset it was (`clusterFromPreset`: the same readers),
+  offers only values the server accepts (`SLOT_CPUS`, `TM_MEMORIES`, …) and shows the server's
+  packing (`cluster:pack`, `usePackCluster`), never its own: the diagram (wraps; `role="img"` with
+  the words), why it splits, the total against the largest node and the fit check. `flinkSpecBlock`
+  writes the cluster in `dumpCluster` order. Readers are locked while a deployed pipeline has a
+  current saved position (`useSavedPositions`), as preflight's `flink_readers_changed` is.
 - `SchemaForm` renders descriptor JSON Schemas (connections, a sink's pipeline options): `ui.group`,
   `ui.expert`, `ui.labels` / `ui.descriptions` for enum values and `ui.when` (shown only while other
   fields hold listed values; hidden fields are dropped by `cleanValues`; `context` passes the sibling

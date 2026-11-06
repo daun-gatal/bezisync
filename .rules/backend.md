@@ -363,7 +363,9 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the
-  typed setting when a key is one, so the wizard never copies the classifier.
+  typed setting when a key is one, so the wizard never copies the classifier; `POST
+  …/pipelines/{id}/cluster:pack` (pure, `services.PreviewCluster`) packs a custom Flink CDC cluster
+  for the pipeline's runtime the way a deploy would, with the fit check.
 - Transforms (`domain/transforms.go`, `compiler/transforms.go`): `spec.transforms` steps are
   `unwrap`, `filter`, `outbox` (the Python types: fixed four-field dump) and the typed `rename`,
   `add_field`, `flatten`, `custom`; filters are either typed (`operations` + `rules`) or a raw

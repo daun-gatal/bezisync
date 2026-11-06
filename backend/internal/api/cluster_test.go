@@ -123,3 +123,39 @@ func TestCapacityMeasuredAtPreflight(t *testing.T) {
 		t.Fatal(c)
 	}
 }
+
+// The wizard's packing preview: pure, the same packing as a deploy, the fit check with it.
+func TestClusterPackPreview(t *testing.T) {
+	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
+	lake := icebergSink(t, e)
+	base := "/api/v1/projects/" + e.pid + "/pipelines"
+	p := e.admin.post(base, map[string]any{"name": "lake-pack", "source_id": e.ids.Source, "sink_id": lake, "runtime_id": e.ids.Runtime, "engine": "flink-cdc",
+		"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}}}).expect(201)
+	u := base + "/" + p.Str("id") + "/cluster:pack"
+	cluster := map[string]any{"parallelism": 6, "slot": map[string]any{"cpu": "1", "memory": "2Gi"}, "job_manager": map[string]any{"cpu": "1", "memory": "1Gi"}}
+	// No node size known (and none measured yet): packed up to 8 slots, the fit unknown.
+	r := e.admin.post(u, map[string]any{"cluster": cluster}).expect(200)
+	if r.At("task_managers") != float64(1) || r.At("slots") != float64(6) || r.At("node") != nil || r.At("check", "status") != "unknown" ||
+		r.At("need", "memory_mib") != float64(1024+6*2048+512) {
+		t.Fatal(string(r.Raw))
+	}
+	exec(t, `UPDATE runtimes SET capacity = '{"cpu_allocatable": 16, "node_cpu_max": 4, "node_memory_max": 8589934592}' WHERE id = '`+e.ids.Runtime+`'`)
+	r = e.admin.post(u, map[string]any{"cluster": cluster}).expect(200)
+	if r.At("task_managers") != float64(2) || r.At("slots") != float64(3) || r.At("readers") != float64(6) || !strings.Contains(r.Str("why"), "limited by memory") ||
+		r.At("node", "cpu") != float64(4) || r.At("check", "status") != "pass" {
+		t.Fatal(string(r.Raw))
+	}
+	// Bad input is refused like in a spec; nothing was saved.
+	bad := map[string]any{"parallelism": 0, "slot": map[string]any{"cpu": "1", "memory": "2Gi"}, "job_manager": map[string]any{"cpu": "1", "memory": "1Gi"}}
+	e.admin.post(u, map[string]any{"cluster": bad}).expect(422)
+	e.admin.post(u, map[string]any{"cluster": cluster, "extra": 1}).expect(422)
+	if strings.Contains(string(e.admin.get(base+"/"+p.Str("id")).Raw), `"cluster"`) {
+		t.Fatal("the preview saved something")
+	}
+	// Debezium pipelines have no cluster; another project's pipeline is a 404 whatever the body.
+	deb := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
+	e.admin.post(base+"/"+deb.Str("id")+"/cluster:pack", map[string]any{"cluster": cluster}).expect(422)
+	other := e.admin.post("/api/v1/projects", map[string]any{"slug": "other", "name": "Other"}).expect(201).Str("id")
+	e.admin.post("/api/v1/projects/"+other+"/pipelines/"+p.Str("id")+"/cluster:pack", map[string]any{"nonsense": true}).expect(404)
+}

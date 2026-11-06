@@ -20,12 +20,14 @@ import { ApiError } from '@/lib/api';
 import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
 import { canonicalSetting, jsonbSorted, settingError, tuningSettings, useClassify } from '@/lib/settings';
 import { slugify } from '@/lib/format';
-import { useDeploy, usePipelines, usePreflight, type Pipeline, type Preflight } from '@/lib/pipelines';
+import { useDeploy, usePipelines, usePreflight, useSavedPositions, type Pipeline, type Preflight } from '@/lib/pipelines';
+import { clusterFromPreset, manualError, usePackCluster } from '@/lib/cluster';
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
 import { CUSTOM_CPUS, CUSTOM_MEMORIES, deriveSinkOptions, fullSpec, heapMiB, memoryMiB, optionsSchemaFor, PRESET_AMOUNTS, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
+import { FlinkClusterEditor } from './FlinkClusterEditor';
 import { FlinkRunSettings } from './FlinkSettings';
 import { OwnerPicker } from './OwnerPicker';
 import { personalSummary } from './personal';
@@ -121,6 +123,17 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const nameErr = deployed ? null : !name.trim() ? 'Give the pipeline a name.' : slugError(name, others);
 
   const discovery = useDiscovery(project.id, pipeline.source.id);
+  // A running Flink CDC pipeline keeps its readers while it has a saved position to restore
+  // (flink_readers_changed); after Start over they can change.
+  const positions = useSavedPositions(project.id, pipeline.id, flink && deployed);
+  const readersLocked = flink && deployed && (positions.data === undefined || positions.data.positions.some((s) => s.current));
+  const clusterOn = flink && resources === 'custom' && fc.cluster !== undefined;
+  const pack = usePackCluster(project.id, pipeline.id, fc.cluster, clusterOn && !(fc.cluster && manualError(fc.cluster)));
+  const tableRows = useMemo(() => {
+    const byName = new Map((discovery.data?.tables ?? []).map((t) => [`${t.schema}.${t.name}`, t.rows_estimate ?? null]));
+    const rows = spec.source.tables.include.map((t) => byName.get(t) ?? null);
+    return rows.length && rows.every((r) => r !== null) ? rows.reduce<number>((n, r) => n + (r ?? 0), 0) : null;
+  }, [discovery.data, spec.source.tables.include]);
   // Options the destination derives from the tables (Iceberg's partition keys) follow the
   // tables and keys chosen in earlier steps.
   const sinkSchema = optionsSchemaFor(sinkCaps.options_schema as JsonSchema | null, pipeline.engine);
@@ -161,7 +174,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     owner !== pipeline.owner ||
     runtimeId !== pipeline.runtime?.id ||
     JSON.stringify(nextSpec) !== JSON.stringify(spec);
-  const invalid = nameErr ?? rawError ?? tuningError ?? customError;
+  const clusterError = clusterOn && fc.cluster ? manualError(fc.cluster) : null;
+  const invalid = nameErr ?? rawError ?? tuningError ?? customError ?? clusterError;
 
   // Save shortly after the last change; one save at a time, so versions never conflict.
   const latest = useRef({ body, dirty, invalid, saving });
@@ -309,14 +323,19 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             <RadioCards
               label="Size"
               value={resources}
-              onChange={(v) => setResources(v as FullSpec['policies']['resources'])}
+              onChange={(v) => {
+                const next = v as FullSpec['policies']['resources'];
+                // A Flink CDC custom cluster starts from the size it was, with the same readers.
+                if (flink && next === 'custom' && !fc.cluster) setFc({ ...fc, cluster: clusterFromPreset(flinkEngine?.sizes?.[resources]) });
+                setResources(next);
+              }}
               options={[
                 ...RESOURCES.map((r) => ({
                   value: r.value as FullSpec['policies']['resources'],
                   label: r.title,
                   description: flink ? flinkSizeHelp(flinkEngine?.sizes?.[r.value]) : r.help,
-                  disabled: (!sizeAllowed(policies, r.value) || (!flink && tooSmall(r.value)) || (flink && deployed)) && r.value !== resources,
-                  why: flink && deployed
+                  disabled: (!sizeAllowed(policies, r.value) || (!flink && tooSmall(r.value)) || readersLocked) && r.value !== resources,
+                  why: readersLocked
                     ? 'A Flink CDC pipeline keeps the readers it was deployed with: Start over to change its size.'
                     : tooSmall(r.value)
                     ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${sinkCaps.min_resources}.`
@@ -324,8 +343,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                 })),
                 ...(expert && !flink
                   ? [{ value: 'custom' as const, label: 'Custom', description: 'Your own CPU and memory; BeziSync works out the Java heap.' }]
-                  : flink && fc.cluster
-                    ? [{ value: 'custom' as const, label: 'Custom', description: `${fc.cluster.parallelism} readers, each ${fc.cluster.slot.cpu} CPU and ${fc.cluster.slot.memory}.` }]
+                  : flink && (expert || fc.cluster)
+                    ? [{ value: 'custom' as const, label: 'Custom', description: 'Your own readers, what each needs, and the TaskManagers BeziSync packs them into.' }]
                     : []),
               ]}
             />
@@ -352,6 +371,16 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               {() => <Meta className="pt-2 text-sm text-ink">{heapMiB(memoryMiB(custom.memory))} MiB</Meta>}
             </Field>
           </div>
+        ) : null}
+        {clusterOn && fc.cluster ? (
+          <FlinkClusterEditor
+            value={fc.cluster}
+            onChange={(cluster) => setFc({ ...fc, cluster })}
+            packed={pack.data}
+            packing={pack.isFetching}
+            readersLocked={readersLocked}
+            rows={tableRows}
+          />
         ) : null}
         {capture.snapshot_modes.length === 0 ? (
           <Notice tone="info" title="Existing rows">
