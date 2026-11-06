@@ -1,3 +1,5 @@
 testdata
 **/*_test.go
 .golangci.yml
+# Directory contracts (README.md, .rules/egm.md) document the source; they ship in no image.
+**/README.md
