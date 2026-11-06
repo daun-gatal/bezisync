@@ -440,7 +440,12 @@ func Preview(in PreviewInput) PreviewResult {
 	res.Input = PreviewEvent{Key: jsonForm(key), Value: jsonForm(mongoText(value))}
 	state := "delivered"
 	var current any = value
+	// A soft delete makes every unwrap step mark deletes, as the compiler does.
+	softDelete := slices.ContainsFunc(in.Spec.Transforms, func(t Transform) bool { return t.Type == "soft_delete" })
 	for i, t := range in.Spec.Transforms {
+		if softDelete && t.Type == "unwrap" {
+			t.DeleteHandling = "rewrite"
+		}
 		step := PreviewStep{Index: i, ID: t.ID, Type: t.Type}
 		switch {
 		case state == "dropped":
@@ -557,6 +562,20 @@ func applyStep(in PreviewInput, t Transform, value any) (any, string, string, st
 		return nil, "dropped", "Dropped: the event does not match this filter.", ""
 	case "unwrap":
 		return unwrap(in, t, value.(*om.Map))
+	case "soft_delete":
+		field := SoftDeleteField["debezium"]
+		for _, c := range in.Columns {
+			if c.Name == field {
+				return value, "error", "", fmt.Sprintf("The table already has a column %s, which the soft delete would overwrite (field name duplication).", field)
+			}
+		}
+		if env, ok := value.(*om.Map); ok && env != nil {
+			if _, isEnvelope := env.Get("op"); isEnvelope {
+				// No unwrap step before it: the compiler adds one that marks deletes.
+				return unwrap(in, Transform{Type: "unwrap", DeleteHandling: "rewrite", AddFields: []string{"op", "source.ts_ms"}}, env)
+			}
+		}
+		return value, "applied", "Deleted rows are kept, marked " + field + ".", ""
 	case "outbox":
 		return value, "unknown", "The outbox router cannot be previewed.", ""
 	case "custom":

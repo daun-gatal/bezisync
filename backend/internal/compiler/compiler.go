@@ -300,7 +300,7 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 	if err != nil {
 		return nil, err
 	}
-	c.Spec.Transforms = withSinkUnwrap(c.Spec.Transforms, caps.Unwrap, sinkOptions)
+	c.Spec.Transforms = withSoftDelete(withSinkUnwrap(c.Spec.Transforms, caps.Unwrap, sinkOptions))
 	spec := c.Spec
 	res := ResourceFor(spec.Policies)
 	props := map[string]string{

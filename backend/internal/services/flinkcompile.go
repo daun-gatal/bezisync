@@ -31,7 +31,7 @@ func NeedsFlinkColumns(spec domain.PipelineSpec) bool {
 			return true
 		}
 	}
-	return slices.ContainsFunc(spec.Transforms, func(t domain.Transform) bool { return t.Type == "rename" })
+	return slices.ContainsFunc(spec.Transforms, func(t domain.Transform) bool { return t.Type == "rename" || t.Type == "soft_delete" })
 }
 
 // ResolveFlinkImage is the Flink CDC image a pipeline runs: its pin, or the catalog default.

@@ -19,7 +19,7 @@ export interface Caps {
 export const NO_CAPS: Caps = { value_formats: {}, key_columns: false, row_filters: false };
 
 /** Step titles on Flink CDC, which writes rows and columns into tables (the others as TYPE_TITLE). */
-export const FLINK_TITLE: Partial<Record<TransformType, string>> = { filter: 'Keep only some rows', rename: 'Rename columns', add_field: 'Add a column' };
+export const FLINK_TITLE: Partial<Record<TransformType, string>> = { filter: 'Keep only some rows', rename: 'Rename columns', add_field: 'Add a column', soft_delete: 'Keep deleted rows' };
 
 /** Step types that run only on Debezium (the Flink CDC compiler refuses them). */
 export const DEBEZIUM_ONLY_STEPS: readonly TransformType[] = ['outbox', 'flatten', 'custom'];
@@ -43,7 +43,11 @@ export const TYPE_TITLE: Record<TransformType, string> = {
   add_field: 'Add a field',
   flatten: 'Flatten nested fields',
   custom: 'Custom transform',
+  soft_delete: 'Keep deleted rows',
 };
+
+/** The field a soft delete marks rows with, per engine (domain.SoftDeleteField). */
+export const SOFT_DELETE_FIELD = { debezium: '__deleted', 'flink-cdc': '__op' } as const;
 
 export const DEBEZIUM_CLASS: Partial<Record<TransformType, string>> = {
   filter: 'io.debezium.transforms.Filter',
@@ -274,6 +278,8 @@ export function fieldsBefore(steps: TransformStep[], index: number, table: Table
       fields = fields.map((f) => map.get(f) ?? f);
     } else if (t.type === 'add_field' && t.name) {
       fields = [...fields, t.name];
+    } else if (t.type === 'soft_delete' && !fields.includes('__deleted')) {
+      fields = [...fields, '__deleted'];
     }
   }
   return fields;
@@ -315,6 +321,8 @@ export function summarize(t: TransformStep): string {
       return `${scope(t)}: ${t.class || 'no class yet'} · ${plural(Object.keys(t.properties ?? {}).length, 'property')}`;
     case 'outbox':
       return 'Outbox event router';
+    case 'soft_delete':
+      return 'A deleted row stays, marked deleted (__deleted on Debezium, __op on Flink CDC), instead of being removed';
   }
 }
 
@@ -355,6 +363,7 @@ export function outputImpact(before: FullSpec, after: FullSpec): Impact[] {
     if (old && same(old, t)) continue;
     const what = summarize(t);
     if (t.type === 'add_field' && !old) out.push({ kind: 'additive', text: `New field ${t.name} (${scope(t)}).` });
+    else if (t.type === 'soft_delete' && !old) out.push({ kind: 'breaking', text: 'Deleted rows now stay, marked deleted, instead of being removed: consumers get a new field.' });
     else if (t.type === 'filter') out.push({ kind: 'breaking', text: `${old ? 'Changed' : 'New'} filter — ${what}. Events that do not match stop arriving.` });
     else if (t.type === 'rename') {
       const tos = (s: TransformStep) => (s.renames ?? []).map((r) => r.to).sort().join(',');

@@ -456,3 +456,24 @@ func TestCompileFlinkAdvanced(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// T3, T4: on Flink CDC a soft delete keeps deleted rows, marked with their change type; a source
+// column of that name is refused.
+func TestSoftDeleteFlink(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{map[string]any{"type": "soft_delete", "id": "sd01"}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "total"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Pipeline, `converter-after-transform: "SOFT_DELETE"`) || !strings.Contains(got.Pipeline, "__data_event_type__ AS `__op`") {
+		t.Fatal(got.Pipeline)
+	}
+	in.Columns = map[string][]string{"shop.orders": {"id", "__op"}}
+	if _, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); code(err) != "transform_field_conflict" {
+		t.Fatal(err)
+	}
+}

@@ -402,7 +402,10 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   Flink CDC raw options: `compiler.ClassifyFlinkAdvanced` (block-prefixed keys; pass-through
   prefixes only) is the only judge, in compile, saves (`RefuseNewAdvanced(eng, …)`), preflight
   and classify; values go into the blocks' options and out through the YAML encoder.
-  `Setting.Experimental` adds `setting_experimental` (warn). `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  `Setting.Experimental` adds `setting_experimental` (warn). Steps: `soft_delete` compiles to
+  nothing itself — `compiler.withSoftDelete` makes unwrap steps rewrite deletes (adding one when
+  missing) on Debezium; on Flink CDC it sets the `SOFT_DELETE` converter and projects `__op`
+  (`domain.SoftDeleteField`); the domain preview and findings flag a column of that name. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

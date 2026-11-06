@@ -22,7 +22,11 @@ import (
 // before the event shape; field changes need the row, so they come after it.
 
 // TransformTypes are the step types, in the order the UI offers them.
-var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom"}
+var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom", "soft_delete"}
+
+// SoftDeleteField is the field a soft delete marks deleted rows with, per engine: Debezium's
+// unwrap adds __deleted ("true" for a delete); Flink CDC writes its change type as __op ("-D").
+var SoftDeleteField = map[string]string{"debezium": "__deleted", "flink-cdc": "__op"}
 
 // Operations a filter keeps, with Debezium's op codes.
 var FilterOperations = map[string]string{"insert": "c", "update": "u", "delete": "d", "snapshot": "r"}
@@ -119,7 +123,7 @@ func (t Transform) Stage() int {
 	switch {
 	case t.Typed():
 		return 0
-	case t.Type == "unwrap":
+	case t.Type == "unwrap" || t.Type == "soft_delete":
 		return 1
 	case t.Type == "rename" || t.Type == "add_field" || t.Type == "flatten" || t.Type == "custom":
 		return 2

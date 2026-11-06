@@ -167,3 +167,18 @@ describe('Flink CDC steps', () => {
     expect(flinkColumns(orders, keyed, [], 'p').filter((c) => c.key).map((c) => c.name)).toEqual(['cust_id']);
   });
 });
+
+describe('soft delete', () => {
+  const table: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'integer' }], primaryKey: ['id'] };
+  it('adds the marker field once, says what it does, and counts as breaking', () => {
+    const steps = [defaultStep('soft_delete', [])];
+    expect(fieldsBefore(steps, 1, table, { source: { tables: { include: ['public.orders'] }, columns: {} } })).toEqual(['id', '__deleted']);
+    expect(summarize(steps[0]!)).toContain('stays, marked deleted');
+    const base = fullSpec({ source: { tables: { include: ['public.orders'] } } });
+    const impact = outputImpact(base, { ...base, transforms: [...base.transforms, steps[0]!] });
+    expect(impact.some((i) => i.kind === 'breaking' && i.text.includes('Deleted rows now stay'))).toBe(true);
+  });
+  it('runs on both engines', () => {
+    expect(DEBEZIUM_ONLY_STEPS).not.toContain('soft_delete');
+  });
+});

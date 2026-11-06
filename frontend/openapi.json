@@ -6238,7 +6238,8 @@
                     "outbox",
                     "rename",
                     "add_field",
-                    "flatten"
+                    "flatten",
+                    "soft_delete"
                   ],
                   "type": "string"
                 },
@@ -9859,7 +9860,8 @@
               "rename",
               "add_field",
               "flatten",
-              "custom"
+              "custom",
+              "soft_delete"
             ],
             "title": "Type",
             "type": "string"

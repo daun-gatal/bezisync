@@ -34,6 +34,18 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		switch {
 		case t.Type == "unwrap":
 			// The event shape: Flink CDC always writes rows.
+		case t.Type == "soft_delete":
+			// A delete becomes a row marked with its change type (T4).
+			field := domain.SoftDeleteField["flink-cdc"]
+			for _, table := range spec.Source.Tables.Include {
+				if slices.Contains(columns[table], field) {
+					return nil, problem.New(422, "transform_field_conflict", fmt.Sprintf("Step %d: %s already has a column %s, which the soft delete would overwrite (field name duplication).", i+1, table, field))
+				}
+			}
+			if sink.Converter == "" {
+				sink.Converter = "SOFT_DELETE"
+				sink.Projection = append(sink.Projection, "__data_event_type__ AS `"+field+"`")
+			}
 		case t.Type == "rename" || t.Type == "add_field" || (t.Type == "filter" && t.Typed()):
 		case t.Type == "filter":
 			return nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Step %d: a filter written as a script runs only on Debezium; build it from rules.", i+1))

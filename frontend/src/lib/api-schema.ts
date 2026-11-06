@@ -4678,7 +4678,7 @@ export interface components {
              * Allowed Transforms
              * @description Built-in step types this project allows; omitted or null = all.
              */
-            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten")[] | null;
+            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "soft_delete")[] | null;
             /** Max Pipelines Per Source */
             max_pipelines_per_source?: number | null;
             /** Max Resources */
@@ -6198,7 +6198,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom";
+            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom" | "soft_delete";
             value?: components["schemas"]["FieldValue"];
         };
         /**

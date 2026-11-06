@@ -65,7 +65,7 @@ export function tuningFor(tuning: Record<string, string> | null | undefined, eng
   return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
-export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom';
+export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom' | 'soft_delete';
 export type FilterOperation = 'insert' | 'update' | 'delete' | 'snapshot';
 export type FilterOp = 'eq' | 'ne' | 'in' | 'not_in' | 'gt' | 'gte' | 'lt' | 'lte' | 'is_null' | 'is_not_null' | 'is_true' | 'is_false';
 export type RuleValue = string | number | boolean;
@@ -96,7 +96,7 @@ export interface TransformStep {
 /** Stage of a step: 0 keep events, 1 event shape, 2 field changes, -1 order as written. */
 export function stageOf(t: TransformStep): number {
   if (t.type === 'filter' && ((t.operations?.length ?? 0) > 0 || (t.rules?.length ?? 0) > 0)) return 0;
-  if (t.type === 'unwrap') return 1;
+  if (t.type === 'unwrap' || t.type === 'soft_delete') return 1;
   if (t.type === 'rename' || t.type === 'add_field' || t.type === 'flatten' || t.type === 'custom') return 2;
   return -1;
 }

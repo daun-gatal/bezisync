@@ -223,3 +223,34 @@ func TestSQLServerTopicsCarryTheDatabase(t *testing.T) {
 		t.Errorf("topic.regex %q", r)
 	}
 }
+
+// T1, T2: a soft delete makes the unwrap step mark deletes (no tombstone), adding one where the
+// pipeline has none; the step itself compiles to nothing.
+func TestSoftDeleteDebezium(t *testing.T) {
+	with, err := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "unwrap", "id": "u1a0", "delete_handling": "drop"}, {"type": "soft_delete", "id": "sd01"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if with.Properties["debezium.transforms.t_u1a0.delete.tombstone.handling.mode"] != "rewrite" || strings.Contains(with.Properties["debezium.transforms"], "sd01") {
+		t.Fatal(with.Properties["debezium.transforms"], with.Properties["debezium.transforms.t_u1a0.delete.tombstone.handling.mode"])
+	}
+	without, err := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "soft_delete", "id": "sd01"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := strings.Split(without.Properties["debezium.transforms"], ",")
+	var unwrap string
+	for _, step := range chain {
+		if without.Properties["debezium.transforms."+step+".type"] == "io.debezium.transforms.ExtractNewRecordState" {
+			unwrap = step
+		}
+	}
+	if unwrap == "" || without.Properties["debezium.transforms."+unwrap+".delete.tombstone.handling.mode"] != "rewrite" {
+		t.Fatal(without.Properties)
+	}
+	// Without the step nothing changes.
+	plain, _ := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "unwrap", "id": "u1a0", "delete_handling": "drop"}]}`)
+	if plain.Properties["debezium.transforms.t_u1a0.delete.tombstone.handling.mode"] != "drop" {
+		t.Fatal(plain.Properties)
+	}
+}

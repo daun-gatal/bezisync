@@ -199,3 +199,20 @@ func TestPreviewEnvelopeFieldsMatchDebezium(t *testing.T) {
 		t.Errorf("source %s", src)
 	}
 }
+
+// T1, T3: the preview shows a deleted row kept and marked; a column of that name is an error.
+func TestPreviewSoftDelete(t *testing.T) {
+	spec := domain.DefaultSpec()
+	spec.Transforms = []domain.Transform{{Type: "soft_delete"}}
+	cols := []domain.PreviewColumn{{Name: "id", Type: "integer"}, {Name: "total", Type: "integer"}}
+	res := domain.Preview(domain.PreviewInput{SourceType: "postgresql", Pipeline: "p", Spec: spec, Table: "public.orders", Operation: "delete", Columns: cols, PrimaryKey: []string{"id"}})
+	b, _ := json.Marshal(res)
+	if !strings.Contains(string(b), `"__deleted":"true"`) || res.Steps[0].Status != "applied" {
+		t.Fatal(string(b))
+	}
+	res = domain.Preview(domain.PreviewInput{SourceType: "postgresql", Pipeline: "p", Spec: spec, Table: "public.orders", Operation: "insert",
+		Columns: append(cols, domain.PreviewColumn{Name: "__deleted", Type: "text"}), PrimaryKey: []string{"id"}})
+	if res.Steps[0].Status != "error" || !strings.Contains(res.Steps[0].Note, "field name duplication") {
+		t.Fatal(res.Steps)
+	}
+}

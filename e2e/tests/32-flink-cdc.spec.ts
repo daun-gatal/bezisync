@@ -107,7 +107,7 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
     name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
     spec: { source: { tables: { include: [table] } }, sink: { naming: `f_${tag.replace(/-/g, '_')}_{table}` }, snapshot: { mode: 'no_data' },
-      policies: { resources: 'custom' }, flink_cdc: { cluster, commit_seconds: 30 } },
+      policies: { resources: 'custom' }, flink_cdc: { cluster, commit_seconds: 30 }, transforms: [{ type: 'soft_delete', id: 'sd01' }] },
   }, 201);
   const url = `${base}/pipelines/${p.id}`;
 
@@ -154,6 +154,13 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   await waitFor('a row written after the shrink is readable', async () => {
     const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
     return e.records.some((r) => r.value.status === after);
+  }, 420_000);
+
+  // T4: with a soft delete, a deleted row stays in the destination, marked with its change type.
+  await ownerSql(`DELETE FROM ${table} WHERE status = '${after}'`);
+  await waitFor('the deleted row kept, marked -D', async () => {
+    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
+    return e.records.some((r) => r.value.status === after && r.value.__op === '-D');
   }, 420_000);
 
   await api.send('DELETE', `${url}?drop_destinations=true`);

@@ -41,6 +41,7 @@ const CHOICES: { group: string; items: { type: TransformType; help: string }[] }
       { type: 'rename', help: 'Match the names consumers expect.' },
       { type: 'add_field', help: 'A fixed value or the pipeline’s name.' },
       { type: 'flatten', help: 'address.city becomes address_city.' },
+      { type: 'soft_delete', help: 'A deleted row stays, marked deleted, instead of being removed.' },
     ],
   },
   { group: 'Expert', items: [{ type: 'custom', help: 'Any transform class the Debezium image ships.' }] },
@@ -176,6 +177,13 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
       flatten: <FlattenEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       custom: <CustomEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       outbox: <p className="m-0 text-xs text-muted">The outbox router has no settings here yet; edit it through YAML or the API.</p>,
+      soft_delete: (
+        <p className="m-0 text-sm text-ink-2">
+          {flink
+            ? 'Deletes arrive as rows with __op = -D; other rows carry their change type (+I, +U). The destination keeps every row.'
+            : 'Deletes arrive as rows with __deleted = true, and no tombstone follows them. Consumers that remove rows on a delete now keep them.'}
+        </p>
+      ),
     };
     return (
       <StepRow
