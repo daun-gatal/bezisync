@@ -2137,6 +2137,13 @@ Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota.
 
 **Runtime {name}**
 
+<a id="setting-experimental"></a>
+### `setting_experimental`
+
+**Experimental settings**
+
+- Why: The engine marks these settings experimental: they may change or go in a later release.
+
 <a id="setting-fetch-memory"></a>
 ### `setting_fetch_memory`
 

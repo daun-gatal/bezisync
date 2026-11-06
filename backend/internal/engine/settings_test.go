@@ -46,11 +46,21 @@ func TestFlinkSettingsUnchanged(t *testing.T) {
 
 func TestRegistry(t *testing.T) {
 	count := func(id ID, src, snk string) int { return len(SettingsFor(id, src, snk)) }
-	if count(FlinkCDC, "postgresql", "iceberg") != len(FlinkSettings)+len(FlinkPipelineSettings) {
-		t.Fatal(count(FlinkCDC, "postgresql", "iceberg"))
+	// F2, F3: a source's or destination's own options only there.
+	for _, st := range SettingsFor(FlinkCDC, "postgresql", "iceberg") {
+		if st.Connectors != nil && !slices.Contains(st.Connectors, map[string]string{ScopeSource: "postgresql", ScopeSink: "iceberg"}[st.Scope]) {
+			t.Errorf("postgresql → iceberg offers %s", st.Key)
+		}
 	}
-	// Connector-specific settings are offered only where they apply.
-	if count(FlinkCDC, "sqlserver", "iceberg") != len(FlinkSettings) {
+	has := func(id ID, src, snk, key string) bool {
+		return slices.ContainsFunc(SettingsFor(id, src, snk), func(st Setting) bool { return st.Key == key })
+	}
+	if !has(FlinkCDC, "postgresql", "iceberg", "source.scan.lsn-commit.checkpoints-num-delay") || has(FlinkCDC, "mysql", "iceberg", "source.scan.lsn-commit.checkpoints-num-delay") ||
+		!has(FlinkCDC, "mysql", "starrocks", "sink.sink.io.thread-count") || has(FlinkCDC, "mysql", "iceberg", "sink.sink.io.thread-count") {
+		t.Fatal("Flink connector filter")
+	}
+	// SQL Server has no Flink CDC source options of its own: only the engine's and the rest.
+	if has(FlinkCDC, "sqlserver", "iceberg", "source.connection.pool.size") || count(FlinkCDC, "sqlserver", "iceberg") < len(FlinkSettings) {
 		t.Fatal("connector filter")
 	}
 	// C19: a connector's own entries only for that connector, source and destination alike.
@@ -62,11 +72,8 @@ func TestRegistry(t *testing.T) {
 			}
 		}
 	}
-	has := func(src, snk, key string) bool {
-		return slices.ContainsFunc(SettingsFor(Debezium, src, snk), func(st Setting) bool { return st.Key == key })
-	}
-	if !has("postgresql", "kafka", "debezium.source.slot.max.retries") || has("mysql", "kafka", "debezium.source.slot.max.retries") ||
-		!has("mysql", "kafka", "debezium.sink.kafka.producer.linger.ms") || has("mysql", "http", "debezium.sink.kafka.producer.linger.ms") {
+	if !has(Debezium, "postgresql", "kafka", "debezium.source.slot.max.retries") || has(Debezium, "mysql", "kafka", "debezium.source.slot.max.retries") ||
+		!has(Debezium, "mysql", "kafka", "debezium.sink.kafka.producer.linger.ms") || has(Debezium, "mysql", "http", "debezium.sink.kafka.producer.linger.ms") {
 		t.Fatal("per-connector entries")
 	}
 	// C20: no destination entry for a key a connection field sets.

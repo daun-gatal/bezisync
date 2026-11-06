@@ -16,8 +16,8 @@ func TestValidateEngineSpecRefusesTheOtherEnginesSettings(t *testing.T) {
 		edit func(*domain.PipelineSpec)
 		want string
 	}{
-		"value formats":  {func(s *domain.PipelineSpec) { s.Values.Decimals = "double" }, "Value formats"},
-		"advanced":       {func(s *domain.PipelineSpec) { s.Advanced = map[string]string{"debezium.source.x": "1"} }, "Advanced Debezium properties"},
+		"value formats": {func(s *domain.PipelineSpec) { s.Values.Decimals = "double" }, "Value formats"},
+		// Raw properties are no longer refused wholesale: compiler.ClassifyFlinkAdvanced judges each key.
 		"copy delay":     {func(s *domain.PipelineSpec) { s.Snapshot.DelaySeconds = 60 }, "copy delay or window"},
 		"copy window":    {func(s *domain.PipelineSpec) { s.Snapshot.Window = &window }, "copy delay or window"},
 		"debezium image": {func(s *domain.PipelineSpec) { s.DebeziumImage = &image }, "Debezium image"},

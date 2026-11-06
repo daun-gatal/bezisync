@@ -164,6 +164,11 @@ function SettingRow({
       </Field>
       <div className="flex flex-col items-end gap-1.5 pt-6">
         <ImpactPill impact={s.impact} />
+        {s.experimental ? (
+          <Pill tone="warn" title="The engine marks it experimental: it may change or go in a later release.">
+            Experimental
+          </Pill>
+        ) : null}
         <span className="max-w-48 truncate font-mono text-xs text-muted" title={s.key}>
           {s.key}
         </span>

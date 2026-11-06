@@ -79,6 +79,8 @@ type Setting struct {
 	Since   string `json:"since,omitempty"`
 	Until   string `json:"until,omitempty"`
 	Renamed string `json:"renamed,omitempty"`
+	// Experimental: the engine marks it experimental; preflight warns when it is set.
+	Experimental bool `json:"experimental,omitempty"`
 }
 
 // Settings is the registry, in the order the wizard lists it.
@@ -188,6 +190,30 @@ var FlinkPipelineSettings = []Setting{
 	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.connection.pool.size",
 		Title: "Connection pool size", Type: "int", Default: "20", Min: "2", Max: "100", Connectors: []string{"mysql", "postgresql"},
 		Why: "Connections the readers share. Each one counts against the database's connection limit."},
+	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.connect.timeout",
+		Title: "Connect timeout", Type: "duration", Default: "30 s", Min: "5s", Max: "5m", Connectors: []string{"mysql", "postgresql"},
+		Why: "How long a reader waits for the database when it connects."},
+	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.connect.max-retries",
+		Title: "Connect attempts", Type: "int", Default: "3", Min: "0", Max: "100", Connectors: []string{"mysql", "postgresql"},
+		Why: "How often a reader tries to connect again before the job fails."},
+	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.scan.lsn-commit.checkpoints-num-delay",
+		Title: "WAL release delay", Type: "int", Default: "3", Min: "0", Max: "100", Connectors: []string{"postgresql"},
+		Why: "Saved positions to wait before telling PostgreSQL it may free WAL: restoring an older one still finds its WAL."},
+	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageSnapshot, Impact: ImpactFirstCopy, Key: "source.scan.incremental.snapshot.unbounded-chunk-first.enabled",
+		Title: "Copy the open-ended chunk first", Type: "bool", Default: "false", Connectors: []string{"mysql", "postgresql"}, Experimental: true,
+		Why: "Copies the last, open-ended chunk of a table first, which can keep a reader from running out of memory on a large table."},
+	{Engine: FlinkCDC, Scope: ScopeSink, Stage: StageDelivery, Impact: ImpactRestart, Key: "sink.sink.buffer-flush.max-bytes",
+		Title: "Load batch bytes", Type: "int", Default: "157286400", Min: "1048576", Max: "10737418240", Connectors: []string{"starrocks"},
+		Why: "Bytes buffered before a load into StarRocks; more makes fewer, bigger loads and needs TaskManager memory."},
+	{Engine: FlinkCDC, Scope: ScopeSink, Stage: StageDelivery, Impact: ImpactRestart, Key: "sink.sink.io.thread-count",
+		Title: "Load threads", Type: "int", Default: "2", Min: "1", Max: "64", Connectors: []string{"starrocks"},
+		Why: "Loads into StarRocks that run at once from each writer."},
+	{Engine: FlinkCDC, Scope: ScopeSink, Stage: StageDelivery, Impact: ImpactRestart, Key: "sink.table.properties.write.target-file-size-bytes",
+		Title: "Target file size", Type: "int", Default: "536870912", Min: "1048576", Max: "2147483648", Connectors: []string{"iceberg"},
+		Why: "Bytes Iceberg aims for in each data file of a table it creates. Smaller commits sooner; larger reads faster."},
+	{Engine: FlinkCDC, Scope: ScopePipeline, Stage: StageEngine, Impact: ImpactRestart, Key: "pipeline.schema-operator.rpc-timeout",
+		Title: "Schema change timeout", Type: "duration", Default: "3 min", Min: "30s", Max: "1h",
+		Why: "How long a schema change may take to reach the destination before the job fails and restarts."},
 }
 
 // CanonicalSetting is value written the one way a spec stores it ("" when it isn't valid).

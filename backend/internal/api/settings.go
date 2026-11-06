@@ -83,8 +83,9 @@ func settingsRoutes(r chi.Router) {
 			if s := engine.SettingOf(id, it.Key); s != nil && slices.Contains(engine.TuningScopes(id), s.Scope) {
 				res.Setting = s
 			}
-			if id != engine.Debezium {
-				res.Class, res.Message = string(compiler.AdvancedInvalid), "Advanced properties apply only to pipelines that run on Debezium."
+			if id == engine.FlinkCDC {
+				v := compiler.ClassifyFlinkAdvanced(it.Key, it.Value, nil)
+				res.Class, res.Message, res.Fix = string(v.Class), v.Message, v.Fix
 			} else if why := services.DriverPropertyRefusal(sourceType, it.Key); why != "" {
 				res.Class, res.Message = string(compiler.AdvancedInvalid), why
 			} else {

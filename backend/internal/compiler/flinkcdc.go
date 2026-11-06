@@ -119,9 +119,6 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	if err := connectors.FlinkTableNames(tables); err != nil {
 		return nil, err
 	}
-	if len(spec.Advanced) > 0 {
-		return nil, problem.New(422, "engine_settings", "Advanced Debezium properties apply only to pipelines that run on Debezium.")
-	}
 	if !spec.Values.Empty() {
 		return nil, problem.New(422, "engine_settings", "Value formats are Debezium options; Flink CDC writes each column with its own type.")
 	}
@@ -198,6 +195,25 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 			return nil, err
 		}
 		target.Set(option, spec.Tuning[s.Key])
+	}
+	// Raw (expert) options, through the pass-through prefixes only; never over BeziSync's own or a
+	// setting's. The YAML encoder quotes every value (F1).
+	var refused []map[string]any
+	for _, k := range advancedKeys(spec.Advanced) {
+		block, option, _ := strings.Cut(k, ".")
+		target := map[string]*connectors.FlinkOptions{"source": &srcBlock.Options, "sink": &snkBlock.Options}[block]
+		managed := map[string]bool{}
+		if target != nil && target.Get(option) != "" {
+			managed[k] = true
+		}
+		if v := ClassifyFlinkAdvanced(k, spec.Advanced[k], managed); v.Refused() {
+			refused = append(refused, map[string]any{"loc": []string{"advanced", k}, "message": v.Message})
+			continue
+		}
+		target.Set(option, spec.Advanced[k])
+	}
+	if len(refused) > 0 {
+		return nil, problem.New(422, "managed_property", "Some advanced properties cannot be set.").WithErrors(refused)
 	}
 
 	// Routes: each table to its destination, first match only.

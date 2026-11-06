@@ -670,7 +670,16 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   the next deploy (default) or sent at once, how often the position is saved (and, for Iceberg, data
   committed: 30 s, 1 min or 5 min) and, for StarRocks and Doris, how long a load batch may wait (2, 5
   or 30 s). Expert mode adds Flink settings from a fixed list (checkpoint timeouts, restart
-  strategy, memory fractions, timeouts), each with its range; BeziSync keeps the rest.
+  strategy, memory fractions, timeouts), each with its range; BeziSync keeps the rest. Engine
+  settings also offer the connectors' options: the sources' connect timeout and attempts (MySQL,
+  PostgreSQL), PostgreSQL's WAL release delay, copying the open-ended chunk first (experimental: a
+  pill, and a preflight warning), StarRocks' load batch bytes and threads, Iceberg's target file
+  size and the schema change timeout. **Advanced Flink CDC options** pass through only the
+  connectors' own prefixes — `source.jdbc.properties.*` (unsafe driver options refused, as for
+  Debezium), `source.debezium.*` (Debezium's rules), and the destination's `sink.properties.*`,
+  `table.create.properties.*` and `table.properties.*` (not the Iceberg keys that would move or
+  rewrite a table); catalog and Hadoop options, bare Flink keys and anything BeziSync sets are
+  refused, and values are written by the YAML encoder.
 - **Size**: small runs one TaskManager (2 readers), medium two (4), large four (8); each
   TaskManager asks for 1 CPU and 2 GiB, the JobManager 1 to 1.5 GiB. A **custom cluster**
   (`policies: {resources: custom}` with `flink_cdc: {cluster: {parallelism, slot: {cpu, memory},

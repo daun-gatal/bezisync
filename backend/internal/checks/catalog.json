@@ -1878,6 +1878,17 @@
    ]
   },
   {
+   "code": "setting_experimental",
+   "section": "Deploy",
+   "titles": [
+    "Experimental settings"
+   ],
+   "whys": [
+    "The engine marks these settings experimental: they may change or go in a later release."
+   ],
+   "fixes": []
+  },
+  {
    "code": "setting_threads",
    "section": "Deploy",
    "titles": [

@@ -3254,6 +3254,11 @@
             "title": "Engine",
             "type": "string"
           },
+          "experimental": {
+            "description": "The engine marks it experimental; preflight warns when it is set.",
+            "title": "Experimental",
+            "type": "boolean"
+          },
           "impact": {
             "description": "What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.",
             "enum": [

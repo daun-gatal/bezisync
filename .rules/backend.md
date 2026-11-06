@@ -398,7 +398,11 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `RefuseSettingLimits` on pipeline saves (new or changed values), `policy_setting_limit` in
   PolicyChecks, `LimitsFor` per engine (P10); pins are applied to the spec preflight checks and
   written into an unsealed version by `writePins` in CheckDeployable (a sealed one is refused:
-  `pinned_setting`) — never read by the compiler (I2). `setting-limits:impact` counts in keyset pages. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  `pinned_setting`) — never read by the compiler (I2). `setting-limits:impact` counts in keyset pages.
+  Flink CDC raw options: `compiler.ClassifyFlinkAdvanced` (block-prefixed keys; pass-through
+  prefixes only) is the only judge, in compile, saves (`RefuseNewAdvanced(eng, …)`), preflight
+  and classify; values go into the blocks' options and out through the YAML encoder.
+  `Setting.Experimental` adds `setting_experimental` (warn). `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

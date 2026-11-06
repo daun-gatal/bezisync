@@ -222,6 +222,18 @@ test('Flink CDC: an Expert sizes a custom cluster in Review, automatic then manu
     expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([]);
     await page.setViewportSize({ width: 1280, height: 900 });
 
+    // Raw Flink CDC options: a pass-through one is kept (not verified), a catalog one refused.
+    const addRow = page.getByRole('button', { name: 'Add a property' });
+    await addRow.click();
+    await page.getByLabel('Property 1 name').fill('sink.catalog.properties.uri');
+    await page.getByLabel('Property 1 value').fill('http://elsewhere');
+    await expect(page.getByText('Not allowed')).toBeVisible();
+    await page.getByLabel('Property 1 name').fill('sink.table.properties.write.parquet.compression-codec');
+    await page.getByLabel('Property 1 value').fill('zstd');
+    await expect(page.getByText('Not verified')).toBeVisible();
+    await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+    expect((await api.get<{ spec: { advanced: Record<string, string> } }>(url)).spec.advanced).toEqual({ 'sink.table.properties.write.parquet.compression-codec': 'zstd' });
+
     // Every step keeps the cluster, and nothing keeps saving.
     await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
     expect((await api.get<Saved>(url)).spec.flink_cdc.cluster).toMatchObject({ shape: 'manual', parallelism: 3 });

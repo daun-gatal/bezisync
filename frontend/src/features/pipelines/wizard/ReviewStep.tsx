@@ -112,7 +112,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const caps = Object.fromEntries(
     tunable.filter((s) => s.type === 'int' && limits[s.key]?.max).map((s) => [s.key, Number(limits[s.key]!.max)]),
   );
-  const verdicts = useClassify(project.id, pipeline.id, rawRows, expert && !flink);
+  const verdicts = useClassify(project.id, pipeline.id, rawRows, expert);
   const rawKeys = rawRows.map((r) => r.key.trim()).filter(Boolean);
   const rawError = rawKeys.length !== new Set(rawKeys).size ? 'A property is set twice: remove one.' : null;
   // Stored maps come back in JSONB order: build them the same way, or the draft never matches.
@@ -165,7 +165,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       delivery_canary: flink ? false : canary,
       ...(resources === 'custom' && !flink ? { custom_resources: custom } : {}),
     },
-    advanced: flink ? {} : advancedValues,
+    advanced: advancedValues,
     // A custom cluster is kept only while the size is custom (the server refuses it otherwise).
     ...(flink ? { flink_cdc: flinkSpecBlock(resources === 'custom' ? fc : { ...fc, cluster: undefined }) } : {}),
   };
@@ -505,30 +505,30 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                 )
               }
             </Field>
-            {flink ? null : (
-              <Field
-                label="Advanced Debezium properties"
-                optional
-                group
-                error={rawError}
-                hint={
-                  policies?.allow_advanced_properties
-                    ? 'For options BeziSync doesn’t offer, passed to Debezium as typed. Keys BeziSync sets, credentials and unsafe options are refused; the rest show in preflight as not verified.'
-                    : 'This project doesn’t allow advanced properties: a pipeline with any can’t deploy. An Admin can allow them in Settings → Policies.'
-                }
-              >
-                {() => (
-                  <RawProperties
-                    idBase="raw"
-                    rows={rawRows}
-                    onChange={setRawRows}
-                    verdicts={verdicts}
-                    onUseSetting={useTypedSetting}
-                    keyPlaceholder="debezium.source.…"
-                  />
-                )}
-              </Field>
-            )}
+            <Field
+              label={flink ? 'Advanced Flink CDC options' : 'Advanced Debezium properties'}
+              optional
+              group
+              error={rawError}
+              hint={
+                !policies?.allow_advanced_properties
+                  ? 'This project doesn’t allow advanced properties: a pipeline with any can’t deploy. An Admin can allow them in Settings → Policies.'
+                  : flink
+                    ? 'Pass-through options BeziSync doesn’t offer: source.jdbc.properties.*, source.debezium.*, and the destination’s sink.properties.*, table.create.properties.* or table.properties.*. The rest show in preflight as not verified.'
+                    : 'For options BeziSync doesn’t offer, passed to Debezium as typed. Keys BeziSync sets, credentials and unsafe options are refused; the rest show in preflight as not verified.'
+              }
+            >
+              {() => (
+                <RawProperties
+                  idBase="raw"
+                  rows={rawRows}
+                  onChange={setRawRows}
+                  verdicts={verdicts}
+                  onUseSetting={useTypedSetting}
+                  keyPlaceholder={flink ? 'source.jdbc.properties.…' : 'debezium.source.…'}
+                />
+              )}
+            </Field>
           </div>
         </Card>
       ) : null}

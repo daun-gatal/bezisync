@@ -346,7 +346,7 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	if err := ValidateEngineSpec(eng, n.Spec); err != nil {
 		return nil, err
 	}
-	if err := RefuseNewAdvanced(nil, n.Spec); err != nil {
+	if err := RefuseNewAdvanced(eng, nil, n.Spec); err != nil {
 		return nil, err
 	}
 	if err := refuseDriverProps(ctx, q, n.SourceID, nil, n.Spec); err != nil {
@@ -541,7 +541,7 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 			s := domain.MustSpec(map[string]any(current.Spec))
 			prev = &s
 		}
-		if err := RefuseNewAdvanced(prev, *e.Spec); err != nil {
+		if err := RefuseNewAdvanced(eng, prev, *e.Spec); err != nil {
 			return nil, err
 		}
 		if err := refuseDriverProps(ctx, q, p.SourceID, prev, *e.Spec); err != nil {
@@ -652,7 +652,7 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 // RefuseNewAdvanced refuses advanced properties a save adds or changes that BeziSync can't pass
 // on (ClassifyAdvanced). Ones the stored spec already holds with the same value still save, so an
 // older pipeline can be edited elsewhere: preflight blocks deploying them until they are removed.
-func RefuseNewAdvanced(prev *domain.PipelineSpec, next domain.PipelineSpec) error {
+func RefuseNewAdvanced(eng engine.ID, prev *domain.PipelineSpec, next domain.PipelineSpec) error {
 	keys := make([]string, 0, len(next.Advanced))
 	for k := range next.Advanced {
 		keys = append(keys, k)
@@ -666,7 +666,11 @@ func RefuseNewAdvanced(prev *domain.PipelineSpec, next domain.PipelineSpec) erro
 				continue
 			}
 		}
-		if v := compiler.ClassifyAdvanced(k, value, nil); v.Refused() {
+		v := compiler.ClassifyAdvanced(k, value, nil)
+		if eng == engine.FlinkCDC {
+			v = compiler.ClassifyFlinkAdvanced(k, value, nil)
+		}
+		if v.Refused() {
 			errs = append(errs, map[string]any{"loc": []string{"advanced", k}, "message": v.Message})
 		}
 	}
@@ -714,8 +718,11 @@ func refuseDriverProps(ctx context.Context, q db.Querier, sourceID uuid.UUID, pr
 // advancedCheck blocks a deploy whose advanced properties BeziSync can't pass on, including ones
 // that would change what it compiled for this pipeline. It is a configuration check, so a forced
 // deploy can't skip it.
-func advancedCheck(spec domain.PipelineSpec, managed map[string]bool) *checks.Check {
+func advancedCheck(spec domain.PipelineSpec, managed map[string]bool, flink bool) *checks.Check {
 	refused := compiler.AdvancedRefusals(spec.Advanced, managed)
+	if flink {
+		refused = compiler.FlinkAdvancedRefusals(spec.Advanced, managed)
+	}
 	if len(refused) == 0 {
 		return nil
 	}
@@ -785,7 +792,22 @@ func unverifiedCheck(spec domain.PipelineSpec) *checks.Check {
 	}
 	sort.Strings(keys)
 	return &checks.Check{Code: "advanced_unverified", Title: "Advanced properties", Category: checks.CatDestination, Status: checks.Unknown,
-		Message: fmt.Sprintf("Passed to Debezium as typed, not verified by BeziSync: %s.", strings.Join(keys, ", "))}
+		Message: fmt.Sprintf("Passed on as typed, not verified by BeziSync: %s.", strings.Join(keys, ", "))}
+}
+
+// experimentalCheck warns about tuned settings the engine marks experimental (F7).
+func experimentalCheck(id engine.ID, spec domain.PipelineSpec) *checks.Check {
+	var keys []string
+	for _, k := range tuningKeys(spec.Tuning) {
+		if s := engine.SettingOf(id, k); s != nil && s.Experimental {
+			keys = append(keys, s.Title+" ("+k+")")
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return &checks.Check{Code: "setting_experimental", Title: "Experimental settings", Category: checks.CatDestination, Status: checks.Warn,
+		Message: "The engine marks these experimental: they may change or go in a later release: " + strings.Join(keys, ", ") + "."}
 }
 
 // CompileFor compiles a pipeline with a spec ("" image = resolve it).
@@ -1206,7 +1228,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 			if c, err := CompileFor(ctx, q, p, clean, ""); err == nil {
 				managed = c.Managed
 			}
-			if c := advancedCheck(spec, managed); c != nil {
+			if c := advancedCheck(spec, managed, EngineOf(p) == engine.FlinkCDC); c != nil {
 				cfgCheck = *c
 			}
 		}
@@ -1214,10 +1236,13 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		return nil, err
 	}
 	configChecks := []checks.Check{cfgCheck}
-	if compiled != nil && compiled.Flink == nil {
-		if c := advancedCheck(spec, compiled.Managed); c != nil {
+	if compiled != nil {
+		if c := advancedCheck(spec, compiled.Managed, compiled.Flink != nil); c != nil {
 			configChecks = append(configChecks, *c)
 		} else if c := unverifiedCheck(spec); c != nil {
+			configChecks = append(configChecks, *c)
+		}
+		if c := experimentalCheck(EngineOf(p), spec); c != nil {
 			configChecks = append(configChecks, *c)
 		}
 	}

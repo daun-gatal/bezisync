@@ -263,7 +263,7 @@ func TestCompileFlinkRefuses(t *testing.T) {
 		{"table name", "flink_table_name", with("source", map[string]any{"tables": map[string]any{"include": []any{"shop.order-lines"}}}), "", false},
 		{"flink setting", "flink_conf", with("flink_cdc", map[string]any{"flink_conf": map[string]any{"jobmanager.rpc.address": "evil"}}), "", false},
 		{"copy on every start", "engine_settings", with("snapshot", map[string]any{"mode": "always"}), "", false},
-		{"advanced", "engine_settings", with("advanced", map[string]any{"debezium.source.x": "1"}), "", false},
+		{"advanced", "managed_property", with("advanced", map[string]any{"debezium.source.x": "1"}), "", false},
 		{"collision", "destination_collision", with("source", map[string]any{"tables": map[string]any{"include": []any{"shop.orders", "crm.orders"}}}), "", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -408,5 +408,51 @@ func TestCompileFlinkCustomCluster(t *testing.T) {
 	again, _ := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
 	if again.ConfigHash() == got.ConfigHash() || again.Size.TaskManagers != 1 {
 		t.Fatal("the shape must be part of what runs")
+	}
+}
+
+// F1, F4–F8: raw options of a Flink CDC pipeline pass only through their connector's prefixes,
+// go into the YAML through its encoder, and never replace what BeziSync sets.
+func TestCompileFlinkAdvanced(t *testing.T) {
+	flinkConfig(t)
+	tricky := ` a: b # c 'd' "e"`
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"advanced": map[string]any{"source.jdbc.properties.connectTimeout": "30000", "sink.table.properties.write.parquet.compression-codec": tricky}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "total"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(got.Pipeline), &doc); err != nil {
+		t.Fatal(err)
+	}
+	src, snk := doc["source"].(map[string]any), doc["sink"].(map[string]any)
+	if src["jdbc.properties.connectTimeout"] != "30000" || snk["table.properties.write.parquet.compression-codec"] != tricky {
+		t.Fatalf("%v\n%v", src, snk)
+	}
+	for key, want := range map[string]string{
+		"source.jdbc.properties.allowLoadLocalInfile": "load files or code", // F4
+		"source.jdbc.properties.sslMode":              "BeziSync sets this", // set from the connection
+		"sink.table.properties.format-version":        "move or rewrite",    // F5
+		"sink.table.properties.location":              "move or rewrite",
+		"sink.catalog.properties.uri":                 "Catalog and Hadoop",
+		"sink.hadoop.conf.fs.s3a.secret.key":          "Catalog and Hadoop",
+		"source.debezium.slot.drop.on.stop":           "WAL",             // F6: Debezium's own rules
+		"taskmanager.memory.process.size":             "Engine settings", // F8
+		"source.scan.startup.mode":                    "typed settings",
+		"pipeline.parallelism":                        "Pipeline options are",
+	} {
+		v := compiler.ClassifyFlinkAdvanced(key, "x", map[string]bool{"source.jdbc.properties.sslMode": true})
+		if !v.Refused() || !strings.Contains(v.Message, want) {
+			t.Errorf("%s: %+v", key, v)
+		}
+	}
+	// What BeziSync sets can't be replaced at compile either.
+	owned := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"advanced": map[string]any{"source.jdbc.properties.sslMode": "DISABLED"}})
+	if _, err := compiler.CompileFlink(flinkCtx(owned), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); code(err) != "managed_property" {
+		t.Fatal(err)
 	}
 }

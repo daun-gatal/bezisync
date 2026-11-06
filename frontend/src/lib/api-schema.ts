@@ -3510,6 +3510,11 @@ export interface components {
              */
             engine: "debezium" | "flink-cdc";
             /**
+             * Experimental
+             * @description The engine marks it experimental; preflight warns when it is set.
+             */
+            experimental?: boolean;
+            /**
              * Impact
              * @description What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.
              * @enum {string}
