@@ -14,7 +14,7 @@ Bash entry points for the repository's development, test and release workflows. 
 ## Invariants
 - Every script runs under `set -euo pipefail` and resolves paths from its own location, so it works from any directory.
 - Docker resources `e2e.sh` and `dev-db.sh` create carry the label `app.bezisync.io/e2e=true` (`[e2e.sh:LABEL]`, `dev-db.sh`), and `[e2e.sh:down]` removes only containers, networks and volumes with that label (the dev database included) plus `bezisync-local/*` images and `.e2e/`.
-- `[e2e.sh:prune_old_images]` keeps the current backend, web and runner tags and never prunes Debezium images, so runs do not re-pull them.
+- `[e2e.sh:prune_old_images]` keeps the current backend, web and runner tags and prunes only its own `bezisync-local/(backend|frontend|e2e)` builds, so Debezium images and an `E2E_FLINK_IMAGE` build stay cached between runs.
 - `BZ_DOCKER_HOST_IP` replaces `localhost` wherever a script publishes or reaches a port (remote Docker daemons).
 - `[build-cli.sh:TARGETS]` builds with `CGO_ENABLED=0 -trimpath` and stamps `internal/version.Version`; its platform list matches `[../tools/licenses/licenses.go:Platforms]` so the shipped licence file covers every archive.
 - `new-migration.sh` numbers the file one above the highest existing `NNNNN_*.sql`; the new migration also needs `internal/migrate/testdata/schema.txt` updated (the script's own instructions).
@@ -22,7 +22,7 @@ Bash entry points for the repository's development, test and release workflows. 
 ## Side Effects
 - Docker: `dev-db.sh` (the `bezisync-dev-pg` container), `e2e.sh` (k3s container `bezisync-e2e-k3s`, network `bezisync-e2e`, volume, images, a Playwright runner container; Debezium and sink images pulled and imported into k3s and the DinD fixture; namespaces `bezisync-e2e*` and a Helm release in the cluster), `demo-smoke.sh` (compose stack, its volumes and two `bezisync-local/demo-*:smoke` images, plus connector containers on the `bezisync-demo` network).
 - Files: `e2e.sh` writes `.e2e/` (kubeconfig, report, test results, `logs-<tag>/` on failure); `build-cli.sh` deletes and recreates `dist/` and uses a temp dir; `new-migration.sh` writes one file under `backend/internal/migrate/sql/`.
-- Environment read: `BZ_DOCKER_HOST_IP`, `BZ_DEV_PG_PORT`, `BZ_E2E_K8S_PORT`, `E2E_TAG`, `E2E_GREP`, `BEZISYNC_DEMO_PORT`.
+- Environment read: `BZ_DOCKER_HOST_IP`, `BZ_DEV_PG_PORT`, `BZ_E2E_K8S_PORT`, `E2E_TAG`, `E2E_GREP`, `E2E_FLINK_IMAGE` (an Admin-built Flink CDC image already in the Docker daemon; `e2e.sh` imports it into k3s and passes it to the runner so the Flink CDC journeys run), `BEZISYNC_DEMO_PORT`.
 
 ## Verification
 - Run: `shellcheck -S warning scripts/*.sh` (what `ci.yml` runs); the scripts themselves are exercised by `make e2e`, `make demo-smoke` and the release workflow.

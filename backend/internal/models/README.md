@@ -19,6 +19,7 @@ values.
 - Struct fields and `db` tags must match the schema in `internal/migrate/sql`; a new column needs a migration and a tagged field.
 - Admin is account-wide (`User.IsSuperuser`), not a project role (`[models.go:RoleEditor]` block).
 - `*_enc` fields (`Connection.SecretsEnc`, `SecretStore.SecretsEnc`, `Pipeline.EngineSecretsEnc`, …) hold sealed (encrypted) values only; secrets are write-only and never returned (`AGENTS.md` golden rule 1).
+- `Pipeline.Engine` is `debezium` or `flink-cdc` (a database check constraint, migration `00007_engines.sql`) and is fixed once deployed; `Runtime.PlacementProfiles` holds a Kubernetes runtime's placement profiles as a JSONB list (`[models.go:Runtime]`, migration `00009_runtime_placement.sql`).
 - `MetricSample.ID` is an `int` serial key, so `db.Insert` omits it (`[models.go:MetricSample]`).
 
 ## Side Effects
