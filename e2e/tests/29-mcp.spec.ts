@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { expect, request, test } from '@playwright/test';
-import { Api, BASE_URL, signIn } from './helpers';
+import { Api, BASE_URL, defaultProject, signIn, unique } from './helpers';
+import { SOURCE_PG } from './fixtures';
 
 /** MCP: an Admin turns it on, agents connect with an API token or by signing in (OAuth). */
 
@@ -44,6 +45,24 @@ test('an Admin turns on MCP and an agent connects with an API token', async ({ p
   expect(names).not.toContain('create_pipeline'); // a read-only token gets read tools only
   const called = await rpc(token, 'tools/call', { name: 'list_projects', arguments: {} });
   expect(called.body.result.content[0].text).toContain('"slug": "default"');
+
+  // An agent reads what a pipeline may tune, with its current values.
+  const project = await defaultProject(admin);
+  const tag = unique('mcpset');
+  const { password, ...pg } = SOURCE_PG;
+  const src = await admin.send<{ id: string }>('POST', `/api/v1/projects/${project.id}/connections`, {
+    kind: 'source', type: 'postgresql', name: `src-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password },
+  }, 201);
+  const draft = await admin.send<{ id: string }>('POST', `/api/v1/projects/${project.id}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, spec: { source: { tables: { include: ['shop.orders'] } }, tuning: { 'debezium.source.snapshot.max.threads': '2' } },
+  }, 201);
+  expect(names).toContain('list_engine_settings');
+  const settings = await rpc(token, 'tools/call', { name: 'list_engine_settings', arguments: { project: 'default', pipeline: `p-${tag}` } });
+  const text = settings.body.result.content[0].text as string;
+  expect(settings.body.result.isError ?? false).toBe(false);
+  expect(text).toContain('"key": "debezium.source.snapshot.max.threads"');
+  expect(text).toContain('"value": "2"');
+  await admin.send('DELETE', `/api/v1/projects/${project.id}/pipelines/${draft.id}`);
 
   // The Account page shows how to connect an agent.
   await page.goto('/p/default/account');

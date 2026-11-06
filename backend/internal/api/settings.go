@@ -35,6 +35,22 @@ type classifyRead struct {
 }
 
 func settingsRoutes(r chi.Router) {
+	// What this pipeline may tune: the settings for its engine, source and destination, the values
+	// its current version has and the project's limits (a hidden setting is left out), and whether
+	// raw properties are allowed (their keys, never their values). MCP's list_engine_settings.
+	r.Get("/projects/{project_id}/pipelines/{pipeline_id}/settings", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		_, p, err := viewPipeline(r, auth.PipelineView, false)
+		if err != nil {
+			return err
+		}
+		view, err := services.PipelineSettings(r.Context(), db.MustPool(r.Context()), p)
+		if err != nil {
+			return err
+		}
+		httpapi.JSON(w, http.StatusOK, view)
+		return nil
+	}))
+
 	// Pure: what BeziSync makes of raw properties for this pipeline, so the wizard never copies
 	// the classifier. Keys BeziSync compiles for the pipeline are refused at preflight.
 	r.Post("/projects/{project_id}/pipelines/{pipeline_id}/settings:classify", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {

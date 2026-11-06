@@ -1531,6 +1531,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A pipeline's engine settings
+         * @description What this pipeline may tune: its engine's settings for its source and destination, each with the value its current version has (empty for the default), where it lives (tuning, or flink_cdc.flink_conf) and this project's limit (a hidden setting is left out); and whether advanced (raw) properties are allowed, with the keys it has (never their values).
+         */
+        get: operations["pipeline_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings:classify": {
         parameters: {
             query?: never;
@@ -2174,6 +2194,15 @@ export interface components {
             /** Properties */
             properties: string;
         };
+        /** AdvancedKey */
+        AdvancedKey: {
+            /** Class */
+            class: string;
+            /** Key */
+            key: string;
+            /** Message */
+            message?: string;
+        };
         /** AlertRead */
         AlertRead: {
             /** Acknowledged At */
@@ -2244,6 +2273,16 @@ export interface components {
         ApplyResultRead: {
             /** Action */
             action: string;
+            /**
+             * Advanced
+             * @description What BeziSync makes of each raw property (never its value).
+             */
+            advanced?: components["schemas"]["AdvancedKey"][];
+            /**
+             * Breaking
+             * @description Why deploying it breaks the running pipeline's consumers or positions (the CLI asks for --confirm).
+             */
+            breaking?: string[];
             /** Deploy */
             deploy: string | null;
             /** Diff */
@@ -2254,6 +2293,8 @@ export interface components {
             notes: string[];
             /** Pipeline Id */
             pipeline_id: string | null;
+            /** @description What deploying it changes in the running pipeline's settings (against the deployed version). */
+            settings_change?: components["schemas"]["SettingsChange"] | null;
             /** Version */
             version: number | null;
         };
@@ -4392,6 +4433,100 @@ export interface components {
             updated_at: string;
             /** Version */
             version: number;
+        };
+        /**
+         * PipelineSetting
+         * @description A tunable setting of the registry (both engines).
+         */
+        PipelineSetting: {
+            /** Choices */
+            choices?: string[];
+            /**
+             * Connectors
+             * @description Source or destination types it applies to (absent: every one).
+             */
+            connectors?: string[];
+            /** Default */
+            default: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
+            /**
+             * Experimental
+             * @description The engine marks it experimental; preflight warns when it is set.
+             */
+            experimental?: boolean;
+            /**
+             * Impact
+             * @description What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.
+             * @enum {string}
+             */
+            impact: "live" | "restart" | "first_copy" | "next_copy" | "breaks_positions";
+            /**
+             * In
+             * @enum {string}
+             */
+            in: "tuning" | "flink_cdc.flink_conf";
+            /** Key */
+            key: string;
+            limit?: components["schemas"]["SettingLimit"];
+            /** Max */
+            max?: string;
+            /** Min */
+            min?: string;
+            /**
+             * Renamed
+             * @description Its key from Until on.
+             */
+            renamed?: string;
+            /**
+             * Scope
+             * @description Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.
+             * @enum {string}
+             */
+            scope: "engine" | "source" | "sink" | "pipeline";
+            /**
+             * Since
+             * @description Debezium releases from this one have it.
+             */
+            since?: string;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "snapshot" | "streaming" | "delivery" | "engine";
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "duration" | "int" | "fraction" | "enum" | "bool";
+            /**
+             * Until
+             * @description Debezium releases from this one no longer have it.
+             */
+            until?: string;
+            /** Value */
+            value: string;
+            /** Why */
+            why: string;
+        };
+        /** PipelineSettingsRead */
+        PipelineSettingsRead: {
+            /** Advanced Allowed */
+            advanced_allowed: boolean;
+            /** Advanced Keys */
+            advanced_keys: string[];
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
+            /** Settings */
+            settings: components["schemas"]["PipelineSetting"][];
         };
         /** PipelineSpec */
         PipelineSpec: {
@@ -9949,6 +10084,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SchemaRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineSettingsRead"];
                 };
             };
             /** @description Validation Error */

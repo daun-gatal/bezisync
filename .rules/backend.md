@@ -294,6 +294,11 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   are refused. Debezium's sizes, row-identity and partitioning checks are skipped
   (`PipelineFacts.FlinkCDC`); the controller's latency target allows the commit interval. iceberg-go
   applies the equality deletes Flink writes, so the Rows view is right.
+- Settings for agents and scripts: `GET …/pipelines/{id}/settings` (`services.PipelineSettings`;
+  limits applied, hidden settings left out, advanced keys without values) is MCP's
+  `list_engine_settings`. Manifest apply results carry `settings_change`, `breaking` and `advanced`
+  (`planEffects`, against the deployed version); the CLI's `diff` exits 3 and `apply --deploy`
+  stops on a breaking change without `--confirm`.
 - Flink CDC for agents and scripts: MCP tools `list_engines`, `list_saved_positions`,
   `restore_saved_position` (destructive, off by default), `engine` on `create_pipeline` /
   `update_pipeline` / `add_debezium_catalog_image` / `get_debezium_catalog`, `from_time` on

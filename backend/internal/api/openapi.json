@@ -110,6 +110,28 @@
         "title": "AdoptRequest",
         "type": "object"
       },
+      "AdvancedKey": {
+        "properties": {
+          "class": {
+            "title": "Class",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "class"
+        ],
+        "title": "AdvancedKey",
+        "type": "object"
+      },
       "AlertRead": {
         "properties": {
           "acknowledged_at": {
@@ -273,6 +295,22 @@
             "title": "Action",
             "type": "string"
           },
+          "advanced": {
+            "description": "What BeziSync makes of each raw property (never its value).",
+            "items": {
+              "$ref": "#/components/schemas/AdvancedKey"
+            },
+            "title": "Advanced",
+            "type": "array"
+          },
+          "breaking": {
+            "description": "Why deploying it breaks the running pipeline's consumers or positions (the CLI asks for --confirm).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Breaking",
+            "type": "array"
+          },
           "deploy": {
             "anyOf": [
               {
@@ -313,6 +351,17 @@
               }
             ],
             "title": "Pipeline Id"
+          },
+          "settings_change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettingsChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What deploying it changes in the running pipeline's settings (against the deployed version)."
           },
           "version": {
             "anyOf": [
@@ -5509,6 +5558,190 @@
           "caps"
         ],
         "title": "PipelineRead",
+        "type": "object"
+      },
+      "PipelineSetting": {
+        "properties": {
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "connectors": {
+            "description": "Source or destination types it applies to (absent: every one).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Connectors",
+            "type": "array"
+          },
+          "default": {
+            "title": "Default",
+            "type": "string"
+          },
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
+            "type": "string"
+          },
+          "experimental": {
+            "description": "The engine marks it experimental; preflight warns when it is set.",
+            "title": "Experimental",
+            "type": "boolean"
+          },
+          "impact": {
+            "description": "What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.",
+            "enum": [
+              "live",
+              "restart",
+              "first_copy",
+              "next_copy",
+              "breaks_positions"
+            ],
+            "title": "Impact",
+            "type": "string"
+          },
+          "in": {
+            "enum": [
+              "tuning",
+              "flink_cdc.flink_conf"
+            ],
+            "title": "In",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "limit": {
+            "$ref": "#/components/schemas/SettingLimit"
+          },
+          "max": {
+            "title": "Max",
+            "type": "string"
+          },
+          "min": {
+            "title": "Min",
+            "type": "string"
+          },
+          "renamed": {
+            "description": "Its key from Until on.",
+            "title": "Renamed",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.",
+            "enum": [
+              "engine",
+              "source",
+              "sink",
+              "pipeline"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "since": {
+            "description": "Debezium releases from this one have it.",
+            "title": "Since",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "snapshot",
+              "streaming",
+              "delivery",
+              "engine"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "duration",
+              "int",
+              "fraction",
+              "enum",
+              "bool"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "until": {
+            "description": "Debezium releases from this one no longer have it.",
+            "title": "Until",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "default",
+          "engine",
+          "impact",
+          "in",
+          "key",
+          "scope",
+          "stage",
+          "title",
+          "type",
+          "value",
+          "why"
+        ],
+        "title": "PipelineSetting",
+        "type": "object",
+        "description": "A tunable setting of the registry (both engines)."
+      },
+      "PipelineSettingsRead": {
+        "properties": {
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
+            "type": "string"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineSetting"
+            },
+            "title": "Settings",
+            "type": "array"
+          },
+          "advanced_allowed": {
+            "title": "Advanced Allowed",
+            "type": "boolean"
+          },
+          "advanced_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Advanced Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "engine",
+          "settings",
+          "advanced_allowed",
+          "advanced_keys"
+        ],
+        "title": "PipelineSettingsRead",
         "type": "object"
       },
       "PipelineSpec": {
@@ -14252,6 +14485,64 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/debezium-images:effects": {
+      "post": {
+        "operationId": "image_effects_api_v1_projects__project_id__debezium_images_effects_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageEffectsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PipelineEffects"
+                  },
+                  "type": "array",
+                  "title": "Effects"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview a Debezium version change",
+        "tags": [
+          "debezium-images"
+        ],
+        "description": "What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes."
+      }
+    },
     "/api/v1/projects/{project_id}/events": {
       "get": {
         "operationId": "list_events_api_v1_projects__project_id__events_get",
@@ -14952,6 +15243,124 @@
         "tags": [
           "pipelines"
         ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack": {
+      "post": {
+        "description": "How a custom Flink CDC cluster would be packed on the pipeline's runtime now: TaskManagers, slots, CPU and memory, why it splits, what it asks for in all and whether it fits the largest node. Pure: the deploy packs again and keeps that shape.",
+        "operationId": "pack_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_pack_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterPackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterPackRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pack a Flink CDC cluster",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:shrink": {
+      "post": {
+        "operationId": "shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Shrink a Flink CDC cluster now",
+        "tags": [
+          "pipelines"
+        ],
+        "description": "Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet."
       }
     },
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/config": {
@@ -16112,6 +16521,60 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings": {
+      "get": {
+        "description": "What this pipeline may tune: its engine's settings for its source and destination, each with the value its current version has (empty for the default), where it lives (tuning, or flink_cdc.flink_conf) and this project's limit (a hidden setting is left out); and whether advanced (raw) properties are allowed, with the keys it has (never their values).",
+        "operationId": "pipeline_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "A pipeline's engine settings",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings:classify": {
       "post": {
         "description": "What BeziSync makes of advanced (raw) properties for this pipeline, so the wizard can say it as they are typed: allowed (passed through, not verified), or refused with why and where to set it instead. A key that is also a typed setting returns that setting. Pure; values are never echoed. Keys BeziSync compiles for the pipeline are refused by preflight.",
@@ -16608,6 +17071,60 @@
         "tags": [
           "approvals"
         ]
+      }
+    },
+    "/api/v1/projects/{project_id}/policies/setting-limits:impact": {
+      "post": {
+        "operationId": "setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectPolicies"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitImpactRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Count what setting limits would refuse",
+        "tags": [
+          "approvals"
+        ],
+        "description": "How many of the project's pipelines (their current versions) proposed setting limits would refuse, with a few names; nothing is saved. Admins."
       }
     },
     "/api/v1/projects/{project_id}/runtime-kinds": {
@@ -18469,236 +18986,6 @@
         "tags": [
           "users"
         ]
-      }
-    },
-    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack": {
-      "post": {
-        "description": "How a custom Flink CDC cluster would be packed on the pipeline's runtime now: TaskManagers, slots, CPU and memory, why it splits, what it asks for in all and whether it fits the largest node. Pure: the deploy packs again and keeps that shape.",
-        "operationId": "pack_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_pack_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Pipeline Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClusterPackRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClusterPackRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Pack a Flink CDC cluster",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
-    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:shrink": {
-      "post": {
-        "operationId": "shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Pipeline Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PipelineRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Shrink a Flink CDC cluster now",
-        "tags": [
-          "pipelines"
-        ],
-        "description": "Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet."
-      }
-    },
-    "/api/v1/projects/{project_id}/debezium-images:effects": {
-      "post": {
-        "operationId": "image_effects_api_v1_projects__project_id__debezium_images_effects_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImageEffectsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PipelineEffects"
-                  },
-                  "type": "array",
-                  "title": "Effects"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Preview a Debezium version change",
-        "tags": [
-          "debezium-images"
-        ],
-        "description": "What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes."
-      }
-    },
-    "/api/v1/projects/{project_id}/policies/setting-limits:impact": {
-      "post": {
-        "operationId": "setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Project Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectPolicies"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LimitImpactRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Count what setting limits would refuse",
-        "tags": [
-          "approvals"
-        ],
-        "description": "How many of the project's pipelines (their current versions) proposed setting limits would refuse, with a few names; nothing is saved. Admins."
       }
     }
   }

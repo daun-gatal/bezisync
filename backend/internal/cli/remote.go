@@ -335,7 +335,7 @@ func remoteCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	addProject(export)
 
 	var file string
-	var dryRun, deploy bool
+	var dryRun, deploy, confirm bool
 	runApply := func(dry, dep bool) error {
 		var text []byte
 		var err error
@@ -355,37 +355,27 @@ func remoteCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		// A deploy that breaks a running pipeline's consumers or positions waits for --confirm (D18):
+		// the plan is read first, and nothing changes without it.
+		if !dry && dep && !confirm {
+			plan, err := c.Call(http.MethodPost, base+"/pipelines:apply", nil, map[string]any{"manifest": string(text), "dry_run": true})
+			if err != nil {
+				return err
+			}
+			if breaking(plan) {
+				printApply(stdout, plan)
+				fmt.Fprintf(stderr, "%serror: deploying this breaks running pipelines (above); run again with --confirm to go ahead.%s\n", red, reset)
+				return &ExitError{3}
+			}
+		}
 		out, err := c.Call(http.MethodPost, base+"/pipelines:apply", nil, map[string]any{"manifest": string(text), "dry_run": dry, "deploy": dep})
 		if err != nil {
 			return err
 		}
-		results, _ := out.([]any)
-		for _, x := range results {
-			r, _ := x.(map[string]any)
-			line := fmt.Sprintf("%s: %s", str(r["name"]), str(r["action"]))
-			if v, ok := r["version"].(float64); ok && v != 0 {
-				line += fmt.Sprintf(" (v%d)", int(v))
-			}
-			if d := str(r["deploy"]); d != "" {
-				line += ", " + d
-			}
-			fmt.Fprintln(stdout, bold+line+reset)
-			diff, _ := r["diff"].([]any)
-			for _, l := range diff {
-				s := str(l)
-				switch {
-				case strings.HasPrefix(s, "+"):
-					fmt.Fprintln(stdout, green+"  "+s+reset)
-				case strings.HasPrefix(s, "-"):
-					fmt.Fprintln(stdout, red+"  "+s+reset)
-				default:
-					fmt.Fprintln(stdout, "  "+s)
-				}
-			}
-			notes, _ := r["notes"].([]any)
-			for _, n := range notes {
-				fmt.Fprintln(stdout, "  • "+str(n))
-			}
+		printApply(stdout, out)
+		if dry && !confirm && breaking(out) {
+			fmt.Fprintf(stderr, "%sdeploying this breaks running pipelines (above); --confirm accepts it.%s\n", red, reset)
+			return &ExitError{3}
 		}
 		return nil
 	}
@@ -394,11 +384,13 @@ func remoteCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	apply.Flags().StringVarP(&file, "file", "f", "", "Manifest file or directory (YAML, several documents allowed; - for stdin).")
 	apply.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would change without changing anything.")
 	apply.Flags().BoolVar(&deploy, "deploy", false, "Deploy changed pipelines (or request approval).")
+	apply.Flags().BoolVar(&confirm, "confirm", false, "Accept changes that break running pipelines (exit 3 without it).")
 	_ = apply.MarkFlagRequired("file")
 	addProject(apply)
-	diff := &cobra.Command{Use: "diff", Short: "Show what `apply` would change.", Args: cobra.NoArgs,
+	diff := &cobra.Command{Use: "diff", Short: "Show what `apply` would change (exit 3 when deploying it breaks running pipelines).", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error { return runApply(true, false) }}
 	diff.Flags().StringVarP(&file, "file", "f", "", "Manifest file or directory.")
+	diff.Flags().BoolVar(&confirm, "confirm", false, "Exit 0 even when deploying it breaks running pipelines.")
 	_ = diff.MarkFlagRequired("file")
 	addProject(diff)
 
@@ -433,4 +425,84 @@ func remoteCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	pipelines.AddCommand(positionsCmd(&project, stdout, stderr), restoreCmd(&project, stdout, stderr), startOverCmd(&project, stdout, stderr))
 	remote.AddCommand(login, get, export, apply, diff, pipelines)
 	return remote
+}
+
+// impactWords says what a setting change does to a running pipeline.
+var impactWords = map[string]string{"live": "applies live", "restart": "restarts it", "first_copy": "matters for the first copy only",
+	"next_copy": "takes effect on the next copy", "breaks_positions": "starts it over"}
+
+// printApply prints apply's results: the action, the diff, notes, settings changes with what each
+// does, raw properties' classes (never values) and what would break.
+func printApply(stdout io.Writer, out any) {
+	results, _ := out.([]any)
+	for _, x := range results {
+		r, _ := x.(map[string]any)
+		line := fmt.Sprintf("%s: %s", str(r["name"]), str(r["action"]))
+		if v, ok := r["version"].(float64); ok && v != 0 {
+			line += fmt.Sprintf(" (v%d)", int(v))
+		}
+		if d := str(r["deploy"]); d != "" {
+			line += ", " + d
+		}
+		fmt.Fprintln(stdout, bold+line+reset)
+		diff, _ := r["diff"].([]any)
+		for _, l := range diff {
+			s := str(l)
+			switch {
+			case strings.HasPrefix(s, "+"):
+				fmt.Fprintln(stdout, green+"  "+s+reset)
+			case strings.HasPrefix(s, "-"):
+				fmt.Fprintln(stdout, red+"  "+s+reset)
+			default:
+				fmt.Fprintln(stdout, "  "+s)
+			}
+		}
+		notes, _ := r["notes"].([]any)
+		for _, n := range notes {
+			fmt.Fprintln(stdout, "  • "+str(n))
+		}
+		if sc, ok := r["settings_change"].(map[string]any); ok {
+			settings, _ := sc["settings"].([]any)
+			for _, x := range settings {
+				s, _ := x.(map[string]any)
+				from, to := "default", "default"
+				if v, ok := s["from"].(string); ok {
+					from = v
+				}
+				if v, ok := s["to"].(string); ok {
+					to = v
+				}
+				what := impactWords[str(s["impact"])]
+				if s["unverified"] == true {
+					what = "an advanced property: restarts it, effect unverified"
+				}
+				fmt.Fprintf(stdout, "  setting %s: %s → %s (%s)\n", str(s["title"]), from, to, what)
+			}
+		}
+		advanced, _ := r["advanced"].([]any)
+		for _, x := range advanced {
+			a, _ := x.(map[string]any)
+			if str(a["class"]) == "allowed" {
+				fmt.Fprintf(stdout, "  raw %s: passed through as typed (not checked)\n", str(a["key"]))
+			} else {
+				fmt.Fprintf(stdout, "%s  raw %s: refused, %s%s\n", red, str(a["key"]), str(a["message"]), reset)
+			}
+		}
+		breaking, _ := r["breaking"].([]any)
+		for _, b := range breaking {
+			fmt.Fprintf(stdout, "%s  ! breaks: %s%s\n", red, str(b), reset)
+		}
+	}
+}
+
+// breaking reports whether any result would break a running pipeline.
+func breaking(out any) bool {
+	results, _ := out.([]any)
+	for _, x := range results {
+		r, _ := x.(map[string]any)
+		if b, _ := r["breaking"].([]any); len(b) > 0 {
+			return true
+		}
+	}
+	return false
 }

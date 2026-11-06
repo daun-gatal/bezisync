@@ -1093,6 +1093,21 @@ bezisync remote apply -f pipelines.yaml --deploy  # all or nothing; respects app
 bezisync remote get
 ```
 
+`diff` (and `apply`) print, for each pipeline, the spec diff, each setting a deploy changes from
+what to what with what it does to the running pipeline, what BeziSync makes of each advanced
+property (passed through, or refused and why), and what would **break** a deployed pipeline: a
+setting that starts it over, another destination naming, another event format, or tables no longer
+captured. `diff` then exits **3** (so CI can stop for a person), and `apply --deploy` changes
+nothing, until `--confirm` is given. The CLI sends manifests as written, so fields it doesn't know
+reach the server unchanged.
+
+Agents read what a pipeline may tune with the MCP tool `list_engine_settings` (or `GET
+…/pipelines/{id}/settings`): its engine's settings for its source and destination, each with its
+bounds, what changing it does, the current value and this project's limit (a hidden one is left
+out), and whether advanced properties are allowed (their keys, never their values). They change
+them with `update_pipeline`, which applies the same checks, limits, policies and approvals as for
+their person.
+
 The CLI is the `bezisync` binary in the `bezisync` image: run it from the image (mount your manifests,
 e.g. `docker run --rm -v "$PWD:/w" -w /w -e BEZISYNC_URL -e BEZISYNC_TOKEN
 ghcr.io/daun-gatal/bezisync remote get`) or copy it out once (`docker create`, then
