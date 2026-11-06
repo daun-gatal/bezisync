@@ -24,6 +24,9 @@
             "title": "Mapped",
             "type": "array"
           },
+          "plan": {
+            "$ref": "#/components/schemas/ImportPlan"
+          },
           "replaced": {
             "items": {
               "type": "string"
@@ -86,7 +89,8 @@
           "kept",
           "managed",
           "replaced",
-          "warnings"
+          "warnings",
+          "plan"
         ],
         "title": "AdoptRead",
         "type": "object"
@@ -3514,6 +3518,14 @@
       },
       "ImageChangeResult": {
         "properties": {
+          "effects": {
+            "items": {
+              "$ref": "#/components/schemas/SettingEffect"
+            },
+            "title": "Effects",
+            "type": "array",
+            "description": "What the release does to the pipeline's settings; omitted when nothing."
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -3551,6 +3563,37 @@
           "version"
         ],
         "title": "ImageChangeResult",
+        "type": "object"
+      },
+      "ImageEffectsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The image; null: each pipeline's runtime default.",
+            "title": "Image"
+          },
+          "pipeline_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Pipeline Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pipeline_ids"
+        ],
+        "title": "ImageEffectsRequest",
         "type": "object"
       },
       "ImageUsageRead": {
@@ -3655,6 +3698,91 @@
           "images"
         ],
         "title": "ImagesRead",
+        "type": "object"
+      },
+      "ImportKey": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "problem": {
+            "description": "Why it needs a change first (out of its bounds; never clamped).",
+            "title": "Problem",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "ImportKey",
+        "type": "object"
+      },
+      "ImportPlan": {
+        "description": "Every property in one of five buckets, and the spec to create the draft from: typed settings in tuning, excluded and masked columns mapped.",
+        "properties": {
+          "expert": {
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array",
+            "description": "Raw properties kept as advanced."
+          },
+          "forbidden": {
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array",
+            "description": "Refused: BeziSync can't pass them on."
+          },
+          "modelled": {
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array",
+            "description": "Set by a wizard choice (or replaced by BeziSync's own)."
+          },
+          "owned": {
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array",
+            "description": "BeziSync manages these itself (connection, offsets, slot, secrets)."
+          },
+          "spec": {
+            "additionalProperties": true,
+            "title": "Spec",
+            "type": "object"
+          },
+          "tunable": {
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array",
+            "description": "Typed settings; one with a problem is left out until changed."
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "owned",
+          "modelled",
+          "tunable",
+          "expert",
+          "forbidden",
+          "spec",
+          "warnings"
+        ],
+        "title": "ImportPlan",
         "type": "object"
       },
       "InboxRead": {
@@ -5019,6 +5147,38 @@
           "source_id"
         ],
         "title": "PipelineCreate",
+        "type": "object"
+      },
+      "PipelineEffects": {
+        "properties": {
+          "effects": {
+            "items": {
+              "$ref": "#/components/schemas/SettingEffect"
+            },
+            "title": "Effects",
+            "type": "array"
+          },
+          "image": {
+            "title": "Image",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pipeline_id": {
+            "format": "uuid",
+            "title": "Pipeline Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pipeline_id",
+          "name",
+          "image",
+          "effects"
+        ],
+        "title": "PipelineEffects",
         "type": "object"
       },
       "PipelineImageRead": {
@@ -8144,6 +8304,50 @@
           "impact"
         ],
         "title": "SettingChange",
+        "type": "object"
+      },
+      "SettingEffect": {
+        "properties": {
+          "blocking": {
+            "title": "Blocking",
+            "type": "boolean"
+          },
+          "effect": {
+            "enum": [
+              "removed",
+              "renamed",
+              "missing",
+              "unknown",
+              "unchecked"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "to": {
+            "description": "The key a renamed setting moves to.",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "effect",
+          "message",
+          "blocking"
+        ],
+        "title": "SettingEffect",
         "type": "object"
       },
       "SettingsChange": {
@@ -18169,6 +18373,64 @@
           "pipelines"
         ],
         "description": "Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet."
+      }
+    },
+    "/api/v1/projects/{project_id}/debezium-images:effects": {
+      "post": {
+        "operationId": "image_effects_api_v1_projects__project_id__debezium_images_effects_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageEffectsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PipelineEffects"
+                  },
+                  "type": "array",
+                  "title": "Effects"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview a Debezium version change",
+        "tags": [
+          "debezium-images"
+        ],
+        "description": "What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes."
       }
     }
   }

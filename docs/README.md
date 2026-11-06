@@ -607,7 +607,9 @@ to an offered version, any other image, or back to the default (pipelines that a
 default are redeployed when it changed). A pipeline's flow strip shows the version it runs and why
 (chosen for this pipeline, the runtime's default, or the default) with a **Change** button. Change
 one first, watch it reach Healthy, then the rest. Each change is a new version, so rollback is
-deploying the previous one.
+deploying the previous one. Before you confirm, the dialog says what the release does to each
+pipeline's settings: a tuned setting it doesn't have refuses that pipeline's change until you remove
+it, a renamed one moves to its new key, and raw properties are listed as not checked.
 
 ## Flink CDC engine (optional)
 
@@ -1082,8 +1084,12 @@ other project has no matching source or destination, it offers to copy this pipe
 
 **Pipelines → Adopt existing:** paste its `application.properties`. BeziSync maps tables, snapshot
 mode, naming, format, value formats, key columns and transforms (known SMTs become steps, any other
-becomes a custom step that needs its policy), keeps safe extras as advanced properties, and lists
-what it manages itself (connection, offsets, slot, history) with warnings. Stop the old deployment first;
+becomes a custom step that needs its policy), and sorts every property into five buckets: typed
+settings (created as settings; one out of its bounds is listed as needing a change, never clamped),
+wizard choices (a key a choice sets stays that choice, even when it is also a setting), managed by
+BeziSync (connection, offsets, slot, history), kept as advanced, and refused. Excluded and masked
+columns (`column.exclude.list`, `column.mask.with.N.chars`) become the Tables step's choices;
+patterns it can't map are named in a warning. Stop the old deployment first;
 BeziSync uses its own slot and offsets, so choose "Only new changes" to avoid copying rows again,
 and drop the old slot afterwards.
 

@@ -139,6 +139,8 @@ src/
 - `components/Recommendations.tsx` shows preflight's recommendations in Review in both modes
   (`freshRecommendations`: evidence under ten minutes old, a setting the pipeline can use, not yet
   chosen); Use sets the tuning value and autosave saves it.
+- The adopt dialog shows the server's `plan` (`ImportBuckets`) and creates the draft from
+  `plan.spec`; Change Debezium version previews `debezium-images:effects` before confirming.
 - Placement (`settings/PlacementProfiles.tsx`): the Kubernetes runtime edit modal edits its profiles
   (`profileError` blocks names and templates the server refuses); Review offers the chosen
   runtime's profiles as Placement and writes `placement` after `tuning`, only when set.

@@ -58,15 +58,26 @@ test('pipelines as YAML: export, preview, apply, adopt and promote', async ({ pa
     'debezium.source.topic.prefix=legacy',
     'debezium.source.slot.name=old_slot',
     'debezium.source.table.include.list=shop.customers',
+    'debezium.source.poll.interval.ms=250',
+    'debezium.source.snapshot.max.threads=99',
+    'debezium.source.column.exclude.list=shop.customers.email',
     'debezium.sink.type=http',
   ].join('\n'));
   await dialog.getByRole('button', { name: 'Analyse' }).click();
   await expect(dialog.getByText(/does not reuse 'old_slot'/)).toBeVisible();
+  // Five buckets: a typed setting, one that needs a change (never clamped), the rest.
+  await expect(dialog.getByText('1 setting needs a change')).toBeVisible();
+  await expect(dialog.getByText(/must be a whole number from 1 to 16/)).toBeVisible();
+  await expect(dialog.getByText('Settings (1)')).toBeVisible();
   await dialog.getByLabel('Pipeline name').fill(`adopted-${tag}`);
   await choose(dialog.getByLabel('Source connection'), `src-${tag}`);
   await dialog.getByRole('button', { name: 'Create draft pipeline' }).click();
   await expect(page).toHaveURL(/step=tables/);
   await expect(page.getByRole('checkbox', { name: 'shop.customers', exact: true })).toBeChecked();
+  const adopted = (await api.get<{ name: string; id: string }[]>(`/api/v1/projects/${project.id}/pipelines?q=adopted-${tag}`)).find((x) => x.name === `adopted-${tag}`)!;
+  const created = await api.get<{ spec: { tuning?: Record<string, string>; source: { columns: Record<string, { exclude: string[] }> } } }>(`/api/v1/projects/${project.id}/pipelines/${adopted.id}`);
+  expect(created.spec.tuning).toEqual({ 'debezium.source.poll.interval.ms': '250' });
+  expect(created.spec.source.columns['shop.customers']?.exclude).toEqual(['email']);
 
   // Promote to another project
   const target = await api.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: `prod-${tag}`.slice(0, 40), name: `Prod ${tag}` }, 201);

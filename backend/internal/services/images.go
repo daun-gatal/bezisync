@@ -220,6 +220,8 @@ type UpgradeResult struct {
 	OK         bool      `json:"ok"`
 	Message    string    `json:"message"`
 	Version    *int      `json:"version"`
+	// Effects are what the release does to the pipeline's settings (omitted: nothing).
+	Effects []SettingEffect `json:"effects,omitempty"`
 }
 
 func problemDetail(err error) (string, bool) {
@@ -317,8 +319,26 @@ func ChangeImage(ctx context.Context, q db.Querier, a *auth.ProjectAccess, ids [
 			results = append(results, UpgradeResult{PipelineID: pid, Name: p.Name, OK: true, Message: message})
 			continue
 		}
+		// What the release does to its settings: a setting it lacks blocks this pipeline's change.
+		image, err := targetImage(ctx, q, p, *current, target)
+		if err != nil {
+			return nil, err
+		}
+		effects := VersionEffects(*current, image)
+		var blocked []string
+		for _, e := range effects {
+			if e.Blocking {
+				blocked = append(blocked, e.Key+" ("+e.Message+")")
+			}
+		}
+		if len(blocked) > 0 {
+			results = append(results, UpgradeResult{PipelineID: pid, Name: p.Name, Effects: effects,
+				Message: "Not changed: " + image + " doesn't have " + strings.Join(blocked, "; ")})
+			continue
+		}
 		spec := current.Clone()
 		spec.DebeziumImage = target
+		applyRenames(&spec, effects)
 		note := "Debezium image → runtime default"
 		if target != nil {
 			note = "Debezium image → " + *target
@@ -365,7 +385,7 @@ func ChangeImage(ctx context.Context, q db.Querier, a *auth.ProjectAccess, ids [
 		case deploy && live:
 			message = "Deploying the new version."
 		}
-		results = append(results, UpgradeResult{PipelineID: pid, Name: p.Name, OK: true, Message: message, Version: number})
+		results = append(results, UpgradeResult{PipelineID: pid, Name: p.Name, OK: true, Message: message, Version: number, Effects: effects})
 	}
 	return results, nil
 }

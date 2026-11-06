@@ -198,7 +198,8 @@ export function AdoptDialog({ open, onOpenChange }: { open: boolean; onOpenChang
             source_id: sourceId,
             sink_id: sinkId || null,
             runtime_id: runtimeId || null,
-            spec: report.data!.spec as Schemas['PipelineSpec'],
+            // The plan's spec: typed settings in tuning, excluded and masked columns mapped.
+            spec: report.data!.plan.spec as Schemas['PipelineSpec'],
             labels: { adopted: 'true' },
           },
         }),
@@ -272,30 +273,16 @@ export function AdoptDialog({ open, onOpenChange }: { open: boolean; onOpenChang
             ) : null}
             {' · '}Destination: <strong>{r.sink_type ? (TYPE_LABEL[r.sink_type] ?? r.sink_type) : 'unknown'}</strong>
           </p>
-          {r.warnings.length ? (
+          {r.warnings.length || r.plan.warnings.length ? (
             <Notice tone="warn" title="Before you switch over">
               <ul className="m-0 list-disc pl-5">
-                {r.warnings.map((w) => (
+                {[...r.warnings, ...r.plan.warnings].map((w) => (
                   <li key={w}>{w}</li>
                 ))}
               </ul>
             </Notice>
           ) : null}
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-2 text-sm text-muted">
-            <div>
-              <strong className="text-ink">Mapped ({r.mapped.length})</strong>: tables, snapshot, naming, format, transforms.
-            </div>
-            <div className="wrap-anywhere">
-              <strong className="text-ink">Kept as advanced ({r.kept.length})</strong>
-              {r.kept.length ? `: ${r.kept.join(', ')}` : ''}
-            </div>
-            <div>
-              <strong className="text-ink">Managed by BeziSync ({r.managed.length})</strong>: connection, offsets, slot, history, secrets.
-            </div>
-            <div>
-              <strong className="text-ink">Replaced by BeziSync settings ({r.replaced.length})</strong>
-            </div>
-          </div>
+          <ImportBuckets plan={r.plan} />
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-4">
             <Field label="Pipeline name">{(id) => <SlugInput id={id} value={name} onChange={setName} taken={taken} />}</Field>
             <Field label="Source connection" hint={sources.length ? undefined : 'Add a matching source under Connections first.'}>
@@ -328,5 +315,43 @@ export function AdoptDialog({ open, onOpenChange }: { open: boolean; onOpenChang
       )}
       <InlineError error={report.error ?? create.error} doing={report.error ? 'Couldn’t analyse the properties' : 'Couldn’t create the draft'} />
     </Modal>
+  );
+}
+
+/** What becomes of each imported property, in the five buckets every raw key falls in. */
+export function ImportBuckets({ plan }: { plan: Schemas['ImportPlan'] }) {
+  const needs = plan.tunable.filter((k) => k.problem);
+  const buckets: { title: string; what: string; keys: Schemas['ImportKey'][] }[] = [
+    { title: 'Settings', what: 'become typed settings in Review', keys: plan.tunable.filter((k) => !k.problem) },
+    { title: 'Wizard choices', what: 'set by tables, snapshot, naming, format, transforms and the size', keys: plan.modelled },
+    { title: 'Managed by BeziSync', what: 'connection, offsets, slot, history, secrets', keys: plan.owned },
+    { title: 'Kept as advanced', what: 'passed on as they are, not verified', keys: plan.expert },
+    { title: 'Refused', what: 'BeziSync can’t pass these on', keys: plan.forbidden },
+  ];
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      {needs.length ? (
+        <Notice tone="warn" title={`${needs.length} setting${needs.length === 1 ? ' needs' : 's need'} a change`}>
+          <ul className="m-0 list-disc pl-5">
+            {needs.map((k) => (
+              <li key={k.key} className="wrap-anywhere">
+                <strong>{k.title ?? k.key}</strong> ({k.key}) {k.problem}: left out until you set it in Review.
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      ) : null}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-2 text-sm text-muted">
+        {buckets.map((b) => (
+          <div key={b.title} className="wrap-anywhere">
+            <strong className="text-ink">
+              {b.title} ({b.keys.length})
+            </strong>
+            : {b.what}
+            {b.keys.length && b.keys.length <= 6 ? ` — ${b.keys.map((k) => k.title ?? k.key).join(', ')}` : ''}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

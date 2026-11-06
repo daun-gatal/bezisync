@@ -194,3 +194,41 @@ func TestPerConnectorSettings(t *testing.T) {
 		t.Fatal(string(c.Raw))
 	}
 }
+
+// Import says what becomes of each key in five buckets, and a version change what it does to the
+// settings (refused when a tuned setting isn't in that release).
+func TestImportPlanAndVersionEffects(t *testing.T) {
+	e := newPipelineEnv(t)
+	admin := e.admin
+	base := "/api/v1/projects/" + e.pid
+	r := admin.post(base+"/pipelines:adopt", map[string]any{"properties": "debezium.source.connector.class=io.debezium.connector.postgresql.PostgresConnector\n" +
+		"debezium.source.table.include.list=public.orders\ndebezium.source.poll.interval.ms=250\ndebezium.source.column.exclude.list=public.orders.notes\n"}).expect(200)
+	if r.Str("source_type") != "postgresql" || r.At("plan", "spec", "tuning", "debezium.source.poll.interval.ms") != "250" ||
+		len(r.At("plan", "tunable").([]any)) != 1 || r.At("plan", "spec", "source", "columns", "public.orders", "exclude").([]any)[0] != "notes" {
+		t.Fatal(string(r.Raw))
+	}
+	p := createPipeline(t, admin, e.pid, e.ids, "shop.orders")
+	u := base + "/pipelines/" + p.Str("id")
+	cur := admin.get(u).expect(200)
+	admin.patch(u, map[string]any{"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}},
+		"tuning": map[string]any{"debezium.source.skip.messages.without.change": "true"}}}, ifMatch(cur.At("version"))...).expect(200)
+	old := "quay.io/debezium/server:1.9.7.Final"
+	fx := admin.post(base+"/debezium-images:effects", map[string]any{"pipeline_ids": []string{p.Str("id")}, "image": old}).expect(200).List()
+	if len(fx) != 1 || at(t, fx[0], "image") != old || at(t, fx[0], "effects").([]any)[0].(map[string]any)["effect"] != "missing" {
+		t.Fatal(fx)
+	}
+	// The change itself refuses it, naming the setting; the pipeline keeps its version.
+	res := admin.post(base+"/debezium-images:apply", map[string]any{"pipeline_ids": []string{p.Str("id")}, "image": old, "deploy": false}).expect(200).List()
+	if at(t, res[0], "ok") != false || !strings.Contains(at(t, res[0], "message").(string), "debezium.source.skip.messages.without.change") {
+		t.Fatal(res)
+	}
+	if admin.get(u).At("current_version") != cur.At("current_version") {
+		t.Fatal("a refused change saved a version")
+	}
+	// A release that has it changes as before.
+	ok := admin.post(base+"/debezium-images:apply", map[string]any{"pipeline_ids": []string{p.Str("id")}, "image": "quay.io/debezium/server:3.7.0.Final", "deploy": false}).expect(200).List()
+	if at(t, ok[0], "ok") != true {
+		t.Fatal(ok)
+	}
+	admin.post(base+"/debezium-images:effects", map[string]any{"pipeline_ids": []string{p.Str("id")}, "extra": 1}).expect(422)
+}

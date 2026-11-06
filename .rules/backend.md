@@ -388,7 +388,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   below its queue (size-derived defaults included). Registry entries are only documented Debezium
   properties (per connector by `Connectors`; never a key a connection field sets — those are
   modelled); `DriverPropertyRefusal` refuses `driver.*` on `NoJDBC` sources when saved and in
-  classify. CockroachDB, Vitess, Spanner and SQL Server have no entries of their own yet. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  classify. CockroachDB, Vitess, Spanner and SQL Server have no entries of their own yet. Import:
+  `services.Adopt` is the recorded contract (`testdata/contract/services_pure.json`) and stays as
+  it is; `PlanImport` sorts its keys into the five buckets and builds the spec the draft is created
+  from (`plan` in the adopt response). Version changes: `VersionEffects` (C16, C24) in
+  `debezium-images:effects` (pure) and `ChangeImage`, which refuses a pipeline a blocking effect
+  names and moves renamed settings. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

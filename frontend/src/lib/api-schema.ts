@@ -1013,6 +1013,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/debezium-images:effects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a Debezium version change
+         * @description What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes.
+         */
+        post: operations["image_effects_api_v1_projects__project_id__debezium_images_effects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/events": {
         parameters: {
             query?: never;
@@ -2107,6 +2127,7 @@ export interface components {
             managed: string[];
             /** Mapped */
             mapped: string[];
+            plan: components["schemas"]["ImportPlan"];
             /** Replaced */
             replaced: string[];
             /** Sink Hint */
@@ -3595,6 +3616,11 @@ export interface components {
         };
         /** ImageChangeResult */
         ImageChangeResult: {
+            /**
+             * Effects
+             * @description What the release does to the pipeline's settings; omitted when nothing.
+             */
+            effects?: components["schemas"]["SettingEffect"][];
             /** Message */
             message: string;
             /** Name */
@@ -3608,6 +3634,16 @@ export interface components {
             pipeline_id: string;
             /** Version */
             version: number | null;
+        };
+        /** ImageEffectsRequest */
+        ImageEffectsRequest: {
+            /**
+             * Image
+             * @description The image; null: each pipeline's runtime default.
+             */
+            image?: string | null;
+            /** Pipeline Ids */
+            pipeline_ids: string[];
         };
         /** ImageUsageRead */
         ImageUsageRead: {
@@ -3641,6 +3677,40 @@ export interface components {
             default_release_notes_url: string | null;
             /** Images */
             images: components["schemas"]["ImageUsageRead"][];
+        };
+        /** ImportKey */
+        ImportKey: {
+            /** Key */
+            key: string;
+            /**
+             * Problem
+             * @description Why it needs a change first (out of its bounds; never clamped).
+             */
+            problem?: string;
+            /** Title */
+            title?: string;
+        };
+        /**
+         * ImportPlan
+         * @description Every property in one of five buckets, and the spec to create the draft from: typed settings in tuning, excluded and masked columns mapped.
+         */
+        ImportPlan: {
+            /** @description Raw properties kept as advanced. */
+            expert: components["schemas"]["ImportKey"][];
+            /** @description Refused: BeziSync can't pass them on. */
+            forbidden: components["schemas"]["ImportKey"][];
+            /** @description Set by a wizard choice (or replaced by BeziSync's own). */
+            modelled: components["schemas"]["ImportKey"][];
+            /** @description BeziSync manages these itself (connection, offsets, slot, secrets). */
+            owned: components["schemas"]["ImportKey"][];
+            /** Spec */
+            spec: {
+                [key: string]: unknown;
+            };
+            /** @description Typed settings; one with a problem is left out until changed. */
+            tunable: components["schemas"]["ImportKey"][];
+            /** Warnings */
+            warnings: string[];
         };
         /** InboxRead */
         InboxRead: {
@@ -4162,6 +4232,20 @@ export interface components {
             spec?: components["schemas"]["PipelineSpec"];
             /** Template Id */
             template_id?: string | null;
+        };
+        /** PipelineEffects */
+        PipelineEffects: {
+            /** Effects */
+            effects: components["schemas"]["SettingEffect"][];
+            /** Image */
+            image: string;
+            /** Name */
+            name: string;
+            /**
+             * Pipeline Id
+             * Format: uuid
+             */
+            pipeline_id: string;
         };
         /** PipelineImageRead */
         PipelineImageRead: {
@@ -5388,6 +5472,27 @@ export interface components {
              * @description An advanced property: passed as typed, so BeziSync can only say it restarts the pipeline.
              */
             unverified?: boolean;
+        };
+        /** SettingEffect */
+        SettingEffect: {
+            /** Blocking */
+            blocking: boolean;
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "removed" | "renamed" | "missing" | "unknown" | "unchecked";
+            /** Key */
+            key: string;
+            /** Message */
+            message: string;
+            /** Title */
+            title?: string;
+            /**
+             * To
+             * @description The key a renamed setting moves to.
+             */
+            to?: string;
         };
         /**
          * SettingsChange
@@ -8585,6 +8690,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImageChangeResult"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    image_effects_api_v1_projects__project_id__debezium_images_effects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageEffectsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEffects"][];
                 };
             };
             /** @description Validation Error */
