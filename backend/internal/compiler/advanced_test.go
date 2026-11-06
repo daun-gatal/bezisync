@@ -104,7 +104,7 @@ func TestClassifyAdvanced(t *testing.T) {
 		{"debezium.source.table.include.list", "public.secrets", compiler.AdvancedModelled, "tables"},
 		{"debezium.source.column.exclude.list", "public.users.ssn", compiler.AdvancedModelled, "tables"},
 		{"debezium.source.column.mask.hash.v2.SHA-256.with.salt.x", "public.users.email", compiler.AdvancedModelled, "tables"},
-		{"debezium.source.column.truncate.to.10.chars", "public.users.note", compiler.AdvancedModelled, "tables"},
+		{"debezium.source.column.truncate.to.10.chars", "public.users.note", compiler.AdvancedModelled, "transform"}, // the Truncate step
 		{"debezium.source.message.key.columns", "public.t:id", compiler.AdvancedModelled, "tables"},
 		// Value formats the wizard doesn't offer stay possible, unless the spec chose one itself.
 		{"debezium.source.time.precision.mode", "adaptive_time_microseconds", compiler.AdvancedAllowed, ""},

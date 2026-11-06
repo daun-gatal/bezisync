@@ -22,7 +22,11 @@ import (
 // before the event shape; field changes need the row, so they come after it.
 
 // TransformTypes are the step types, in the order the UI offers them.
-var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom", "soft_delete"}
+var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom", "soft_delete", "truncate"}
+
+// TruncateSources are the Debezium sources whose columns BeziSync truncates (column.truncate.to.N.chars,
+// named schema.table.column); Flink CDC truncates on any source.
+var TruncateSources = []string{"postgresql", "mysql"}
 
 // SoftDeleteField is the field a soft delete marks deleted rows with, per engine: Debezium's
 // unwrap adds __deleted ("true" for a delete); Flink CDC writes its change type as __op ("-D").
@@ -235,6 +239,8 @@ func decodeTransformExtras(v *val.V, o *val.Object, out *Transform) {
 		}
 	case "custom":
 		decodeCustom(v, o, out)
+	case "truncate":
+		decodeTruncate(v, o, out)
 	}
 	if out.Tables != nil && !scoped[out.Type] {
 		v.ValueError(o.Loc().Add("tables"), out.Type+" steps apply to every table")
@@ -399,6 +405,42 @@ func decodeRenames(v *val.V, o *val.Object, out *Transform) {
 	}
 }
 
+func decodeTruncate(v *val.V, o *val.Object, out *Transform) {
+	f := o.Get("columns")
+	if !f.Required() {
+		return
+	}
+	items, ok := v.List(f.Loc, f.Raw)
+	if !ok || !v.ListLen(f.Loc, len(items), 1, maxRenames) {
+		return
+	}
+	seen := map[string]bool{}
+	for i, item := range items {
+		at := f.Loc.Add(i)
+		co := v.Model(at, item, "Truncation")
+		if co.Failed {
+			continue
+		}
+		var t Truncation
+		if g := co.Get("table"); g.Required() {
+			t.Table, _ = v.Constrained(g.Loc, g.Raw, val.StrRules{Pattern: tableRe.String()})
+		}
+		if g := co.Get("column"); g.Required() {
+			t.Column, _ = v.Constrained(g.Loc, g.Raw, val.StrRules{Pattern: fieldRe})
+		}
+		if g := co.Get("length"); g.Required() {
+			t.Length, _ = v.IntIn(g.Loc, g.Raw, val.Num{GE: val.F(1), LE: val.F(65535)})
+		}
+		co.Forbid()
+		if k := t.Table + "." + t.Column; seen[k] {
+			v.ValueError(at, k+" is truncated twice")
+		} else {
+			seen[k] = true
+		}
+		out.Truncate = append(out.Truncate, t)
+	}
+}
+
 func decodeAddField(v *val.V, o *val.Object, out *Transform) {
 	if f := o.Get("name"); f.Required() {
 		out.Name, _ = v.Constrained(f.Loc, f.Raw, val.StrRules{Pattern: newNameRe})
@@ -486,6 +528,19 @@ func validateTransforms(v *val.V, loc val.Loc, spec PipelineSpec) {
 		for _, table := range t.Tables {
 			if !contains(spec.Source.Tables.Include, table) {
 				v.ValueError(at.Add("tables"), table+" is not captured by this pipeline")
+			}
+		}
+		if t.Type == "truncate" {
+			for j, c := range t.Truncate {
+				switch {
+				case !contains(spec.Source.Tables.Include, c.Table):
+					v.ValueError(at.Add("columns", j), c.Table+" is not captured by this pipeline")
+				case contains(spec.Source.Columns[c.Table].Mask, c.Column):
+					// T6: a masked value is replaced whole; cutting it would say nothing.
+					v.ValueError(at.Add("columns", j), c.Table+"."+c.Column+" is masked: the mask replaces it whole, so it can't be truncated too")
+				case contains(spec.Source.Columns[c.Table].Exclude, c.Column):
+					v.ValueError(at.Add("columns", j), c.Table+"."+c.Column+" is left out of the pipeline")
+				}
 			}
 		}
 		switch t.Stage() {
@@ -613,6 +668,12 @@ func dumpTransform(t Transform) *om.Map {
 		m.Set("name", t.Name).Set("value", value)
 	case "flatten":
 		m.Set("delimiter", t.Delimiter)
+	case "truncate":
+		cols := make([]any, len(t.Truncate))
+		for i, c := range t.Truncate {
+			cols[i] = om.New().Set("table", c.Table).Set("column", c.Column).Set("length", c.Length)
+		}
+		m.Set("columns", cols)
 	case "custom":
 		props := om.New()
 		for _, k := range sortedStrKeys(t.Properties) {
@@ -672,6 +733,9 @@ func cloneTransform(t Transform) Transform {
 			props[k] = v
 		}
 		t.Properties = props
+	}
+	if t.Truncate != nil {
+		t.Truncate = append([]Truncation{}, t.Truncate...)
 	}
 	return t
 }

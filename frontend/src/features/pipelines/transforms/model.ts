@@ -44,7 +44,17 @@ export const TYPE_TITLE: Record<TransformType, string> = {
   flatten: 'Flatten nested fields',
   custom: 'Custom transform',
   soft_delete: 'Keep deleted rows',
+  truncate: 'Cut long text',
 };
+
+/** Sources whose Debezium connector truncates columns (domain.TruncateSources). */
+export const TRUNCATE_SOURCES = ['postgresql', 'mysql'];
+
+/** A column type a truncation cuts (text, not JSON). */
+export function isTextType(type: string): boolean {
+  const t = type.toLowerCase();
+  return !t.includes('json') && ['char', 'text', 'string', 'clob'].some((s) => t.includes(s));
+}
 
 /** The field a soft delete marks rows with, per engine (domain.SoftDeleteField). */
 export const SOFT_DELETE_FIELD = { debezium: '__deleted', 'flink-cdc': '__op' } as const;
@@ -123,6 +133,8 @@ export function defaultStep(type: TransformType, steps: TransformStep[]): Transf
       return { type, id, delimiter: '_' };
     case 'custom':
       return { type, id, class: '', properties: {} };
+    case 'truncate':
+      return { type, id, columns: [] };
     default:
       return { type, id };
   }
@@ -187,6 +199,10 @@ export function stepErrors(steps: TransformStep[]): Map<number, string> {
     if (t.type === 'add_field') {
       const e = nameError(t.name ?? '') ?? (t.value?.kind === 'static' ? textError(t.value.text ?? '') : null);
       if (e) out.set(i, e);
+    }
+    if (t.type === 'truncate') {
+      if (!(t.columns?.length)) out.set(i, 'Add a column to cut.');
+      else if (t.columns.some((c) => !c.column)) out.set(i, 'Pick a column for every row.');
     }
     if (t.type === 'custom' && !/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)+$/.test(t.class ?? '')) out.set(i, 'Choose a class.');
   });
@@ -323,6 +339,8 @@ export function summarize(t: TransformStep): string {
       return 'Outbox event router';
     case 'soft_delete':
       return 'A deleted row stays, marked deleted (__deleted on Debezium, __op on Flink CDC), instead of being removed';
+    case 'truncate':
+      return (t.columns ?? []).map((c) => `${c.table}.${c.column || '…'} to ${c.length}`).join(', ') || 'No columns yet';
   }
 }
 

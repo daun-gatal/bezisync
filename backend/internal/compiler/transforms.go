@@ -3,6 +3,7 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
@@ -49,6 +50,29 @@ func stepProps(c connectors.CompileContext, src connectors.Source, desc *connect
 	for i, t := range spec.Transforms {
 		name := domain.StepName(i, t)
 		key := "debezium.transforms." + name + "."
+		if t.Type == "truncate" {
+			// A source option, not a transform in the chain: exactly the property a raw one
+			// would be, so a pipeline moved to the step keeps its hash (T7).
+			if desc == nil || !slices.Contains(domain.TruncateSources, desc.Type) {
+				return nil, nil, nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Truncating columns is not available for %s.", title))
+			}
+			byLength := map[int][]string{}
+			var lengths []int
+			for _, c := range t.Truncate {
+				if _, seen := byLength[c.Length]; !seen {
+					lengths = append(lengths, c.Length)
+				}
+				byLength[c.Length] = append(byLength[c.Length], c.Table+"."+c.Column)
+			}
+			for _, n := range lengths {
+				k := fmt.Sprintf("debezium.source.column.truncate.to.%d.chars", n)
+				if props[k] != "" {
+					props[k] += ","
+				}
+				props[k] += strings.Join(byLength[n], ",")
+			}
+			continue
+		}
 		switch t.Type {
 		case "unwrap":
 			props[key+"type"] = desc.UnwrapTransform

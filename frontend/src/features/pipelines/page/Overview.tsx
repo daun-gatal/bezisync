@@ -194,6 +194,7 @@ const ICON: Record<RowIcon, ComponentType<{ className?: string; 'aria-hidden'?: 
   unwrap: Rows3,
   outbox: Inbox,
   soft_delete: Trash,
+  truncate: Funnel,
   filter: Funnel,
   rename: PenLine,
   add_field: SquarePlus,

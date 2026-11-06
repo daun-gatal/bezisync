@@ -46,7 +46,7 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				sink.Converter = "SOFT_DELETE"
 				sink.Projection = append(sink.Projection, "__data_event_type__ AS `"+field+"`")
 			}
-		case t.Type == "rename" || t.Type == "add_field" || (t.Type == "filter" && t.Typed()):
+		case t.Type == "rename" || t.Type == "add_field" || t.Type == "truncate" || (t.Type == "filter" && t.Typed()):
 		case t.Type == "filter":
 			return nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Step %d: a filter written as a script runs only on Debezium; build it from rules.", i+1))
 		default:
@@ -57,6 +57,7 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 	for _, table := range spec.Source.Tables.Include {
 		rules := spec.Source.Columns[table]
 		renames := map[string]string{}
+		cut := map[string]int{}
 		var added []string
 		var filters []string
 		for _, t := range spec.Transforms {
@@ -67,6 +68,12 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 			case "rename":
 				for _, r := range t.Renames {
 					renames[r.From] = r.To
+				}
+			case "truncate":
+				for _, c := range t.Truncate {
+					if c.Table == table {
+						cut[c.Column] = c.Length
+					}
 				}
 			case "add_field":
 				value := t.Value.Text
@@ -86,7 +93,7 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		}
 		// Column by column when anything must be left out or renamed; "*" otherwise, so new
 		// columns reach the destination.
-		explicit := newColumns == "hold" || len(rules.Exclude) > 0 || len(renames) > 0
+		explicit := newColumns == "hold" || len(rules.Exclude) > 0 || len(renames) > 0 || len(cut) > 0
 		var projection []string
 		if explicit {
 			cols, ok := columns[table]
@@ -108,6 +115,8 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 					name = to
 				}
 				switch {
+				case cut[col] > 0:
+					projection = append(projection, fmt.Sprintf("SUBSTR(%s, 1, %d) AS %s", sqlIdent(col), cut[col], sqlIdent(name)))
 				case sink.NoDefaults && slices.Contains(defaults[table], col):
 					// An expression carries no default (a plain or renamed column keeps the source's).
 					projection = append(projection, "CASE WHEN TRUE THEN "+sqlIdent(col)+" END AS "+sqlIdent(name))

@@ -2227,6 +2227,19 @@
    ]
   },
   {
+   "code": "transform_truncate_type",
+   "section": "Deploy",
+   "titles": [
+    "Truncated columns"
+   ],
+   "whys": [
+    "A Truncate step cuts text only. On Debezium another type is left as it is; on Flink CDC it would fail the job, so it blocks. Unknown when BeziSync can't read the columns' types."
+   ],
+   "fixes": [
+    "Remove those columns from the Truncate step."
+   ]
+  },
+  {
    "code": "transform_field_conflict",
    "fixes": [
     "Pick a field name the events do not have yet, under Transform."

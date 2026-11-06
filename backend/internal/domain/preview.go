@@ -562,6 +562,26 @@ func applyStep(in PreviewInput, t Transform, value any) (any, string, string, st
 		return nil, "dropped", "Dropped: the event does not match this filter.", ""
 	case "unwrap":
 		return unwrap(in, t, value.(*om.Map))
+	case "truncate":
+		var cut []string
+		for _, c := range t.Truncate {
+			if c.Table != in.Table {
+				continue
+			}
+			text := false
+			for _, col := range in.Columns {
+				text = text || (col.Name == c.Column && previewText(col.Type))
+			}
+			if !text {
+				continue
+			}
+			cutField(value, c.Column, c.Length)
+			cut = append(cut, fmt.Sprintf("%s to %d characters", c.Column, c.Length))
+		}
+		if len(cut) == 0 {
+			return value, "applied", "Nothing to cut in this table (text columns only).", ""
+		}
+		return value, "applied", "Cuts " + strings.Join(cut, ", ") + ".", ""
 	case "soft_delete":
 		field := SoftDeleteField["debezium"]
 		for _, c := range in.Columns {
@@ -864,4 +884,37 @@ func twosComplement(n *big.Int) []byte {
 		b = append([]byte{0xff}, b...)
 	}
 	return b
+}
+
+// previewText: a column type truncation cuts (text, not JSON).
+func previewText(typ string) bool {
+	t := strings.ToLower(typ)
+	return !strings.Contains(t, "json") && (strings.Contains(t, "char") || strings.Contains(t, "text") || strings.Contains(t, "string") || strings.Contains(t, "clob"))
+}
+
+// cutField cuts a field's string value to n characters, in a row or in an envelope's before and
+// after.
+func cutField(value any, field string, n int) {
+	m, ok := value.(*om.Map)
+	if !ok || m == nil {
+		return
+	}
+	cut := func(r *om.Map) {
+		if v, ok := r.Get(field); ok {
+			if s, ok := v.(string); ok && len([]rune(s)) > n {
+				r.Set(field, string([]rune(s)[:n]))
+			}
+		}
+	}
+	if _, envelope := m.Get("op"); envelope {
+		for _, side := range []string{"before", "after"} {
+			if r, ok := m.Get(side); ok {
+				if rm, ok := r.(*om.Map); ok && rm != nil {
+					cut(rm)
+				}
+			}
+		}
+		return
+	}
+	cut(m)
 }

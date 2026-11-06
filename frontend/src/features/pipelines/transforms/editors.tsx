@@ -12,6 +12,7 @@ import {
   fieldsBefore,
   FLINK_OPERATIONS,
   isNumericKind,
+  isTextType,
   KNOWN_CLASSES,
   METADATA,
   metadataField,
@@ -24,6 +25,7 @@ import {
   SCRIPTED_CLASSES,
   textError,
   toggleFlinkOperation,
+  TRUNCATE_SOURCES,
   type Caps,
   type TableInfo,
 } from './model';
@@ -767,5 +769,52 @@ export function KeysEditor({ keys, ctx, onChange }: { keys: Record<string, strin
         })}
       </tbody>
     </table>
+  );
+}
+
+/** Truncate: text columns of the captured tables, each cut to at most a length. Masked or left-out
+ *  columns aren't offered (a mask replaces the value whole). */
+export function TruncateEditor({ step, ctx, onChange }: { step: TransformStep; ctx: EditorContext; onChange: (s: TransformStep) => void }) {
+  const cols = step.columns ?? [];
+  const put = (next: typeof cols) => onChange({ ...step, columns: next });
+  const choices = ctx.tables.flatMap((t) => {
+    const rules = ctx.spec.source.columns[t.name];
+    return t.columns
+      .filter((c) => isTextType(c.type) && !rules?.mask.includes(c.name) && !rules?.exclude.includes(c.name))
+      .map((c) => ({ value: `${t.name}.${c.name}`, label: `${t.name}.${c.name}`, description: c.type }));
+  });
+  const unavailable = !ctx.flink && !TRUNCATE_SOURCES.includes(ctx.sourceType);
+  return (
+    <div className="flex flex-col gap-3">
+      {unavailable ? <Notice tone="warn">Debezium truncates columns of PostgreSQL and MySQL sources only.</Notice> : null}
+      {cols.map((c, i) => (
+        <div key={i} className="grid min-w-0 grid-cols-[minmax(0,1fr)_8rem_auto] items-end gap-2">
+          <Select
+            label={`Column ${i + 1}`}
+            value={c.column ? `${c.table}.${c.column}` : ''}
+            onChange={(v) => {
+              const at = v.lastIndexOf('.');
+              put(cols.map((x, j) => (j === i ? { ...x, table: v.slice(0, at), column: v.slice(at + 1) } : x)));
+            }}
+            options={choices}
+          />
+          <Input
+            aria-label={`Column ${i + 1} length`}
+            type="number"
+            min={1}
+            max={65535}
+            value={c.length}
+            onChange={(e) => put(cols.map((x, j) => (j === i ? { ...x, length: Math.max(1, Math.min(65535, Number(e.target.value) || 1)) } : x)))}
+          />
+          <Button size="sm" variant="ghost" icon={<X />} aria-label={`Remove column ${i + 1}`} onClick={() => put(cols.filter((_, j) => j !== i))} />
+        </div>
+      ))}
+      <div>
+        <Button size="sm" icon={<Plus />} disabled={!choices.length || unavailable} onClick={() => put([...cols, { table: '', column: '', length: 255 }])}>
+          Add a column
+        </Button>
+      </div>
+      {!choices.length ? <span className="text-xs text-muted">No text columns to cut in the captured tables.</span> : null}
+    </div>
   );
 }

@@ -254,3 +254,22 @@ func TestSoftDeleteDebezium(t *testing.T) {
 		t.Fatal(plain.Properties)
 	}
 }
+
+// T7: a Truncate step compiles to exactly the source property a raw one was, outside the chain.
+func TestTruncateDebezium(t *testing.T) {
+	got, err := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "unwrap", "id": "u1a0"},
+	  {"type": "truncate", "id": "tr01", "columns": [{"table": "public.orders", "column": "notes", "length": 100}, {"table": "public.orders", "column": "status", "length": 10},
+	   {"table": "public.orders", "column": "memo", "length": 100}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := got.Properties
+	if p["debezium.source.column.truncate.to.100.chars"] != "public.orders.notes,public.orders.memo" || p["debezium.source.column.truncate.to.10.chars"] != "public.orders.status" ||
+		strings.Contains(p["debezium.transforms"], "tr01") {
+		t.Fatal(p["debezium.source.column.truncate.to.100.chars"], p["debezium.transforms"])
+	}
+	if _, err := compileSpec(t, "mongo", "kafka", `{"source": {"tables": {"include": ["shop.orders"]}}, "transforms": [{"type": "truncate", "columns": [{"table": "shop.orders", "column": "notes", "length": 5}]}]}`); err == nil ||
+		!strings.Contains(err.Error(), "not available") {
+		t.Fatal(err)
+	}
+}

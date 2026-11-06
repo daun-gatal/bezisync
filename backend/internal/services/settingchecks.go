@@ -252,3 +252,57 @@ func heapBytes(h string) int64 {
 	}
 	return n << 20
 }
+
+// isText reports whether a column type holds text a truncation can cut (JSON excluded: cut, it
+// would no longer parse).
+func isText(typ string) bool {
+	t := strings.ToLower(typ)
+	if strings.Contains(t, "json") {
+		return false
+	}
+	for _, s := range []string{"char", "text", "string", "clob"} {
+		if strings.Contains(t, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateChecks: a truncation cuts text only (T5). On Debezium another type is left as it is
+// (a warning); on Flink CDC SUBSTR would fail the job, so it blocks.
+func truncateChecks(found connectors.Discovery, spec domain.PipelineSpec, flink bool) []checks.Check {
+	types := map[string]string{}
+	for _, t := range found.Tables {
+		for _, c := range t.Columns {
+			types[t.Identifier()+"."+c.Name] = c.Type
+		}
+	}
+	var notText, unknown []string
+	for _, t := range spec.Transforms {
+		for _, c := range t.Truncate {
+			typ, known := types[c.Table+"."+c.Column]
+			switch {
+			case !known:
+				unknown = append(unknown, c.Table+"."+c.Column)
+			case !isText(typ):
+				notText = append(notText, fmt.Sprintf("%s.%s (%s)", c.Table, c.Column, typ))
+			}
+		}
+	}
+	var out []checks.Check
+	if len(notText) > 0 {
+		c := checks.Check{Code: "transform_truncate_type", Title: "Truncated columns", Category: checks.CatTables, Status: checks.Warn,
+			Message: "Only text can be cut: " + strings.Join(notText, ", ") + " stay as they are."}
+		if flink {
+			c.Status, c.Blocking = checks.Fail, true
+			c.Message = "Flink CDC can only cut text: " + strings.Join(notText, ", ") + " would fail the job."
+			c.Fix = &checks.Fix{Kind: "text", Who: "you", Code: "Remove those columns from the Truncate step."}
+		}
+		out = append(out, c)
+	}
+	if len(unknown) > 0 {
+		out = append(out, checks.Check{Code: "transform_truncate_type", Title: "Truncated columns", Category: checks.CatTables, Status: checks.Unknown,
+			Message: "BeziSync couldn't read these columns' types: " + strings.Join(unknown, ", ") + "."})
+	}
+	return out
+}

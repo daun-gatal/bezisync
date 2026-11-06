@@ -477,3 +477,19 @@ func TestSoftDeleteFlink(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// On Flink CDC a Truncate step is SUBSTR in the projection (any source).
+func TestTruncateFlink(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{map[string]any{"type": "truncate", "columns": []any{map[string]any{"table": "shop.orders", "column": "notes", "length": 40}}}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "notes"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Pipeline, "SUBSTR(`notes`, 1, 40) AS `notes`") {
+		t.Fatal(got.Pipeline)
+	}
+}

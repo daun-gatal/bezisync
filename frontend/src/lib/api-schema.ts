@@ -4678,7 +4678,7 @@ export interface components {
              * Allowed Transforms
              * @description Built-in step types this project allows; omitted or null = all.
              */
-            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "soft_delete")[] | null;
+            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "soft_delete" | "truncate")[] | null;
             /** Max Pipelines Per Source */
             max_pipelines_per_source?: number | null;
             /** Max Resources */
@@ -6141,6 +6141,11 @@ export interface components {
              */
             class?: string;
             /**
+             * Columns
+             * @description truncate: text columns cut to at most length characters (Debezium: PostgreSQL and MySQL; Flink CDC: any source).
+             */
+            columns?: components["schemas"]["Truncation"][];
+            /**
              * Condition
              * @description Filter: raw Groovy/JS expression (expert). Needs the project policy allow_scripted_transforms; not combined with operations or rules.
              */
@@ -6198,7 +6203,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom" | "soft_delete";
+            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom" | "soft_delete" | "truncate";
             value?: components["schemas"]["FieldValue"];
         };
         /**
@@ -6261,6 +6266,15 @@ export interface components {
             replica_identity?: string | null;
             /** @description Draft spec; omitted = the latest version. */
             spec?: components["schemas"]["PipelineSpec"] | null;
+            /** Table */
+            table: string;
+        };
+        /** Truncation */
+        Truncation: {
+            /** Column */
+            column: string;
+            /** Length */
+            length: number;
             /** Table */
             table: string;
         };

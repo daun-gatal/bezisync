@@ -2307,6 +2307,19 @@ Fix:
 Compare the column with a value of its type, or pick another column.
 ```
 
+<a id="transform-truncate-type"></a>
+### `transform_truncate_type`
+
+**Truncated columns**
+
+- Why: A Truncate step cuts text only. On Debezium another type is left as it is; on Flink CDC it would fail the job, so it blocks. Unknown when BeziSync can't read the columns' types.
+
+Fix:
+
+```
+Remove those columns from the Truncate step.
+```
+
 ## Flink CDC
 
 <a id="flink-agent-version"></a>

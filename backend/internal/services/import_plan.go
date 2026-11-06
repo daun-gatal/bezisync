@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/daun-gatal/bezisync/backend/internal/compiler"
@@ -98,6 +99,8 @@ func PlanImport(text string, r AdoptReport) ImportPlan {
 			plan.Tunable = append(plan.Tunable, item)
 		case in(r.Kept, k):
 			plan.Expert = append(plan.Expert, ImportKey{Key: k})
+		case strings.HasPrefix(k, "debezium.source.") && compiler.ClassifyAdvanced(k, value, nil).Class == compiler.AdvancedModelled:
+			plan.Modelled = append(plan.Modelled, ImportKey{Key: k})
 		case strings.HasPrefix(k, "debezium.source.") && compiler.ClassifyAdvanced(k, value, nil).Refused():
 			plan.Forbidden = append(plan.Forbidden, ImportKey{Key: k, Problem: compiler.ClassifyAdvanced(k, value, nil).Message})
 		default:
@@ -111,6 +114,7 @@ func PlanImport(text string, r AdoptReport) ImportPlan {
 		spec["tuning"] = tuning
 	}
 	mapColumns(spec, props, &plan)
+	mapTruncations(spec, props, &plan)
 	plan.Spec = spec
 	return plan
 }
@@ -175,5 +179,53 @@ func mapColumns(spec map[string]any, props map[string]string, plan *ImportPlan) 
 	if len(unmapped) > 0 {
 		sort.Strings(unmapped)
 		plan.Warnings = append(plan.Warnings, "Column patterns BeziSync can't map, so they are not left out or masked yet: "+strings.Join(unmapped, ", ")+". Choose those columns in the Tables step.")
+	}
+}
+
+var truncateKeyRe = regexp.MustCompile(`^debezium\.source\.column\.truncate\.to\.(\d+)\.chars$`)
+
+// mapTruncations turns column.truncate.to.N.chars into a Truncate step (T7), for the captured
+// tables' plainly named columns; the step compiles to the same property.
+func mapTruncations(spec map[string]any, props map[string]string, plan *ImportPlan) {
+	source, _ := spec["source"].(map[string]any)
+	tables := map[string]bool{}
+	if t, ok := source["tables"].(map[string]any); ok {
+		if inc, ok := t["include"].([]any); ok {
+			for _, x := range inc {
+				tables[fmt.Sprint(x)] = true
+			}
+		}
+	}
+	var cols []any
+	keys := make([]string, 0)
+	for k := range props {
+		if truncateKeyRe.MatchString(k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	var unmapped []string
+	for _, k := range keys {
+		n := truncateKeyRe.FindStringSubmatch(k)[1]
+		length, _ := strconv.Atoi(n)
+		for _, e := range strings.Split(props[k], ",") {
+			e = strings.TrimSpace(e)
+			if e == "" {
+				continue
+			}
+			last := strings.LastIndex(e, ".")
+			if !plainColumnRe.MatchString(e) || !tables[e[:last]] || length < 1 || length > 65535 {
+				unmapped = append(unmapped, e)
+				continue
+			}
+			cols = append(cols, map[string]any{"table": e[:last], "column": e[last+1:], "length": length})
+		}
+	}
+	if len(cols) > 0 {
+		steps, _ := spec["transforms"].([]any)
+		spec["transforms"] = append(steps, map[string]any{"type": "truncate", "columns": cols})
+	}
+	if len(unmapped) > 0 {
+		plan.Warnings = append(plan.Warnings, "Truncations BeziSync can't map: "+strings.Join(unmapped, ", ")+". Add them to the Truncate step.")
 	}
 }

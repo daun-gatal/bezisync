@@ -6239,7 +6239,8 @@
                     "rename",
                     "add_field",
                     "flatten",
-                    "soft_delete"
+                    "soft_delete",
+                    "truncate"
                   ],
                   "type": "string"
                 },
@@ -9751,6 +9752,14 @@
             "title": "Class",
             "type": "string"
           },
+          "columns": {
+            "description": "truncate: text columns cut to at most length characters (Debezium: PostgreSQL and MySQL; Flink CDC: any source).",
+            "items": {
+              "$ref": "#/components/schemas/Truncation"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
           "condition": {
             "anyOf": [
               {
@@ -9861,7 +9870,8 @@
               "add_field",
               "flatten",
               "custom",
-              "soft_delete"
+              "soft_delete",
+              "truncate"
             ],
             "title": "Type",
             "type": "string"
@@ -10064,6 +10074,32 @@
           "table"
         ],
         "title": "TransformPreviewRequest",
+        "type": "object"
+      },
+      "Truncation": {
+        "additionalProperties": false,
+        "properties": {
+          "column": {
+            "title": "Column",
+            "type": "string"
+          },
+          "length": {
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Length",
+            "type": "integer"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "column",
+          "length"
+        ],
+        "title": "Truncation",
         "type": "object"
       },
       "UserAccessUpsert": {

@@ -93,6 +93,7 @@ var modelledSource = []struct {
 	fix, why string
 }{
 	{regexp.MustCompile(`^(table|schema|database|collection)\.(include|exclude)\.list$`), "tables", "Tables are chosen on the Tables step."},
+	{regexp.MustCompile(`^column\.truncate\.to\.\d+\.chars$`), "transform", "Cutting long text is a Truncate step on the Transform step."},
 	{regexp.MustCompile(`^column\.|^field\.(include|exclude)\.list$|^message\.key\.columns$`), "tables", "Columns, personal data and keys are chosen on the Tables and Transform steps, so personal-data choices can't be bypassed."},
 	{regexp.MustCompile(`^skipped\.operations$`), "transform", "Which changes to keep is a filter on the Transform step."},
 	{regexp.MustCompile(`^snapshot\.mode`), "review", "How the first copy runs is chosen on Review."},

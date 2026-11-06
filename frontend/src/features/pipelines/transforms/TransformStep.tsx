@@ -11,7 +11,7 @@ import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { fullSpec, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
-import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext } from './editors';
+import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext, TruncateEditor } from './editors';
 import { FlinkPreviewPanel } from './FlinkPreviewPanel';
 import { PreviewPanel } from './PreviewPanel';
 import {
@@ -42,6 +42,7 @@ const CHOICES: { group: string; items: { type: TransformType; help: string }[] }
       { type: 'add_field', help: 'A fixed value or the pipeline’s name.' },
       { type: 'flatten', help: 'address.city becomes address_city.' },
       { type: 'soft_delete', help: 'A deleted row stays, marked deleted, instead of being removed.' },
+      { type: 'truncate', help: 'Cut long text columns to a length.' },
     ],
   },
   { group: 'Expert', items: [{ type: 'custom', help: 'Any transform class the Debezium image ships.' }] },
@@ -177,6 +178,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
       flatten: <FlattenEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       custom: <CustomEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       outbox: <p className="m-0 text-xs text-muted">The outbox router has no settings here yet; edit it through YAML or the API.</p>,
+      truncate: <TruncateEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       soft_delete: (
         <p className="m-0 text-sm text-ink-2">
           {flink

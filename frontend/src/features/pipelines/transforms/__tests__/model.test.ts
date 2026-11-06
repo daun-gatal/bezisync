@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, fieldsBefore, flinkColumns, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, isTextType, fieldsBefore, flinkColumns, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -180,5 +180,23 @@ describe('soft delete', () => {
   });
   it('runs on both engines', () => {
     expect(DEBEZIUM_ONLY_STEPS).not.toContain('soft_delete');
+  });
+});
+
+describe('truncate', () => {
+  it('cuts text only and says what it cuts', () => {
+    expect(isTextType('character varying(200)')).toBe(true);
+    expect(isTextType('text')).toBe(true);
+    expect(isTextType('jsonb')).toBe(false);
+    expect(isTextType('integer')).toBe(false);
+    const step = { ...defaultStep('truncate', []), columns: [{ table: 'public.orders', column: 'notes', length: 100 }] };
+    expect(summarize(step)).toBe('public.orders.notes to 100');
+    expect(summarize(defaultStep('truncate', []))).toBe('No columns yet');
+    expect(DEBEZIUM_ONLY_STEPS).not.toContain('truncate');
+  });
+  it('a row without a column is never saved nor previewed', () => {
+    expect(stepErrors([defaultStep('truncate', [])]).get(0)).toBe('Add a column to cut.');
+    expect(stepErrors([{ ...defaultStep('truncate', []), columns: [{ table: '', column: '', length: 255 }] }]).get(0)).toBe('Pick a column for every row.');
+    expect(stepErrors([{ ...defaultStep('truncate', []), columns: [{ table: 'public.orders', column: 'notes', length: 9 }] }]).size).toBe(0);
   });
 });

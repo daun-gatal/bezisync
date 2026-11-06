@@ -319,3 +319,36 @@ test('a long list of steps scrolls inside the Transforms card, level with the ca
   await expect.poll(() => scroller.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
   await api.send('DELETE', url);
 });
+
+test('an editor keeps deleted rows and cuts long text; the preview shows both', async ({ page }) => {
+  test.setTimeout(180_000);
+  const api = await Api.signIn();
+  const tag = unique('tfcut');
+  const { project, base, rt, source, sink } = await setup(api, tag);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: source.id, sink_id: sink.id, runtime_id: rt.id, spec: { source: { tables: { include: ['shop.orders'] } } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+  await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Keep deleted rows/ }).click();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Cut long text/ }).click();
+  const cut = page.getByRole('region', { name: /Cut long text/ });
+  await cut.getByRole('button', { name: 'Add a column' }).click();
+  await choose(cut.getByLabel(/^Column 1:/), 'shop.orders.status');
+  await cut.getByLabel('Column 1 length').fill('3');
+  await cut.getByRole('button', { name: 'Done' }).click();
+  // A delete in the preview keeps the row, marked.
+  const preview = page.getByLabel('Preview event');
+  await page.getByRole('radio', { name: 'Delete' }).click();
+  await expect(preview).toContainText('"__deleted": "true"', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  const saved = await api.get<{ spec: { transforms: { type: string; columns?: unknown[] }[] } }>(url);
+  expect(saved.spec.transforms.map((t) => t.type)).toEqual(expect.arrayContaining(['soft_delete', 'truncate']));
+  expect(saved.spec.transforms.find((t) => t.type === 'truncate')?.columns).toEqual([{ table: 'shop.orders', column: 'status', length: 3 }]);
+  await api.send('DELETE', url);
+});

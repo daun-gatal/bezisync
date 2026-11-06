@@ -92,6 +92,14 @@ type Transform struct {
 	Delimiter  string            `json:"delimiter"`  // flatten
 	Class      string            `json:"class"`      // custom
 	Properties map[string]string `json:"properties"` // custom
+	Truncate   []Truncation      `json:"columns"`    // truncate
+}
+
+// Truncation cuts one text column of a table to at most Length characters.
+type Truncation struct {
+	Table  string `json:"table"`
+	Column string `json:"column"`
+	Length int    `json:"length"`
 }
 
 type ErrorPolicy struct {

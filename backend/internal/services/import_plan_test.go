@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
 )
@@ -145,4 +146,36 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// T7: a raw truncation becomes the Truncate step (modelled); T5: only text is cut.
+func TestTruncateImportAndChecks(t *testing.T) {
+	file := "debezium.source.connector.class=io.debezium.connector.postgresql.PostgresConnector\n" +
+		"debezium.source.table.include.list=public.orders\n" +
+		"debezium.source.column.truncate.to.20.chars=public.orders.notes,public.orders.x.*\n"
+	plan := PlanImport(file, Adopt(file))
+	steps, _ := plan.Spec["transforms"].([]any)
+	last, _ := steps[len(steps)-1].(map[string]any)
+	if last["type"] != "truncate" || last["columns"].([]any)[0].(map[string]any)["column"] != "notes" || len(plan.Warnings) != 1 {
+		t.Fatal(steps, plan.Warnings)
+	}
+	modelled := false
+	for _, k := range plan.Modelled {
+		modelled = modelled || k.Key == "debezium.source.column.truncate.to.20.chars"
+	}
+	if !modelled {
+		t.Fatal(plan.Modelled, plan.Forbidden)
+	}
+	if _, err := ParseSpec(plan.Spec); err != nil {
+		t.Fatal(err)
+	}
+	spec := domain.DefaultSpec()
+	spec.Transforms = []domain.Transform{{Type: "truncate", Truncate: []domain.Truncation{{Table: "public.orders", Column: "notes", Length: 5}, {Table: "public.orders", Column: "total", Length: 5}}}}
+	found := connectors.Discovery{Tables: []connectors.TableInfo{{Schema: "public", Name: "orders", Columns: []connectors.Column{{Name: "notes", Type: "text"}, {Name: "total", Type: "integer"}}}}}
+	if c := truncateChecks(found, spec, false); len(c) != 1 || c[0].Status != "warn" || !strings.Contains(c[0].Message, "total (integer)") {
+		t.Fatal(c)
+	}
+	if c := truncateChecks(found, spec, true); c[0].Status != "fail" || !c[0].Blocking {
+		t.Fatal(c)
+	}
 }
