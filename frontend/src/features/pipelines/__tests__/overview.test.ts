@@ -316,3 +316,20 @@ describe('shapeView', () => {
     expect(v?.problem).toContain('failed 3 times');
   });
 });
+
+describe('transformView with Keep deleted rows', () => {
+  it('shows the row and kept deletes on Debezium, though the spec has no unwrap', () => {
+    const { output } = transformView(fullSpec({ transforms: [{ type: 'soft_delete', id: 's' }] } as never));
+    expect(output.map((r) => r.title)).toContain('The row after the change');
+    expect(output.find((r) => r.icon === 'delete')).toMatchObject({ title: 'Deletes are kept', code: ['__deleted = true'] });
+  });
+  it('marks deleted rows with __op on Flink CDC, whatever the destination', () => {
+    const { output } = transformView(fullSpec({ transforms: [{ type: 'soft_delete', id: 's' }] } as never), { sinkType: 'starrocks' });
+    expect(output.find((r) => r.icon === 'delete')).toMatchObject({ title: 'Deleted rows are kept', code: ['__op = -D'] });
+  });
+  it('follows the destination option over the stored delete handling', () => {
+    const jdbc = { required: false, add_fields: [], delete_handling: [], delete_handling_from: { option: 'deletes', map: { delete: 'tombstone', ignore: 'drop' } } };
+    const { output } = transformView(fullSpec({ transforms: [{ type: 'unwrap', id: 'u', delete_handling: 'rewrite' }], sink: { options: { deletes: 'ignore' } } } as never), undefined, { unwrap: jdbc });
+    expect(output.find((r) => r.icon === 'delete')?.title).toBe('Deletes are dropped');
+  });
+});

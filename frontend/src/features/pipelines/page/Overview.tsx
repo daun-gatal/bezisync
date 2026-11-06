@@ -13,6 +13,7 @@ import { useMetrics, useShrinkCluster, useVersions, type Pipeline } from '@/lib/
 import { useProject } from '@/lib/session';
 import { isStale, statusOf, type FlinkStatus } from '@/lib/status';
 import { fullSpec } from '../spec';
+import { useShapeCtx } from '../transforms/Impact';
 import { Flow } from './Flow';
 import { flinkView, formatLatency, latest, protectionView, shapeView, transformView, type Fact, type Row, type RowIcon } from './overview';
 
@@ -240,6 +241,7 @@ function Rows({ rows, label }: { rows: Row[]; label: string }) {
 
 /** The deployed transforms as what consumers receive and the steps on the way, plus what a schema change broke. */
 function TransformsCard({ pipeline: p }: { pipeline: Pipeline }) {
+  const shapeCtx = useShapeCtx(p);
   const { project, can } = useProject();
   const versions = useVersions(project.id, p.id);
   const drift = ((p.status as Record<string, unknown>).transform_drift ?? []) as { code: string; fail: boolean; message: string }[];
@@ -271,7 +273,7 @@ function TransformsCard({ pipeline: p }: { pipeline: Pipeline }) {
         {(list) => {
           const deployed = list.find((v) => v.number === p.deployed_version);
           if (!deployed) return <Meta as="p">The deployed version is not available.</Meta>;
-          const { output, steps } = transformView(fullSpec(deployed.spec), p.engine === 'flink-cdc' ? { sinkType: p.sink?.type } : undefined);
+          const { output, steps } = transformView(fullSpec(deployed.spec), p.engine === 'flink-cdc' ? { sinkType: p.sink?.type } : undefined, shapeCtx);
           return (
             <>
               {drift.length ? (

@@ -74,24 +74,16 @@ export function streamingFrom(slot: { cpu: string; memory: string }): { cpu: str
   return { cpu: String(cpu / 1000), memory: mem % 1024 === 0 ? `${mem / 1024}Gi` : `${mem}Mi` };
 }
 
-/** Why a streaming slot size can't be used (mirrors decodeCluster); null when it can. */
+/** Why a streaming slot size can't be used (mirrors decodeCluster); null when it can. The first of `streamingErrors`. */
 export function streamingError(c: FlinkCluster): string | null {
-  const s = c.streaming_slot;
-  if (!s) return null;
-  const bigger = Number(s.cpu) > Number(c.slot.cpu) || mib(s.memory) > mib(c.slot.memory);
-  const same = Number(s.cpu) === Number(c.slot.cpu) && mib(s.memory) === mib(c.slot.memory);
-  if (bigger) return 'While streaming a reader needs no more than while copying.';
-  if (same) return 'The same size as while copying: there is nothing to shrink to.';
-  return null;
+  const e = streamingErrors(c);
+  return e.cpu ?? e.memory ?? null;
 }
 
-/** Why a manual shape can't hold the readers (mirrors decodeCluster); null when it can. */
+/** Why a manual shape can't hold the readers (mirrors decodeCluster); null when it can. The first of `manualErrors`. */
 export function manualError(c: FlinkCluster): string | null {
-  const tm = c.task_managers;
-  if (c.shape !== 'manual' || !tm) return null;
-  if (tm.count * tm.slots < c.parallelism) return `${tm.count} × ${tm.slots} slots can’t hold ${c.parallelism} readers: add TaskManagers or slots.`;
-  if (mib(tm.memory) / tm.slots < 512) return 'Each slot needs at least 512 MiB: add memory or remove slots.';
-  return null;
+  const e = manualErrors(c);
+  return e.taskManagers ?? e.memory ?? null;
 }
 
 /** How the server packs a cluster for the pipeline's runtime, asked once it stopped changing. */
@@ -113,4 +105,34 @@ export function usePackCluster(projectId: string, pipelineId: string, cluster: F
         }),
       ),
   });
+}
+
+/**
+ * `streamingError` per field: a bigger CPU or memory than while copying on that field, the same
+ * size (both equal) on both. A manual shape is never resized and its streaming fields aren't
+ * drawn (switching to Manual clears the streaming size), so it has none. Mirrors decodeCluster.
+ */
+export function streamingErrors(c: FlinkCluster): { cpu?: string; memory?: string } {
+  const s = c.streaming_slot;
+  if (!s || c.shape === 'manual') return {};
+  const bigger = 'While streaming a reader needs no more than while copying.';
+  const sameCpu = Number(s.cpu) === Number(c.slot.cpu);
+  const sameMem = mib(s.memory) === mib(c.slot.memory);
+  if (sameCpu && sameMem) {
+    const same = 'The same size as while copying: there is nothing to shrink to.';
+    return { cpu: same, memory: same };
+  }
+  const out: { cpu?: string; memory?: string } = {};
+  if (Number(s.cpu) > Number(c.slot.cpu)) out.cpu = bigger;
+  if (mib(s.memory) > mib(c.slot.memory)) out.memory = bigger;
+  return out;
+}
+
+/** `manualError` per field: too few slots on TaskManagers, too little memory a slot on TaskManager memory. Only a manual shape has them. */
+export function manualErrors(c: FlinkCluster): { taskManagers?: string; memory?: string } {
+  const tm = c.task_managers;
+  if (c.shape !== 'manual' || !tm) return {};
+  if (tm.count * tm.slots < c.parallelism) return { taskManagers: `${tm.count} × ${tm.slots} slots can’t hold ${c.parallelism} readers: add TaskManagers or slots.` };
+  if (mib(tm.memory) / tm.slots < 512) return { memory: 'Each slot needs at least 512 MiB: add memory or remove slots.' };
+  return {};
 }

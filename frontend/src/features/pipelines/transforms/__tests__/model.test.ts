@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, computedError, defaultArgs, formulaText, kindFits, FLINK_ONLY_STEPS, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, drawOrder, effectiveDeletes, sectionOf, shapeFields, summarizeShape, TYPE_TITLE, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, computedError, defaultArgs, formulaText, kindFits, FLINK_ONLY_STEPS, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -276,5 +276,115 @@ describe('computed', () => {
     expect(flinkColumns(table, spec, [s], 'p').at(-1)).toEqual({ name: 'label', from: { kind: 'computed', formula: 'Join(status, "-", id)' }, key: false });
     const after = { ...spec, transforms: [...spec.transforms, s] };
     expect(outputImpact(spec, after)).toEqual([{ kind: 'additive', text: 'New column label (public.orders).' }]);
+  });
+});
+
+describe('Keep deleted rows (soft_delete): the server\'s shape boundary, drawing, and what deletes become', () => {
+  const soft: TransformStep = { type: 'soft_delete', id: 'soft' };
+  const soft2: TransformStep = { type: 'soft_delete', id: 'soft2' };
+  const outbox: TransformStep = { type: 'outbox', id: 'obx' };
+  const ids = (steps: TransformStep[]) => steps.map((t) => t.id);
+  const errs = (steps: TransformStep[]) => [...stepErrors(steps).keys()];
+
+  it.each([
+    ['[soft_delete, filter]', [soft, filter], [1]],
+    ['[filter, soft_delete]', [filter, soft], []],
+    ['[soft_delete, rename]', [soft, rename], []],
+    ['[rename, soft_delete]', [rename, soft], [0]],
+    ['[unwrap, soft_delete, rename]', [unwrap, soft, rename], []],
+  ] as const)('stepErrors %s → %j (the first stage-1 step is the boundary, as on the server)', (_n, steps, want) => {
+    expect(errs([...steps])).toEqual(want);
+  });
+
+  it.each([
+    ['[] + soft_delete', [], soft, ['soft']],
+    ['[unwrap] + soft_delete', [unwrap], soft, ['shape', 'soft']],
+    ['[filter, unwrap, rename] + soft_delete', [filter, unwrap, rename], soft, ['keep', 'shape', 'soft', 'ren1']],
+    ['[soft_delete] + filter', [soft], filter, ['keep', 'soft']],
+    ['[outbox] + soft_delete', [outbox], soft, ['obx', 'soft']],
+    ['[unwrap, soft_delete] + rename', [unwrap, soft], rename, ['shape', 'soft', 'ren1']],
+  ] as const)('addStep %s', (_n, steps, step, want) => {
+    expect(ids(addStep([...steps], step))).toEqual(want);
+  });
+
+  it('draws every step type in exactly one section on each engine', () => {
+    for (const type of Object.keys(TYPE_TITLE) as TransformStep['type'][]) {
+      for (const flink of [false, true]) expect(['keep', 'shape', 'fields', 'other', 'hidden']).toContain(sectionOf({ type }, flink));
+    }
+    expect(sectionOf(soft, false)).toBe('shape');
+    expect(sectionOf(soft, true)).toBe('keep');
+    expect(sectionOf(unwrap, true)).toBe('hidden');
+  });
+
+  it('draws by section, the shape row before Keep deleted rows, without reordering the spec', () => {
+    expect(drawOrder([rename, soft, filter, unwrap], false)).toEqual([2, 3, 1, 0]);
+    expect(drawOrder([filter, unwrap, soft, rename], true)).toEqual([0, 2, 3]);
+  });
+
+  const jdbc = { required: false, add_fields: [], delete_handling: [], delete_handling_from: { option: 'deletes', map: { delete: 'tombstone', ignore: 'drop' } } };
+  const iceberg = { required: true, add_fields: ['op'], delete_handling: ['rewrite'], delete_handling_from: null };
+  it.each([
+    ['Flink CDC with Keep deleted rows', [soft], {}, { flink: true }, { mode: 'op_marked', by: 'keep_deleted' }],
+    ['Flink CDC without', [], {}, { flink: true }, { mode: 'flink_default', by: 'shape' }],
+    ['Debezium, Keep deleted rows wins over the shape', [{ ...unwrap, delete_handling: 'drop' }, soft], {}, {}, { mode: 'rewrite', by: 'keep_deleted', step: 2 }],
+    ['…and over the destination', [unwrap, soft], { deletes: 'delete' }, { unwrap: jdbc }, { mode: 'rewrite', by: 'keep_deleted', step: 2 }],
+    ['the destination option maps deletes', [unwrap], { deletes: 'delete' }, { unwrap: jdbc }, { mode: 'tombstone', by: 'destination' }],
+    ['…with its schema default when the option is left out', [unwrap], {}, { unwrap: jdbc, optionDefaults: { deletes: 'delete' } }, { mode: 'tombstone', by: 'destination' }],
+    ['the shape step decides otherwise', [{ ...unwrap, delete_handling: 'drop' }], {}, {}, { mode: 'drop', by: 'shape' }],
+    ['a required shape the compiler adds', [], {}, { unwrap: iceberg }, { mode: 'rewrite', by: 'shape' }],
+    ['the full change envelope', [], {}, {}, { mode: 'envelope', by: 'shape' }],
+  ] as const)('effectiveDeletes: %s', (_n, steps, options, ctx, want) => {
+    expect(effectiveDeletes([...steps], options, ctx as never)).toEqual(want);
+  });
+
+  it('reports the first of two Keep deleted rows steps', () => {
+    expect(effectiveDeletes([soft, soft2], {}).step).toBe(1);
+  });
+
+  it('describes the shape as it runs', () => {
+    expect(summarizeShape([unwrap], {})).toBe('Row after change · deletes kept with __deleted = true · adds __op');
+    expect(summarizeShape([{ ...unwrap, delete_handling: 'drop', add_fields: [] }, soft], {})).toBe('Row after change · deletes kept with __deleted = true (Keep deleted rows)');
+    expect(summarizeShape([soft], {})).toBe('Row after change · deletes kept with __deleted = true (Keep deleted rows) · adds __op, __source_ts_ms');
+    expect(summarizeShape([], {})).toBeNull();
+  });
+
+  it('says events become rows when Keep deleted rows is added to an envelope pipeline', () => {
+    const before = fullSpec({ transforms: [] } as never);
+    const after = fullSpec({ transforms: [soft] } as never);
+    const texts = outputImpact(before, after).map((i) => i.text);
+    expect(texts).toContain('Events become the row after the change instead of the full change envelope.');
+    expect(texts.some((t) => t.startsWith('Deleted rows now stay'))).toBe(true);
+    expect(texts.some((t) => t.startsWith('Deletes change'))).toBe(false);
+  });
+
+  it('gives one deletes line when Keep deleted rows joins an unwrap that drops deletes (regression guard)', () => {
+    const before = fullSpec({ transforms: [{ ...unwrap, delete_handling: 'drop' }] } as never);
+    const after = fullSpec({ transforms: [{ ...unwrap, delete_handling: 'drop' }, soft] } as never);
+    const texts = outputImpact(before, after).map((i) => i.text);
+    expect(texts.filter((t) => t.startsWith('Deleted rows now stay') || t.startsWith('Deletes change'))).toHaveLength(1);
+  });
+});
+
+describe('a new keep-events filter', () => {
+  it('has no match until it has rules (the server refuses match without rules)', () => {
+    const f = defaultStep('filter', []);
+    expect(f.match).toBeUndefined();
+    expect(f.operations?.length).toBeGreaterThan(0);
+    expect(stepErrors([f]).size).toBe(0);
+  });
+});
+
+describe('the shape as the compiler builds it', () => {
+  const jdbc = { required: false, add_fields: [], delete_handling: [], delete_handling_from: { option: 'deletes', map: { delete: 'tombstone', ignore: 'drop' } } };
+  it('says the destination decides deletes (JDBC deletes: delete)', () => {
+    expect(summarizeShape([{ type: 'unwrap', id: 'u', delete_handling: 'rewrite', add_fields: [] }], { deletes: 'delete' }, { unwrap: jdbc })).toBe(
+      'Row after change · deletes become tombstones (the destination’s Deletes setting)',
+    );
+  });
+  it('merges the fields a destination requires into the spec\'s unwrap (withSinkUnwrap)', () => {
+    const iceberg = { required: true, add_fields: ['op', 'source.ts_ms'], delete_handling: ['rewrite'], delete_handling_from: null };
+    expect(shapeFields([{ type: 'unwrap', id: 'u', add_fields: ['op'] }], { unwrap: iceberg })).toEqual(['op', 'source.ts_ms']);
+    expect(shapeFields([{ type: 'soft_delete', id: 's' }])).toEqual(['op', 'source.ts_ms']);
+    expect(shapeFields([], { unwrap: iceberg })).toEqual(['op', 'source.ts_ms']);
   });
 });

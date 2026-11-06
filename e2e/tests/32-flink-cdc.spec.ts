@@ -226,6 +226,16 @@ test('Flink CDC: an Expert sizes a custom cluster in Review, automatic then manu
     expect(saved.spec.policies.resources).toBe('custom');
     expect(saved.spec.flink_cdc.cluster).toEqual({ parallelism: 3, slot: { cpu: '0.5', memory: '768Mi' }, job_manager: { cpu: '0.5', memory: '1Gi' }, shape: 'auto' });
 
+    // A streaming size no smaller than the copy size: each field says so, and the badge names them.
+    await card.getByRole('switch', { name: /Shrink after the first copy/ }).click();
+    await choose(card.getByLabel('Streaming reader CPU', { exact: true }), '0.5 CPU');
+    await choose(card.getByLabel('Streaming reader memory', { exact: true }), '768 MiB');
+    await expect(card.locator('[data-review-field="streaming-cpu"]').getByText('nothing to shrink to')).toBeVisible();
+    await expect(card.locator('[data-review-field="streaming-memory"]').getByText('nothing to shrink to')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Not saved: fix Streaming reader CPU and 1 more' })).toBeVisible();
+    await card.getByRole('switch', { name: /Shrink after the first copy/ }).click();
+    await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+
     // Manual: seeded from the packed shape (rounded up to a choice), then two TaskManagers.
     await card.getByRole('button', { name: 'Manual' }).click();
     await card.getByLabel('TaskManagers', { exact: true }).fill('2');
@@ -255,6 +265,14 @@ test('Flink CDC: an Expert sizes a custom cluster in Review, automatic then manu
     await page.getByLabel('Property 1 name').fill('sink.catalog.properties.uri');
     await page.getByLabel('Property 1 value').fill('http://elsewhere');
     await expect(page.getByText('Not allowed')).toBeVisible();
+    // A refused option blocks the save in the browser: no request loop, the engine's own label.
+    await expect(page.getByRole('group', { name: /Advanced Flink CDC options/ })).toBeVisible();
+    const refusedSaves: string[] = [];
+    const onSave = (r: { method(): string; url(): string }) => { if (r.method() === 'PATCH' && r.url().endsWith(url)) refusedSaves.push(r.url()); };
+    page.on('request', onSave);
+    await page.waitForTimeout(4_000);
+    page.off('request', onSave);
+    expect(refusedSaves.length, 'a refused option kept saving').toBeLessThanOrEqual(1);
     await page.getByLabel('Property 1 name').fill('sink.table.properties.write.parquet.compression-codec');
     await page.getByLabel('Property 1 value').fill('zstd');
     await expect(page.getByText('Not verified')).toBeVisible();
@@ -336,5 +354,41 @@ test('Flink CDC: an editor adds a computed column and partitions the Iceberg tab
   expect(all.find((c) => c.code === 'iceberg_partition_column')?.status).toBe('pass');
   expect(all.find((c) => c.code === 'transform_computed_input')).toBeUndefined();
   await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+  await api.send('DELETE', url);
+});
+
+test('Flink CDC: Keep deleted rows sits under Keep rows, and a filter goes before it', async ({ page }) => {
+  test.setTimeout(240_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('flinksd');
+  const { password, ...pg } = SOURCE_PG;
+  const { secret_access_key, ...iceberg } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
+    spec: { source: { tables: { include: ['shop.orders'] } }, snapshot: { mode: 'no_data' }, transforms: [] },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+  await expect(page.getByRole('heading', { name: 'Which rows and columns reach each table?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Keep deleted rows/ }).click();
+  await expect(page.getByRole('region', { name: 'Step 1: Keep deleted rows' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await expect(page.getByRole('button', { name: /^Keep deleted rows/ })).toContainText('Already added: see Keep rows.');
+  await page.getByRole('button', { name: /^Keep only some rows/ }).click();
+  // The filter runs first: the server refuses a filter after the event shape.
+  await expect(page.getByRole('region', { name: 'Step 1: Keep only some rows' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Step 2: Keep deleted rows' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  const saved = await api.get<{ spec: { transforms: { type: string }[] } }>(url);
+  expect(saved.spec.transforms.map((t) => t.type)).toEqual(['filter', 'soft_delete']);
   await api.send('DELETE', url);
 });

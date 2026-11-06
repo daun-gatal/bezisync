@@ -13,10 +13,8 @@ import {
   SLOT_MEMORIES,
   TM_CPUS,
   TM_MEMORIES,
-  manualError,
   memoryLabel,
   mib,
-  streamingError,
   streamingFrom,
   type PackedCluster,
 } from '@/lib/cluster';
@@ -46,6 +44,7 @@ export function FlinkClusterEditor({
   packing,
   readersLocked,
   rows,
+  errors,
 }: {
   value: FlinkCluster;
   onChange: (c: FlinkCluster) => void;
@@ -56,6 +55,8 @@ export function FlinkClusterEditor({
   readersLocked: boolean;
   /** Rows of the selected tables, for the copy time (null when unknown). */
   rows: number | null;
+  /** Each field's problem, from the Review step's problem list (streamingErrors, manualErrors). */
+  errors: { streamingCpu?: string; streamingMemory?: string; taskManagers?: string; tmMemory?: string };
 }) {
   const set = (patch: Partial<FlinkCluster>) => onChange({ ...value, ...patch });
   const manual = value.shape === 'manual';
@@ -77,8 +78,7 @@ export function FlinkClusterEditor({
         memory: TM_MEMORIES.find((m) => mib(m) >= mib(packed?.task_manager_memory ?? '2Gi')) ?? TM_MEMORIES.at(-1)!,
       },
     });
-  const shapeError = manualError(value);
-  const shrinkError = streamingError(value);
+  const anyError = Boolean(errors.streamingCpu || errors.streamingMemory || errors.taskManagers || errors.tmMemory);
   const stream = value.streaming_slot;
   // A streaming size no bigger than the copy one: the lists stop at the copy size.
   const streamCpus = SLOT_CPUS.filter((c) => Number(c) <= Number(value.slot.cpu));
@@ -114,12 +114,16 @@ export function FlinkClusterEditor({
       />
       {stream && !manual ? (
         <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,200px),1fr))] gap-4">
-          <Field label="Streaming reader CPU" error={shrinkError}>
-            {(id) => <Select id={id} value={stream.cpu} onChange={(cpu) => set({ streaming_slot: { ...stream, cpu } })} options={cpuOptions(streamCpus)} />}
-          </Field>
-          <Field label="Streaming reader memory">
-            {(id) => <Select id={id} value={stream.memory} onChange={(memory) => set({ streaming_slot: { ...stream, memory } })} options={memoryOptions(streamMemories)} />}
-          </Field>
+          <div data-review-field="streaming-cpu" className="min-w-0">
+            <Field label="Streaming reader CPU" error={errors.streamingCpu}>
+              {(id) => <Select id={id} value={stream.cpu} onChange={(cpu) => set({ streaming_slot: { ...stream, cpu } })} options={cpuOptions(streamCpus)} />}
+            </Field>
+          </div>
+          <div data-review-field="streaming-memory" className="min-w-0">
+            <Field label="Streaming reader memory" error={errors.streamingMemory}>
+              {(id) => <Select id={id} value={stream.memory} onChange={(memory) => set({ streaming_slot: { ...stream, memory } })} options={memoryOptions(streamMemories)} />}
+            </Field>
+          </div>
         </div>
       ) : null}
       <Field label="Shape" group hint={manual ? 'TaskManagers as you set them.' : 'BeziSync packs the readers into TaskManagers that fit the runtime’s nodes when it deploys, and keeps that shape until the next deploy.'}>
@@ -137,21 +141,25 @@ export function FlinkClusterEditor({
       </Field>
       {manual && tm ? (
         <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,200px),1fr))] gap-4">
-          <Field label="TaskManagers" error={shapeError}>
-            {(id) => <Stepper id={id} value={tm.count} min={1} max={MAX_TASK_MANAGERS} onChange={(count) => set({ task_managers: { ...tm, count } })} />}
-          </Field>
+          <div data-review-field="task-managers" className="min-w-0">
+            <Field label="TaskManagers" error={errors.taskManagers}>
+              {(id) => <Stepper id={id} value={tm.count} min={1} max={MAX_TASK_MANAGERS} onChange={(count) => set({ task_managers: { ...tm, count } })} />}
+            </Field>
+          </div>
           <Field label="Slots per TaskManager">
             {(id) => <Stepper id={id} value={tm.slots} min={1} max={MAX_SLOTS} onChange={(slots) => set({ task_managers: { ...tm, slots } })} />}
           </Field>
           <Field label="TaskManager CPU">
             {(id) => <Select id={id} value={tm.cpu} onChange={(cpu) => set({ task_managers: { ...tm, cpu } })} options={cpuOptions(TM_CPUS)} />}
           </Field>
-          <Field label="TaskManager memory">
-            {(id) => <Select id={id} value={tm.memory} onChange={(memory) => set({ task_managers: { ...tm, memory } })} options={memoryOptions(TM_MEMORIES)} />}
-          </Field>
+          <div data-review-field="tm-memory" className="min-w-0">
+            <Field label="TaskManager memory" error={errors.tmMemory}>
+              {(id) => <Select id={id} value={tm.memory} onChange={(memory) => set({ task_managers: { ...tm, memory } })} options={memoryOptions(TM_MEMORIES)} />}
+            </Field>
+          </div>
         </div>
       ) : null}
-      {packed && !shapeError && !shrinkError ? (
+      {packed && !anyError ? (
         <>
           <ClusterDiagram title={manual ? 'Your TaskManagers' : packed.streaming ? 'During the first copy' : 'How it would be packed now'} shape={packed} />
           {manual ? null : <Meta className="text-sm text-ink-2">{packed.why}</Meta>}

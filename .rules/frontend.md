@@ -116,7 +116,9 @@ src/
   `ImpactPill`; `settingError`/`canonicalSetting` mirror `engine.CheckSetting`/`CanonicalSetting`.
   `RawProperties` edits raw properties as key/value rows and shows the server's verdict per key
   (`settings:classify`, `useClassify`), never its own rules. Maps the server stores (`advanced`,
-  `tuning`) are compared in JSONB order (`jsonbSorted`), or autosave never settles. Review's Engine
+  `tuning`) are compared in JSONB order (`jsonbSorted`), or autosave never settles. Autosave never
+  retries a failed save by itself (`wizard/review.ts:useAutosave`): it waits for a change, Try again
+  or leaving the step. Review's Engine
   settings card (Expert) holds both: `tuningSettings` picks the pipeline's settings (Flink settings
   stay in `FlinkRunSettings`), and a raw key that is a setting converts with "Use the typed setting".
   `SettingsChangeList` (`components/SettingsChange.tsx`) shows preflight's or the diff's
@@ -180,8 +182,9 @@ src/
   the ones before it are done (`stepState`); each step registers a `StepHandle` (`dirty`, `commit`)
   so leaving it by any route saves it, and Review saves its settings as they change. The Transform step
   (`features/pipelines/transforms/`) groups steps by the stage they run in (value formats, keep
-  events, event shape, field changes, message key); `model.ts` holds the pure rules (stage-aware
-  `addStep`/`moveStep`, `stepErrors` mirroring the backend decoder, `fieldsBefore` for pickers,
+  events, event shape, field changes, other steps, message key), drawn by `sectionOf`/`drawOrder` and ordered by
+  `shapeIndex` (the server's boundary: the first unwrap or Keep deleted rows); `model.ts` holds the
+  pure rules (stage-aware `addStep`/`moveStep`, `effectiveDeletes` for what deletes really become, `stepErrors` mirroring the backend decoder, `fieldsBefore` for pickers,
   `outputImpact` for Review and approvals), each type has one editor in `editors.tsx`, and
   `PreviewPanel` calls `…/transforms:preview` with the draft spec and the discovered columns
   (pure on the server). Field names are pickers fed by discovery; only new names and rule values
@@ -217,4 +220,6 @@ src/
   `TimeSeries` hides uPlot's legend and shows a readout (latest or hovered values, peak); its pure
   parts live in `lib/series.ts` because importing uPlot needs a browser.
 - Guided vs Expert mode (`useProject().expert`): Guided uses plain language with the Debezium term
-  as a secondary label; Expert reveals raw properties. Both edit the same spec.
+  as a secondary label; Expert reveals raw properties. Both edit the same spec. Guided never shows
+  the raw editor, but a value that blocks saving is never hidden: Review lists it under "Settings
+  that block saving" with Remove. An error names its field (`wizard/review.ts:reviewProblems`).

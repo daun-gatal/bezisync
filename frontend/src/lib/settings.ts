@@ -133,3 +133,31 @@ export function useClassify(projectId: string, pipelineId: string, rows: { key: 
   for (const v of q.data?.items ?? []) byKey[v.key] = v;
   return byKey;
 }
+
+/**
+ * Raw property rows that block saving, by trimmed key, with the reason: a key set twice, or one
+ * the server refuses (any class but `allowed`) that is new or whose value changed against the
+ * stored spec. A refused key the stored spec already holds with the same value still saves, as
+ * the server allows (mirrors services.RefuseNewAdvanced, which compares with the current
+ * version). A key with no verdict yet does not block: the server refuses it if it must.
+ */
+export function rawErrors(
+  rows: { key: string; value: string }[],
+  verdicts: Record<string, Pick<Schemas['ClassifyRead'], 'class' | 'message'>>,
+  stored: Record<string, string>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+    if (seen.has(key)) {
+      out.set(key, 'A property is set twice: remove one.');
+      continue;
+    }
+    seen.add(key);
+    const v = verdicts[key];
+    if (v && v.class !== 'allowed' && stored[key] !== row.value) out.set(key, v.message);
+  }
+  return out;
+}

@@ -128,7 +128,8 @@ export function defaultStep(type: TransformType, steps: TransformStep[]): Transf
     case 'unwrap':
       return { type, id, delete_handling: 'rewrite', add_fields: ['op', 'source.ts_ms'], condition: null };
     case 'filter':
-      return { type, id, operations: ['insert', 'update', 'delete', 'snapshot'], match: 'all', rules: [] };
+      // No `match` until there are rules: the server refuses match without rules (domain decodeFilter).
+      return { type, id, operations: ['insert', 'update', 'delete', 'snapshot'], rules: [] };
     case 'rename':
       return { type, id, renames: [{ from: '', to: '' }] };
     case 'add_field':
@@ -196,13 +197,19 @@ export function routeError(steps: TransformStep[], step: TransformStep, tables: 
   return null;
 }
 
-/** Inserts a step at the end of its stage, so the chain stays valid. */
+/**
+ * Inserts a step where the chain stays valid: a keep-events filter just before the event shape
+ * (`shapeIndex`), Keep deleted rows just after the unwrap (or at the end when there is none, so
+ * the unwrap the compiler adds there lands where it always did), anything else at the end.
+ */
 export function addStep(steps: TransformStep[], step: TransformStep): TransformStep[] {
-  const stage = stageOf(step);
   let at = steps.length;
-  if (stage === 0) {
-    const shape = steps.findIndex((t) => t.type === 'unwrap');
+  if (stageOf(step) === 0) {
+    const shape = shapeIndex(steps);
     if (shape >= 0) at = shape;
+  } else if (step.type === 'soft_delete') {
+    const unwrap = steps.findIndex((t) => t.type === 'unwrap');
+    if (unwrap >= 0) at = unwrap + 1;
   }
   return [...steps.slice(0, at), step, ...steps.slice(at)];
 }
@@ -226,7 +233,8 @@ export function canMove(steps: TransformStep[], index: number, delta: -1 | 1): b
 /** Problems that make a step unsaveable (mirrors the backend decoder), keyed by step index. */
 export function stepErrors(steps: TransformStep[], tableNames: string[] = []): Map<number, string> {
   const out = new Map<number, string>();
-  const shapeAt = steps.findIndex((t) => t.type === 'unwrap');
+  // The server's boundary: the first unwrap or Keep deleted rows.
+  const shapeAt = shapeIndex(steps);
   steps.forEach((t, i) => {
     const stage = stageOf(t);
     if (stage === 2 && (shapeAt < 0 || shapeAt > i)) out.set(i, 'Needs the "Row after change" event shape before it.');
@@ -404,7 +412,7 @@ export function summarize(t: TransformStep): string {
     case 'outbox':
       return 'Outbox event router';
     case 'soft_delete':
-      return 'A deleted row stays, marked deleted (__deleted on Debezium, __op on Flink CDC), instead of being removed';
+      return 'A deleted row stays, marked deleted (__deleted on Debezium, __op on Flink CDC), instead of being removed: it keeps rows, it is not a filter';
     case 'truncate':
       return (t.columns ?? []).map((c) => `${c.table}.${c.column || '…'} to ${c.length}`).join(', ') || 'No columns yet';
     case 'route':
@@ -431,19 +439,28 @@ export interface Impact {
 
 const stepKey = (t: TransformStep, i: number) => t.id ?? `#${i}:${t.type}`;
 
-/** What changes for consumers between the deployed spec and a new one. */
-export function outputImpact(before: FullSpec, after: FullSpec): Impact[] {
+/**
+ * What changes for consumers between the deployed spec and a new one, as the compiler runs them
+ * (`effectiveDeletes`): Keep deleted rows on a full-envelope pipeline also turns events into rows.
+ */
+export function outputImpact(before: FullSpec, after: FullSpec, ctx: ShapeCtx = {}): Impact[] {
   const out: Impact[] = [];
   const oldSteps = new Map(before.transforms.map((t, i) => [stepKey(t, i), t]));
   const newSteps = new Map(after.transforms.map((t, i) => [stepKey(t, i), t]));
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  const oldShape = before.transforms.find((t) => t.type === 'unwrap');
-  const newShape = after.transforms.find((t) => t.type === 'unwrap');
-  if (Boolean(oldShape) !== Boolean(newShape)) {
-    out.push({ kind: 'breaking', text: newShape ? 'Events become the row after the change instead of the full change envelope.' : 'Events become the full change envelope (before/after/source) instead of the row.' });
-  } else if (oldShape && newShape) {
-    if (oldShape.delete_handling !== newShape.delete_handling) out.push({ kind: 'breaking', text: `Deletes change: ${summarize(newShape).split(' · ')[1]}.` });
-    if (!same(oldShape.add_fields, newShape.add_fields)) out.push({ kind: 'breaking', text: 'The metadata fields added to every event change.' });
+  const oldDeletes = effectiveDeletes(before.transforms, before.sink.options, ctx);
+  const newDeletes = effectiveDeletes(after.transforms, after.sink.options, ctx);
+  const oldRows = oldDeletes.mode !== 'envelope';
+  const newRows = newDeletes.mode !== 'envelope';
+  const softChanged = before.transforms.some((t) => t.type === 'soft_delete') !== after.transforms.some((t) => t.type === 'soft_delete');
+  if (oldRows !== newRows) {
+    out.push({ kind: 'breaking', text: newRows ? 'Events become the row after the change instead of the full change envelope.' : 'Events become the full change envelope (before/after/source) instead of the row.' });
+  } else if (oldRows && newRows && !ctx.flink) {
+    // Adding or removing Keep deleted rows has its own line below.
+    if (oldDeletes.mode !== newDeletes.mode && !softChanged) out.push({ kind: 'breaking', text: `Deletes change: ${DELETE_TEXT[newDeletes.mode] ?? newDeletes.mode}.` });
+    const oldShape = before.transforms.find((t) => t.type === 'unwrap');
+    const newShape = after.transforms.find((t) => t.type === 'unwrap');
+    if (oldShape && newShape && !same(oldShape.add_fields, newShape.add_fields)) out.push({ kind: 'breaking', text: 'The metadata fields added to every event change.' });
   }
   for (const [k, t] of newSteps) {
     if (t.type === 'unwrap') continue;
@@ -625,4 +642,113 @@ export function computedError(t: TransformStep): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Where the event shape starts for ordering: the first stage-1 step, `unwrap` or `soft_delete`
+ * (mirrors `unwrapAt` in domain.validateTransforms). Keep-events filters must come before it and
+ * field changes after it. -1 when there is none.
+ */
+export function shapeIndex(steps: TransformStep[]): number {
+  return steps.findIndex((t) => stageOf(t) === 1);
+}
+
+/** Where the Transform step draws a step. On Flink CDC the event shape isn't drawn (rows are always written). */
+export type Section = 'keep' | 'shape' | 'fields' | 'other' | 'hidden';
+
+export function sectionOf(t: TransformStep, flink: boolean): Section {
+  if (t.type === 'unwrap') return flink ? 'hidden' : 'shape';
+  if (t.type === 'soft_delete') return flink ? 'keep' : 'shape';
+  const stage = stageOf(t);
+  return stage === 0 ? 'keep' : stage === 2 ? 'fields' : 'other';
+}
+
+const SECTION_ORDER: Section[] = ['keep', 'shape', 'fields', 'other'];
+
+/**
+ * The chain indexes in the order the Transform step draws them: by section (keep, shape, field
+ * changes, other), in chain order inside each, the shape row before Keep deleted rows. A step's
+ * number on screen is its position here; hidden steps aren't drawn. Nothing reorders the spec.
+ */
+export function drawOrder(steps: TransformStep[], flink: boolean): number[] {
+  const rank = (t: TransformStep) => (t.type === 'unwrap' ? 0 : t.type === 'soft_delete' ? 1 : 0);
+  return SECTION_ORDER.flatMap((section) =>
+    steps
+      .map((t, i) => [t, i] as const)
+      .filter(([t]) => sectionOf(t, flink) === section)
+      .sort(([a, i], [b, j]) => (section === 'shape' ? rank(a) - rank(b) : 0) || i - j)
+      .map(([, i]) => i),
+  );
+}
+
+/** What the destination says about the event shape (its connector type's `unwrap`), and its option defaults. */
+export interface ShapeCtx {
+  flink?: boolean;
+  unwrap?: { required: boolean; add_fields: string[]; delete_handling: string[]; delete_handling_from: { option: string; map: Record<string, string> } | null } | null;
+  /** The destination options' schema defaults: the compiler reads options with them filled in. */
+  optionDefaults?: Record<string, unknown>;
+}
+
+export type DeleteMode = 'rewrite' | 'tombstone' | 'drop' | 'envelope' | 'op_marked' | 'flink_default';
+
+export interface Deletes {
+  mode: DeleteMode;
+  /** What decides it: Keep deleted rows, the destination's Deletes option, or the shape step. */
+  by: 'keep_deleted' | 'destination' | 'shape';
+  /** The drawn number of the first Keep deleted rows step, when it decides. */
+  step?: number;
+}
+
+/**
+ * What a delete really becomes once compiled: mirrors compiler.withSinkUnwrap then
+ * withSoftDelete (compiler.go). Keep deleted rows wins over the destination's Deletes option,
+ * which wins over the shape step's own choice; the destination's mapping applies only to an
+ * unwrap the spec has (one the compiler adds takes the destination's first allowed mode).
+ */
+export function effectiveDeletes(steps: TransformStep[], options: Record<string, unknown> | undefined, ctx: ShapeCtx = {}): Deletes {
+  const soft = steps.findIndex((t) => t.type === 'soft_delete');
+  if (ctx.flink) return soft >= 0 ? { mode: 'op_marked', by: 'keep_deleted' } : { mode: 'flink_default', by: 'shape' };
+  if (soft >= 0) return { mode: 'rewrite', by: 'keep_deleted', step: drawOrder(steps, false).indexOf(soft) + 1 };
+  const unwrap = steps.find((t) => t.type === 'unwrap');
+  const rule = ctx.unwrap;
+  if (unwrap) {
+    const from = rule?.delete_handling_from;
+    if (from) {
+      const value = { ...(ctx.optionDefaults ?? {}), ...(options ?? {}) }[from.option];
+      const mapped = value === undefined || value === null ? undefined : from.map[String(value)];
+      if (mapped) return { mode: mapped as DeleteMode, by: 'destination' };
+    }
+    return { mode: unwrap.delete_handling ?? 'rewrite', by: 'shape' };
+  }
+  if (rule?.required) return { mode: (rule.delete_handling[0] as DeleteMode | undefined) ?? 'rewrite', by: 'shape' };
+  return { mode: 'envelope', by: 'shape' };
+}
+
+/**
+ * The metadata fields the compiled row shape adds: the spec's unwrap with the destination's
+ * required ones merged in (withSinkUnwrap), the operation and source time on an unwrap the
+ * compiler adds for Keep deleted rows (withSoftDelete), else the destination's own.
+ */
+export function shapeFields(steps: TransformStep[], ctx: ShapeCtx = {}): string[] {
+  const unwrap = steps.find((t) => t.type === 'unwrap');
+  const required = ctx.unwrap?.add_fields ?? [];
+  if (unwrap) return [...(unwrap.add_fields ?? []), ...required.filter((f) => !(unwrap.add_fields ?? []).includes(f))];
+  if (steps.some((t) => t.type === 'soft_delete')) return ['op', 'source.ts_ms'];
+  return required;
+}
+
+const DELETE_TEXT: Partial<Record<DeleteMode, string>> = { rewrite: 'deletes kept with __deleted = true', tombstone: 'deletes become tombstones', drop: 'deletes dropped' };
+
+/**
+ * The event shape in one line, as it runs: "Row after change · deletes kept with __deleted =
+ * true (Keep deleted rows) · adds __op", or null for the full change envelope (and on Flink CDC).
+ */
+export function summarizeShape(steps: TransformStep[], options: Record<string, unknown> | undefined, ctx: ShapeCtx = {}): string | null {
+  const d = effectiveDeletes(steps, options, ctx);
+  const text = DELETE_TEXT[d.mode];
+  if (!text) return null;
+  const fields = shapeFields(steps, ctx);
+  const why = d.by === 'keep_deleted' ? ' (Keep deleted rows)' : d.by === 'destination' ? ' (the destination’s Deletes setting)' : '';
+  const meta = fields.map(metadataField);
+  return `Row after change · ${text}${why}${meta.length ? ` · adds ${meta.join(', ')}` : ''}`;
 }

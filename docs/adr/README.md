@@ -38,3 +38,4 @@ The other options, and why they lost.
 
 | ADR | Title | Status |
 |-----|-------|--------|
+| [0001](0001-wizard-truth.md) | Wizard truth: Keep deleted rows, the Review autosave loop, and a badge that names the field | Accepted |

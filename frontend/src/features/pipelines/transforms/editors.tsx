@@ -37,6 +37,7 @@ import {
   type TableInfo,
 } from './model';
 import type { FullSpec } from '../spec';
+import { effectiveDeletes, type ShapeCtx } from './model';
 
 export interface EditorContext {
   sourceType: string;
@@ -50,6 +51,8 @@ export interface EditorContext {
   expert: boolean;
   /** The pipeline runs on Flink CDC (rows written into tables, Flink CDC's operations). */
   flink: boolean;
+  /** What the destination says about the event shape, for what deletes really become. */
+  shape?: ShapeCtx;
 }
 
 /** Labelled row: the label column keeps editors aligned. */
@@ -148,6 +151,8 @@ export function ShapeEditor({ step, ctx, onChange }: { step: TransformStep; ctx:
   const fields = step.add_fields ?? [];
   const required = ctx.sink.unwrap?.add_fields ?? [];
   const allowedDeletes = ctx.sink.unwrap?.delete_handling.length ? ctx.sink.unwrap.delete_handling : ['rewrite', 'tombstone', 'drop'];
+  // What a delete really becomes: Keep deleted rows or the destination may decide it.
+  const deletes = effectiveDeletes(ctx.steps, ctx.spec.sink.options, ctx.shape ?? { unwrap: ctx.sink.unwrap ?? null });
   const meta = METADATA.filter((m) => !m.postgresOnly || ctx.sourceType === 'postgresql').filter(
     (m) => m.value !== 'source.schema' || ['postgresql', 'sqlserver', 'oracle', 'cockroachdb'].includes(ctx.sourceType),
   );
@@ -157,16 +162,18 @@ export function ShapeEditor({ step, ctx, onChange }: { step: TransformStep; ctx:
         <div className="w-full max-w-md">
           <Select
             id={`deletes-${step.id}`}
-            disabled={Boolean(ctx.sink.unwrap?.delete_handling_from)}
-            value={step.delete_handling ?? 'rewrite'}
+            disabled={Boolean(ctx.sink.unwrap?.delete_handling_from) || deletes.by === 'keep_deleted'}
+            value={deletes.by === 'shape' ? (step.delete_handling ?? 'rewrite') : deletes.mode}
             onChange={(v) => onChange({ ...step, delete_handling: v as TransformStep['delete_handling'] })}
             options={[
               { value: 'rewrite', label: 'Keep as an event with __deleted = true' },
               { value: 'tombstone', label: 'Tombstone', description: 'An empty value; for compacted topics' },
               { value: 'drop', label: 'Drop delete events' },
-            ].filter((o) => allowedDeletes.includes(o.value))}
+            ].filter((o) => allowedDeletes.includes(o.value) || o.value === deletes.mode)}
           />
-          {ctx.sink.unwrap?.delete_handling_from ? (
+          {deletes.by === 'keep_deleted' ? (
+            <span className="mt-1 block text-xs text-muted">Set by Keep deleted rows (step {deletes.step}). Remove that step to choose.</span>
+          ) : ctx.sink.unwrap?.delete_handling_from ? (
             <span className="mt-1 block text-xs text-muted">Set by the destination’s Deletes setting (Destination step).</span>
           ) : null}
         </div>
@@ -462,7 +469,12 @@ export function FilterEditor({ step, ctx, onChange }: { step: TransformStep; ctx
                 step={step}
                 ctx={ctx}
                 onChange={(next) => onChange({ ...step, rules: rules.map((x, j) => (j === i ? next : x)) })}
-                onRemove={() => onChange({ ...step, rules: rules.filter((_, j) => j !== i), ...(rules.length <= 2 ? { match: 'all' } : {}) })}
+                onRemove={() => {
+                  const next = rules.filter((_, j) => j !== i);
+                  // One rule needs no all/any; none takes no match at all (the server refuses match without rules).
+                  const { match: _match, ...rest } = step;
+                  onChange(next.length === 0 ? { ...rest, rules: next } : { ...step, rules: next, ...(next.length < 2 ? { match: 'all' } : {}) });
+                }}
               />
             ))}
             <div>
@@ -959,5 +971,16 @@ export function ComputedEditor({ step, ctx, onChange }: { step: TransformStep; c
       ) : null}
       {table && !columns(0).length ? <span className="text-xs text-muted">{step.table} has no column {f.title.toLowerCase()} can read.</span> : null}
     </div>
+  );
+}
+
+/** Keep deleted rows: what a delete becomes on this engine. It keeps rows; it is not a filter. */
+export function SoftDeleteEditor({ ctx }: { ctx: EditorContext }) {
+  return (
+    <p className="m-0 text-sm text-ink-2">
+      {ctx.flink
+        ? 'Deletes arrive as rows with __op = -D; other rows carry their change type (+I, +U). The destination keeps every row: this step keeps rows, it doesn’t filter them.'
+        : 'Deletes arrive as rows with __deleted = true, and no tombstone follows them. Consumers that remove rows on a delete now keep them.'}
+    </p>
   );
 }

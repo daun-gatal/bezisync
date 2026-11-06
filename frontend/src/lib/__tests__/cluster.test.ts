@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { clusterSummary, readersPerTaskManager } from '@/components/ClusterDiagram';
 import { copyMinutes } from '@/features/pipelines/wizard/FlinkClusterEditor';
-import { clusterFromPreset, JM_CPUS, JM_MEMORIES, manualError, memoryLabel, SLOT_CPUS, SLOT_MEMORIES, streamingError, streamingFrom, TM_MEMORIES } from '../cluster';
+import { clusterFromPreset, JM_CPUS, JM_MEMORIES, manualError, manualErrors, memoryLabel, SLOT_CPUS, SLOT_MEMORIES, streamingError, streamingErrors, streamingFrom, TM_MEMORIES } from '../cluster';
 
 const small = { jobmanager_cpu: '500m', jobmanager_memory: '1Gi', taskmanagers: 1, taskmanager_cpu: '1', taskmanager_memory: '2Gi', parallelism: 2, total_memory_mib: 3072 };
 const large = { jobmanager_cpu: '1', jobmanager_memory: '1536Mi', taskmanagers: 4, taskmanager_cpu: '1', taskmanager_memory: '2Gi', parallelism: 8, total_memory_mib: 9728 };
@@ -64,5 +64,28 @@ describe('shrinking after the copy', () => {
     expect(streamingError({ ...c, streaming_slot: { cpu: '1', memory: '2Gi' } })).toContain('nothing to shrink to');
     expect(streamingError({ ...c, streaming_slot: { cpu: '2', memory: '1Gi' } })).toContain('no more than');
     expect(streamingError(c)).toBeNull();
+  });
+});
+
+describe('cluster errors per field', () => {
+  const c = { parallelism: 2, slot: { cpu: '1', memory: '2Gi' }, job_manager: { cpu: '0.5', memory: '1Gi' }, shape: 'auto' as const };
+  it('puts a streaming size problem on the field it is about', () => {
+    expect(streamingErrors(c)).toEqual({});
+    expect(streamingErrors({ ...c, streaming_slot: { cpu: '0.5', memory: '1Gi' } })).toEqual({});
+    expect(streamingErrors({ ...c, streaming_slot: { cpu: '2', memory: '1Gi' } })).toEqual({ cpu: expect.stringContaining('no more than') });
+    expect(streamingErrors({ ...c, streaming_slot: { cpu: '0.5', memory: '4Gi' } })).toEqual({ memory: expect.stringContaining('no more than') });
+    expect(streamingErrors({ ...c, streaming_slot: { cpu: '1', memory: '2Gi' } })).toEqual({ cpu: expect.stringContaining('nothing to shrink'), memory: expect.stringContaining('nothing to shrink') });
+    // Equal memory alone is a smaller size: no error (the server agrees).
+    expect(streamingErrors({ ...c, streaming_slot: { cpu: '0.5', memory: '2Gi' } })).toEqual({});
+  });
+  it('has no streaming problem on a manual shape (never resized, fields not drawn)', () => {
+    expect(streamingErrors({ ...c, shape: 'manual', streaming_slot: { cpu: '2', memory: '4Gi' }, task_managers: { count: 1, slots: 2, cpu: '2', memory: '4Gi' } })).toEqual({});
+  });
+  it('puts a manual shape problem on TaskManagers or TaskManager memory', () => {
+    const m = { ...c, shape: 'manual' as const };
+    expect(manualErrors({ ...m, task_managers: { count: 1, slots: 1, cpu: '1', memory: '2Gi' } })).toEqual({ taskManagers: expect.stringContaining('can’t hold 2 readers') });
+    expect(manualErrors({ ...m, task_managers: { count: 1, slots: 8, cpu: '2', memory: '2Gi' } })).toEqual({ memory: expect.stringContaining('512 MiB') });
+    expect(manualErrors({ ...m, task_managers: { count: 1, slots: 2, cpu: '2', memory: '2Gi' } })).toEqual({});
+    expect(manualErrors(c)).toEqual({});
   });
 });

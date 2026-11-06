@@ -5,6 +5,7 @@ import { Empty, InlineError, Notice } from '@/components/ui/feedback';
 import { Check, Field, Input, RadioCards } from '@/components/ui/form';
 import { Card, QueryState } from '@/components/ui/layout';
 import { Select } from '@/components/ui/select';
+import { Meta } from '@/components/ui/text';
 import { CheckList, reportBadge } from '@/components/CheckList';
 import { ConnectionDialog } from '@/features/connections/ConnectionDialog';
 import { allows, usePolicies } from '@/lib/policies';
@@ -261,6 +262,10 @@ export function SinkStep({
       {current && optionsSchema ? (
         <Card title={`${TYPE_LABEL[current.type] ?? current.type} settings for this pipeline`}>
           <SchemaForm idPrefix="sink-opt" schema={optionsSchema} values={options} onChange={setOptions} expert={expert} />
+          {/* Keep deleted rows (Transform) decides deletes over this destination's own Deletes option. */}
+          {caps.unwrap?.delete_handling_from && !flink && spec.transforms.some((t) => t.type === 'soft_delete') ? (
+            <Meta className="mt-3 block">Deletes: kept, marked deleted. Set by Keep deleted rows in Transform.</Meta>
+          ) : null}
         </Card>
       ) : null}
       {partitioned ? (
