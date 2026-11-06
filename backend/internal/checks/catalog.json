@@ -2240,6 +2240,30 @@
    ]
   },
   {
+   "code": "transform_route_idle",
+   "section": "Deploy",
+   "titles": [
+    "Routes"
+   ],
+   "whys": [
+    "A route that matches no captured table does nothing (a table added later that matches is routed)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "transform_route_merge",
+   "section": "Deploy",
+   "titles": [
+    "Routes"
+   ],
+   "whys": [
+    "Tables a route sends to one destination must have the same key and columns, or the destination can't hold both."
+   ],
+   "fixes": [
+    "Route only tables of the same shape together, or give each its own destination."
+   ]
+  },
+  {
    "code": "transform_field_conflict",
    "fixes": [
     "Pick a field name the events do not have yet, under Transform."

@@ -93,6 +93,14 @@ type Transform struct {
 	Class      string            `json:"class"`      // custom
 	Properties map[string]string `json:"properties"` // custom
 	Truncate   []Truncation      `json:"columns"`    // truncate
+	Routes     []Route           `json:"routes"`     // route
+}
+
+// Route sends the captured tables a pattern matches to one destination name (merging shards):
+// * matches any run of characters, so shop.orders_* takes shop.orders_eu and shop.orders_us.
+type Route struct {
+	Match string `json:"match"`
+	To    string `json:"to"`
 }
 
 // Truncation cuts one text column of a table to at most Length characters.

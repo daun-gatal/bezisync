@@ -2294,6 +2294,26 @@ Fix:
 Under Transform, choose key columns the table has.
 ```
 
+<a id="transform-route-idle"></a>
+### `transform_route_idle`
+
+**Routes**
+
+- Why: A route that matches no captured table does nothing (a table added later that matches is routed).
+
+<a id="transform-route-merge"></a>
+### `transform_route_merge`
+
+**Routes**
+
+- Why: Tables a route sends to one destination must have the same key and columns, or the destination can't hold both.
+
+Fix:
+
+```
+Route only tables of the same shape together, or give each its own destination.
+```
+
 <a id="transform-rule-type"></a>
 ### `transform_rule_type`
 

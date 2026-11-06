@@ -295,3 +295,62 @@ func TestTruncateStep(t *testing.T) {
 		t.Fatal(res.Steps)
 	}
 }
+
+func TestRouteStep(t *testing.T) {
+	for pattern, cases := range map[string]map[string]bool{
+		"shop.orders_*": {"shop.orders_eu": true, "shop.orders_": true, "shop.orders": false, "crm.orders_eu": false},
+		"*.orders":      {"shop.orders": true, "crm.orders": true, "shop.orders_eu": false},
+		"shop.*_eu":     {"shop.orders_eu": true, "shop.eu": false, "shop.x_eu_y": false},
+		"shop.orders":   {"shop.orders": true, "shop.orders2": false},
+		// A middle part never takes the end's characters; the ends never overlap.
+		"p*s*s": {"public.sales": true, "public.orders": false, "ps": false, "pss": true},
+		"a*a":   {"a": false, "aa": true},
+		"*":     {"shop.x": true},
+	} {
+		for table, want := range cases {
+			if got := domain.GlobMatch(pattern, table); got != want {
+				t.Errorf("%s ~ %s: %v", pattern, table, got)
+			}
+		}
+	}
+	parse := func(steps ...any) (domain.PipelineSpec, string) {
+		v := &val.V{}
+		s, _ := domain.ParseSpec(v, nil, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders_eu", "shop.orders_us", "shop.refunds"}}},
+			"transforms": steps})
+		var msgs []string
+		for _, e := range v.Errors {
+			msgs = append(msgs, e.Message)
+		}
+		return s, strings.Join(msgs, "|")
+	}
+	route := func(rules ...any) map[string]any {
+		return map[string]any{"type": "route", "id": "rt01", "routes": rules}
+	}
+	rule := func(match, to string) map[string]any { return map[string]any{"match": match, "to": to} }
+	s, errs := parse(route(rule("shop.orders_*", "shop.orders_all")))
+	if errs != "" {
+		t.Fatal(errs)
+	}
+	if got := domain.RouteTargets(s); len(got) != 2 || got["shop.orders_eu"] != "shop.orders_all" || got["shop.refunds"] != "" {
+		t.Fatal(got)
+	}
+	b, _ := json.Marshal(s)
+	if !strings.Contains(string(b), `{"type":"route","id":"rt01","routes":[{"match":"shop.orders_*","to":"shop.orders_all"}]}`) {
+		t.Fatal(string(b))
+	}
+	// T10: a table two routes match.
+	if _, errs := parse(route(rule("shop.orders_*", "a"), rule("shop.*_eu", "b"))); !strings.Contains(errs, "shop.orders_eu matches more than one route") {
+		t.Fatal(errs)
+	}
+	for _, bad := range []map[string]any{rule("orders", "x"), rule("shop.orders_*", "${X}"), rule("shop.orders_*", "a b")} {
+		if _, errs := parse(route(bad)); errs == "" {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+	// The preview says where the table goes.
+	res := domain.Preview(domain.PreviewInput{SourceType: "postgresql", Pipeline: "p", Spec: s, Table: "shop.orders_us", Operation: "insert",
+		Columns: []domain.PreviewColumn{{Name: "id", Type: "integer"}}, PrimaryKey: []string{"id"}})
+	if res.Destination != "shop.orders_all" {
+		t.Fatal(res.Destination)
+	}
+}

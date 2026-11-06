@@ -11,7 +11,7 @@ import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { fullSpec, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
-import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext, TruncateEditor } from './editors';
+import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor } from './editors';
 import { FlinkPreviewPanel } from './FlinkPreviewPanel';
 import { PreviewPanel } from './PreviewPanel';
 import {
@@ -45,6 +45,7 @@ const CHOICES: { group: string; items: { type: TransformType; help: string }[] }
       { type: 'truncate', help: 'Cut long text columns to a length.' },
     ],
   },
+  { group: 'Destinations', items: [{ type: 'route', help: 'Send tables a pattern matches to one destination of your naming.' }] },
   { group: 'Expert', items: [{ type: 'custom', help: 'Any transform class the Debezium image ships.' }] },
 ];
 
@@ -100,7 +101,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
     const v = flink ? undefined : cleanValues(values, caps);
     return { ...rest, transforms: steps, ...(v ? { values: v } : {}), ...(Object.keys(keys).length ? { keys } : {}) };
   }, [spec, steps, values, keys, caps, flink]);
-  const errors = stepErrors(steps);
+  const errors = stepErrors(steps, captured);
   const dirty = JSON.stringify(draft) !== JSON.stringify(spec);
   useImperativeHandle(handle, () => ({
     dirty: () => dirty,
@@ -179,6 +180,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
       custom: <CustomEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       outbox: <p className="m-0 text-xs text-muted">The outbox router has no settings here yet; edit it through YAML or the API.</p>,
       truncate: <TruncateEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
+      route: <RouteEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       soft_delete: (
         <p className="m-0 text-sm text-ink-2">
           {flink

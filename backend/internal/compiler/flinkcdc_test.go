@@ -493,3 +493,20 @@ func TestTruncateFlink(t *testing.T) {
 		t.Fatal(got.Pipeline)
 	}
 }
+
+// Routes on Flink CDC: merged tables share their sink-table, which naming alone refuses.
+func TestRouteFlink(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders", "shop.orders_eu"}}},
+		"sink":       map[string]any{"naming": "{schema}_{table}"},
+		"transforms": []any{map[string]any{"type": "route", "routes": []any{map[string]any{"match": "shop.orders*", "to": "all_orders"}}}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id"}, "shop.orders_eu": {"id"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Destinations["shop.orders"] != got.Destinations["shop.orders_eu"] || strings.Count(got.Pipeline, "sink-table: \""+got.Destinations["shop.orders"]+"\"") != 2 {
+		t.Fatalf("%v\n%s", got.Destinations, got.Pipeline)
+	}
+}

@@ -408,7 +408,7 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   (`domain.SoftDeleteField`); the domain preview and findings flag a column of that name.
   `truncate` is a source option on Debezium (`column.truncate.to.N.chars`, the exact property a
   raw one was, so a moved pipeline keeps its hash; `domain.TruncateSources`) and `SUBSTR` in the
-  Flink CDC projection; `transform_truncate_type` checks the types; import maps raw truncations. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  Flink CDC projection; `transform_truncate_type` checks the types; import maps raw truncations. `route` sends tables a glob (`domain.GlobMatch`, mirrored by the frontend's `globMatch`) matches to one destination: `domain.RouteTargets` (first match wins; T10 refuses a table two routes match) is the only source of the name, read by the destinations, the preview, Flink CDC's sink table and Debezium's `bzmerge<N>` RegexRouters after `bzroute`; `transform_route_merge` blocks tables of different shapes sent together, `transform_route_idle` warns. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

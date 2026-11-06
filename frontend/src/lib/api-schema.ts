@@ -4678,7 +4678,7 @@ export interface components {
              * Allowed Transforms
              * @description Built-in step types this project allows; omitted or null = all.
              */
-            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "soft_delete" | "truncate")[] | null;
+            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "soft_delete" | "truncate" | "route")[] | null;
             /** Max Pipelines Per Source */
             max_pipelines_per_source?: number | null;
             /** Max Resources */
@@ -4864,6 +4864,19 @@ export interface components {
          * @enum {string}
          */
         Role: "editor" | "operator" | "viewer";
+        /** Route */
+        Route: {
+            /**
+             * Match
+             * @description schema.table, where * matches any run of characters.
+             */
+            match: string;
+            /**
+             * To
+             * @description The destination name the matched tables go to.
+             */
+            to: string;
+        };
         /** RuleKind */
         RuleKind: {
             /** Default For Seconds */
@@ -6192,6 +6205,11 @@ export interface components {
             };
             /** Renames */
             renames?: components["schemas"]["Rename"][];
+            /**
+             * Routes
+             * @description route: tables a pattern matches to one destination (a table two routes match is refused).
+             */
+            routes?: components["schemas"]["Route"][];
             /** Rules */
             rules?: components["schemas"]["FilterRule"][];
             /**
@@ -6203,7 +6221,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom" | "soft_delete" | "truncate";
+            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom" | "soft_delete" | "truncate" | "route";
             value?: components["schemas"]["FieldValue"];
         };
         /**

@@ -306,3 +306,59 @@ func truncateChecks(found connectors.Discovery, spec domain.PipelineSpec, flink 
 	}
 	return out
 }
+
+// routeChecks: a route that matches no captured table does nothing (T9, a warning); tables merged
+// into one destination must share their key and columns, or the destination can't hold both (T8).
+func routeChecks(found connectors.Discovery, spec domain.PipelineSpec) []checks.Check {
+	var out []checks.Check
+	var idle []string
+	for _, t := range spec.Transforms {
+		for _, r := range t.Routes {
+			if !slices.ContainsFunc(spec.Source.Tables.Include, func(table string) bool { return domain.GlobMatch(r.Match, table) }) {
+				idle = append(idle, r.Match)
+			}
+		}
+	}
+	if len(idle) > 0 {
+		out = append(out, checks.Check{Code: "transform_route_idle", Title: "Routes", Category: checks.CatTables, Status: checks.Warn,
+			Message: "These routes match no captured table: " + strings.Join(idle, ", ") + "."})
+	}
+	shape := map[string]string{}
+	for _, t := range found.Tables {
+		cols := make([]string, len(t.Columns))
+		for i, c := range t.Columns {
+			cols[i] = c.Name
+		}
+		slices.Sort(cols)
+		key := append([]string{}, t.PrimaryKey...)
+		slices.Sort(key)
+		shape[t.Identifier()] = "key " + strings.Join(key, ",") + " · columns " + strings.Join(cols, ",")
+	}
+	byTarget := map[string][]string{}
+	for table, to := range domain.RouteTargets(spec) {
+		byTarget[to] = append(byTarget[to], table)
+	}
+	targets := make([]string, 0, len(byTarget))
+	for to := range byTarget {
+		targets = append(targets, to)
+	}
+	slices.Sort(targets)
+	var clashes []string
+	for _, to := range targets {
+		tables := byTarget[to]
+		slices.Sort(tables)
+		for _, other := range tables[1:] {
+			a, okA := shape[tables[0]]
+			b, okB := shape[other]
+			if okA && okB && a != b {
+				clashes = append(clashes, fmt.Sprintf("%s and %s (into %s)", tables[0], other, to))
+			}
+		}
+	}
+	if len(clashes) > 0 {
+		out = append(out, checks.Check{Code: "transform_route_merge", Title: "Routes", Category: checks.CatTables, Status: checks.Fail, Blocking: true,
+			Message: "Tables merged into one destination must have the same key and columns: " + strings.Join(clashes, "; ") + ".",
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Route only tables of the same shape together, or give each its own destination."}})
+	}
+	return out
+}

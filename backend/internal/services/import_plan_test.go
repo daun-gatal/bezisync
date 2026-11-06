@@ -179,3 +179,27 @@ func TestTruncateImportAndChecks(t *testing.T) {
 		t.Fatal(c)
 	}
 }
+
+// T8, T9: routes that do nothing warn; merging tables of different shapes blocks.
+func TestRouteChecks(t *testing.T) {
+	spec := domain.DefaultSpec()
+	spec.Source.Tables.Include = []string{"shop.orders_eu", "shop.orders_us"}
+	spec.Transforms = []domain.Transform{{Type: "route", Routes: []domain.Route{{Match: "shop.orders_*", To: "all"}, {Match: "crm.*", To: "crm"}}}}
+	table := func(name string, key []string, cols ...string) connectors.TableInfo {
+		t := connectors.TableInfo{Schema: "shop", Name: name, PrimaryKey: key}
+		for _, c := range cols {
+			t.Columns = append(t.Columns, connectors.Column{Name: c, Type: "text"})
+		}
+		return t
+	}
+	same := connectors.Discovery{Tables: []connectors.TableInfo{table("orders_eu", []string{"id"}, "id", "total"), table("orders_us", []string{"id"}, "total", "id")}}
+	out := routeChecks(same, spec)
+	if len(out) != 1 || out[0].Code != "transform_route_idle" || !strings.Contains(out[0].Message, "crm.*") {
+		t.Fatal(out)
+	}
+	differ := connectors.Discovery{Tables: []connectors.TableInfo{table("orders_eu", []string{"id"}, "id", "total"), table("orders_us", []string{"id"}, "id", "total", "vat")}}
+	out = routeChecks(differ, spec)
+	if len(out) != 2 || out[1].Code != "transform_route_merge" || !out[1].Blocking {
+		t.Fatal(out)
+	}
+}

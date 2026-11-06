@@ -1332,6 +1332,11 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 			configChecks = append(configChecks, truncateChecks(found, spec, flink)...)
 		}
 	}
+	if slices.ContainsFunc(spec.Transforms, func(t domain.Transform) bool { return t.Type == "route" }) {
+		if found, err := discover.get(ctx); err == nil {
+			configChecks = append(configChecks, routeChecks(found, spec)...)
+		}
+	}
 	configChecks = append(configChecks, transformChecks(ctx, sourceConn, discover, p.Name, spec)...)
 	configChecks = append(configChecks, personalDataChecks(ctx, srcDesc, discover, spec)...)
 	if sinkDesc != nil && compiled != nil {

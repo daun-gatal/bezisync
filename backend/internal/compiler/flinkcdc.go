@@ -219,11 +219,18 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	// Routes: each table to its destination, first match only.
 	destinations := map[string]string{}
 	owner := map[string]string{}
+	routed := domain.RouteTargets(spec)
 	var routes []yamlMap
 	for _, t := range tables {
 		schema, table, _ := strings.Cut(t, ".")
-		dest := fsnk.FlinkDestination(sink, c, c.Destination(schema, table))
-		if other, taken := owner[dest]; taken {
+		name := c.Destination(schema, table)
+		to, merged := routed[t]
+		if merged {
+			name = to
+		}
+		dest := fsnk.FlinkDestination(sink, c, name)
+		// Two tables meet in one destination only when a route sends them there.
+		if other, taken := owner[dest]; taken && !(merged && routed[other] == to) {
 			return nil, problem.New(422, "destination_collision", fmt.Sprintf("%s and %s would both be written to %s. Change the naming pattern.", other, t, dest))
 		}
 		owner[dest], destinations[t] = t, dest

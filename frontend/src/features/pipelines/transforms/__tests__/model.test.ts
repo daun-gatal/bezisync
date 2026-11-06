@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, isTextType, fieldsBefore, flinkColumns, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -198,5 +198,46 @@ describe('truncate', () => {
     expect(stepErrors([defaultStep('truncate', [])]).get(0)).toBe('Add a column to cut.');
     expect(stepErrors([{ ...defaultStep('truncate', []), columns: [{ table: '', column: '', length: 255 }] }]).get(0)).toBe('Pick a column for every row.');
     expect(stepErrors([{ ...defaultStep('truncate', []), columns: [{ table: 'public.orders', column: 'notes', length: 9 }] }]).size).toBe(0);
+  });
+});
+
+describe('route', () => {
+  const tables = ['public.orders_2024', 'public.orders_2025', 'public.customers'];
+  it('matches like the server (domain.GlobMatch)', () => {
+    expect(globMatch('public.orders_*', 'public.orders_2024')).toBe(true);
+    expect(globMatch('public.orders_*', 'public.customers')).toBe(false);
+    expect(globMatch('*.customers', 'public.customers')).toBe(true);
+    expect(globMatch('public.*_2025', 'public.orders_2025')).toBe(true);
+    expect(globMatch('public.orders', 'public.orders_2024')).toBe(false);
+    expect(globMatch('p*s*s', 'public.sales')).toBe(true);
+    expect(globMatch('p*s*s', 'public.orders')).toBe(false);
+    expect(globMatch('a*a', 'a')).toBe(false);
+    expect(globMatch('a*a', 'aa')).toBe(true);
+    expect(globMatch('*', 'public.x')).toBe(true);
+    expect(globMatch('public.*o*o*', 'public.foo')).toBe(true);
+  });
+  it('sends each table to the first route it matches; the rest keep their own destination', () => {
+    const step: TransformStep = { type: 'route', id: 's1', routes: [{ match: 'public.orders_*', to: 'orders' }] };
+    const t = routeTargets([step], tables);
+    expect([...t.entries()]).toEqual([['public.orders_2024', 'orders'], ['public.orders_2025', 'orders']]);
+    expect(summarize(step)).toBe('public.orders_* → orders');
+    expect(summarize({ type: 'route', routes: [] })).toBe('No routes yet');
+    expect(DEBEZIUM_ONLY_STEPS).not.toContain('route');
+  });
+  it('refuses what the server refuses: bad patterns, bad names, and a table two routes match (T10)', () => {
+    const err = (routes: { match: string; to: string }[], more: TransformStep[] = []) =>
+      stepErrors([{ type: 'route', id: 's1', routes }, ...more], tables).get(0);
+    expect(err([{ match: 'orders', to: 'x' }])).toMatch(/schema.table/);
+    expect(err([{ match: 'public.orders_*', to: 'a b' }])).toMatch(/destination name/);
+    expect(err([])).toBe('Add a route.');
+    expect(err([{ match: 'public.orders_*', to: 'orders' }, { match: '*.orders_2025', to: 'other' }])).toMatch(/public.orders_2025 matches more than one route/);
+    // Across two route steps too.
+    expect(err([{ match: 'public.orders_*', to: 'orders' }], [{ type: 'route', id: 's2', routes: [{ match: 'public.*', to: 'all' }] }])).toMatch(/more than one route/);
+    expect(err([{ match: 'public.orders_*', to: 'orders' }])).toBeUndefined();
+  });
+  it('a new or changed route breaks consumers', () => {
+    const before = fullSpec({ source: { tables: { include: tables } } });
+    const after = { ...before, transforms: [...before.transforms, { type: 'route' as const, id: 's1', routes: [{ match: 'public.orders_*', to: 'orders' }] }] };
+    expect(outputImpact(before, after)).toEqual([{ kind: 'breaking', text: 'New routes — public.orders_* → orders. Matched tables arrive in another destination.' }]);
   });
 });

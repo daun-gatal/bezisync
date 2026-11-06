@@ -10,6 +10,8 @@ import type { FilterOp, FilterRule, RuleValue, TransformStep, ValueFormats } fro
 import {
   columnKind,
   fieldsBefore,
+  globMatch,
+  routeTargets,
   FLINK_OPERATIONS,
   isNumericKind,
   isTextType,
@@ -815,6 +817,65 @@ export function TruncateEditor({ step, ctx, onChange }: { step: TransformStep; c
         </Button>
       </div>
       {!choices.length ? <span className="text-xs text-muted">No text columns to cut in the captured tables.</span> : null}
+    </div>
+  );
+}
+
+/** Routes: tables a pattern matches (schema.table, * any run) go to one destination of the name
+ *  given; the first route a table matches wins and a table two routes match is refused (T10). Below,
+ *  where each captured table lands, live. */
+export function RouteEditor({ step, ctx, onChange }: { step: TransformStep; ctx: EditorContext; onChange: (s: TransformStep) => void }) {
+  const routes = step.routes ?? [];
+  const put = (next: typeof routes) => onChange({ ...step, routes: next });
+  const captured = ctx.spec.source.tables.include;
+  const steps = ctx.steps.map((t, j) => (j === ctx.index ? step : t));
+  const targets = routeTargets(steps, captured);
+  const what = ctx.flink ? 'table' : 'topic';
+  return (
+    <div className="flex flex-col gap-3">
+      {routes.map((r, i) => {
+        const n = captured.filter((t) => r.match && globMatch(r.match, t)).length;
+        return (
+          <div key={i} className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
+            <label className="flex min-w-0 flex-col gap-1 text-sm text-muted">
+              Tables {i + 1}
+              <Input aria-label={`Route ${i + 1} tables`} className="font-mono" placeholder="public.orders_*" value={r.match}
+                onChange={(e) => put(routes.map((x, j) => (j === i ? { ...x, match: e.target.value.trim() } : x)))} />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1 text-sm text-muted">
+              Destination {what}
+              <Input aria-label={`Route ${i + 1} destination`} className="font-mono" value={r.to}
+                onChange={(e) => put(routes.map((x, j) => (j === i ? { ...x, to: e.target.value.trim() } : x)))} />
+            </label>
+            <Button size="sm" variant="ghost" icon={<X />} aria-label={`Remove route ${i + 1}`} disabled={routes.length === 1} onClick={() => put(routes.filter((_, j) => j !== i))} />
+            <span className="col-span-3 text-xs text-muted">{r.match ? `Matches ${n} captured table${n === 1 ? '' : 's'}.` : 'A table name, or a pattern with *.'}</span>
+          </div>
+        );
+      })}
+      <div>
+        <Button size="sm" icon={<Plus />} disabled={routes.length >= 20} onClick={() => put([...routes, { match: '', to: '' }])}>
+          Add a route
+        </Button>
+      </div>
+      <table aria-label="Where tables go" className="w-full text-left text-sm">
+        <thead>
+          <tr className="text-xs text-muted">
+            <th className="py-1 font-medium">Table</th>
+            <th className="py-1 font-medium">Goes to</th>
+          </tr>
+        </thead>
+        <tbody>
+          {captured.map((t) => (
+            <tr key={t} className="border-t border-line">
+              <td className="py-1 font-mono">{t}</td>
+              <td className={clsx('py-1', targets.has(t) ? 'font-mono' : 'text-muted')}>{targets.get(t) || (targets.has(t) ? '…' : `its own ${what}`)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {[...new Set(targets.values())].some((to) => [...targets.values()].filter((x) => x === to).length > 1) ? (
+        <Notice tone="info">Tables routed together must have the same key and columns; preflight checks it.</Notice>
+      ) : null}
     </div>
   );
 }

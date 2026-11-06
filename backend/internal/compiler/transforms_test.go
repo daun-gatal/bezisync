@@ -273,3 +273,28 @@ func TestTruncateDebezium(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Routes on Debezium: after bzroute, one router per destination; the destinations follow.
+func TestRouteDebezium(t *testing.T) {
+	got, err := compileSpec(t, "pg", "kafka", `{"source": {"tables": {"include": ["public.orders", "public.orders_eu", "public.items"]}},
+	  "transforms": [{"type": "unwrap", "id": "u1a0"}, {"type": "route", "id": "rt01", "routes": [{"match": "public.orders*", "to": "shop.all_orders"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := got.Properties
+	if !strings.HasSuffix(p["debezium.transforms"], ",bzroute,bzmerge1") || p["debezium.transforms.bzmerge1.replacement"] != "shop.all_orders" ||
+		!strings.Contains(p["debezium.transforms.bzmerge1.regex"], "orders_eu") || strings.Contains(p["debezium.transforms.bzmerge1.regex"], "items") {
+		t.Fatal(p["debezium.transforms"], p["debezium.transforms.bzmerge1.regex"])
+	}
+	if got.Destinations["public.orders_eu"] != "shop.all_orders" || got.Destinations["public.items"] == "shop.all_orders" {
+		t.Fatal(got.Destinations)
+	}
+	// A route onto the destination an unrouted table already has is refused, not mixed in.
+	items := got.Destinations["public.items"]
+	_, err = compileSpec(t, "pg", "kafka", `{"source": {"tables": {"include": ["public.orders", "public.items"]}},
+	  "transforms": [{"type": "route", "id": "rt01", "routes": [{"match": "public.orders", "to": "`+items+`"}]}]}`)
+	var pe *problem.Problem
+	if !errors.As(err, &pe) || pe.Code != "destination_collision" || !strings.Contains(pe.Detail, "public.orders and public.items") {
+		t.Fatal(err)
+	}
+}

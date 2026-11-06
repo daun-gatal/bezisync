@@ -403,6 +403,9 @@ func Preview(in PreviewInput) PreviewResult {
 	res := PreviewResult{Table: in.Table, Operation: in.Operation, Steps: []PreviewStep{}, Notes: []string{}}
 	schema, table, _ := strings.Cut(in.Table, ".")
 	res.Destination = strings.NewReplacer("{schema}", schema, "{table}", table, "{pipeline}", in.Pipeline).Replace(in.Spec.Sink.Naming)
+	if to, ok := RouteTargets(in.Spec)[in.Table]; ok {
+		res.Destination = to
+	}
 	if len(in.Columns) == 0 {
 		res.Notes = append(res.Notes, "BeziSync has not read this table's columns yet, so the sample has no fields.")
 	}
@@ -562,6 +565,11 @@ func applyStep(in PreviewInput, t Transform, value any) (any, string, string, st
 		return nil, "dropped", "Dropped: the event does not match this filter.", ""
 	case "unwrap":
 		return unwrap(in, t, value.(*om.Map))
+	case "route":
+		if to, ok := RouteTargets(in.Spec)[in.Table]; ok {
+			return value, "applied", "Sent to " + to + ".", ""
+		}
+		return value, "applied", "No route matches this table: it goes where the naming says.", ""
 	case "truncate":
 		var cut []string
 		for _, c := range t.Truncate {

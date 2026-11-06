@@ -100,6 +100,8 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
   const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
   const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  // The table goes to a routed name instead of the naming pattern's.
+  const routedTo = `r_${tag.replace(/-/g, '_')}`;
   // Three readers: not a preset's shape (two slots per TaskManager); smaller once it streams.
   const cluster = {
     parallelism: 3, slot: { cpu: '0.5', memory: '768Mi' }, streaming_slot: { cpu: '0.25', memory: '512Mi' }, job_manager: { cpu: '0.5', memory: '1Gi' }, shape: 'auto',
@@ -107,7 +109,7 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
     name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
     spec: { source: { tables: { include: [table] } }, sink: { naming: `f_${tag.replace(/-/g, '_')}_{table}` }, snapshot: { mode: 'no_data' },
-      policies: { resources: 'custom' }, flink_cdc: { cluster, commit_seconds: 30 }, transforms: [{ type: 'soft_delete', id: 'sd01' }] },
+      policies: { resources: 'custom' }, flink_cdc: { cluster, commit_seconds: 30 }, transforms: [{ type: 'soft_delete', id: 'sd01' }, { type: 'route', id: 'rt01', routes: [{ match: table, to: routedTo }] }] },
   }, 201);
   const url = `${base}/pipelines/${p.id}`;
 
@@ -135,7 +137,8 @@ test('Flink CDC: a custom cluster is packed at deploy, streams, and round-trips'
   const marker = `FLINKC-${tag}`;
   await ownerSql(`INSERT INTO ${table} (status, total) VALUES ('${marker}', 1)`);
   await waitFor('row readable in Iceberg', async () => {
-    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
+    const e = await api.get<{ records: Rec[]; destination: string }>(`${url}/events?table=${table}&limit=100`);
+    expect(e.destination).toContain(routedTo);
     return e.records.some((r) => r.value.status === marker);
   }, 420_000);
 

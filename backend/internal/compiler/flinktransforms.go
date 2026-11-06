@@ -46,7 +46,7 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				sink.Converter = "SOFT_DELETE"
 				sink.Projection = append(sink.Projection, "__data_event_type__ AS `"+field+"`")
 			}
-		case t.Type == "rename" || t.Type == "add_field" || t.Type == "truncate" || (t.Type == "filter" && t.Typed()):
+		case t.Type == "rename" || t.Type == "add_field" || t.Type == "truncate" || t.Type == "route" || (t.Type == "filter" && t.Typed()):
 		case t.Type == "filter":
 			return nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Step %d: a filter written as a script runs only on Debezium; build it from rules.", i+1))
 		default:

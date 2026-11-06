@@ -426,6 +426,9 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 	props["debezium.transforms.bzroute.regex"] = regex
 	props["debezium.transforms.bzroute.replacement"] = replacement
 	chain = append(chain, "bzroute")
+	merged, mergeChain := routeProps(c, spec)
+	merge(props, merged)
+	chain = append(chain, mergeChain...)
 	props["debezium.transforms"] = strings.Join(chain, ",")
 	tuned, err := tuningSettings(engine.Debezium, source.Type, sink.Type, spec.Tuning)
 	if err != nil {
@@ -451,9 +454,24 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 	}
 
 	destinations := map[string]string{}
+	routed := domain.RouteTargets(spec)
+	natural := map[string]string{}
 	for _, t := range spec.Source.Tables.Include {
 		schema, table, _ := strings.Cut(t, ".")
 		destinations[t] = c.Destination(schema, table)
+		if to, ok := routed[t]; ok {
+			destinations[t] = to
+		} else {
+			natural[destinations[t]] = t
+		}
+	}
+	// A route meets an unrouted table's own destination: its events would mix in unasked.
+	for _, t := range spec.Source.Tables.Include {
+		if to, ok := routed[t]; ok {
+			if other, taken := natural[to]; taken {
+				return nil, problem.New(422, "destination_collision", fmt.Sprintf("%s and %s would both be written to %s. Route %s too, or send the route elsewhere.", t, other, to, other))
+			}
+		}
 	}
 	if spec.Policies.DeliveryCanary && srcDesc.SupportsCanary {
 		canary, err := src.CanaryTable(source, c)

@@ -65,7 +65,7 @@ export function tuningFor(tuning: Record<string, string> | null | undefined, eng
   return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
-export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom' | 'soft_delete' | 'truncate';
+export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom' | 'soft_delete' | 'truncate' | 'route';
 export type FilterOperation = 'insert' | 'update' | 'delete' | 'snapshot';
 export type FilterOp = 'eq' | 'ne' | 'in' | 'not_in' | 'gt' | 'gte' | 'lt' | 'lte' | 'is_null' | 'is_not_null' | 'is_true' | 'is_false';
 export type RuleValue = string | number | boolean;
@@ -93,6 +93,7 @@ export interface TransformStep {
   properties?: Record<string, string>;
   /** truncate: text columns cut to at most length characters. */
   columns?: { table: string; column: string; length: number }[];
+  routes?: { match: string; to: string }[];
 }
 
 /** Stage of a step: 0 keep events, 1 event shape, 2 field changes, -1 order as written. */

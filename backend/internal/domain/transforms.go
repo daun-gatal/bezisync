@@ -22,7 +22,53 @@ import (
 // before the event shape; field changes need the row, so they come after it.
 
 // TransformTypes are the step types, in the order the UI offers them.
-var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom", "soft_delete", "truncate"}
+var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom", "soft_delete", "truncate", "route"}
+
+var (
+	routeMatchRe = regexp.MustCompile(`^[A-Za-z0-9_$*-]+\.[A-Za-z0-9_$*-]+$`)
+	routeToRe    = regexp.MustCompile(`^[A-Za-z0-9_$][A-Za-z0-9_$.-]{0,199}$`)
+)
+
+// GlobMatch reports whether a route pattern matches a table ("schema.table"; * is any run).
+func GlobMatch(pattern, table string) bool {
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		return pattern == table
+	}
+	// The first part anchors the start and the last the end; the middle parts are found in order,
+	// each at its first place, in what lies between (so none can take the end's characters).
+	first, last := parts[0], parts[len(parts)-1]
+	if len(table) < len(first)+len(last) || !strings.HasPrefix(table, first) || !strings.HasSuffix(table, last) {
+		return false
+	}
+	rest := table[len(first) : len(table)-len(last)]
+	for _, p := range parts[1 : len(parts)-1] {
+		at := strings.Index(rest, p)
+		if at < 0 {
+			return false
+		}
+		rest = rest[at+len(p):]
+	}
+	return true
+}
+
+// RouteTargets are the captured tables route steps send elsewhere: table → destination name.
+func RouteTargets(spec PipelineSpec) map[string]string {
+	out := map[string]string{}
+	for _, t := range spec.Transforms {
+		if t.Type != "route" {
+			continue
+		}
+		for _, r := range t.Routes {
+			for _, table := range spec.Source.Tables.Include {
+				if _, routed := out[table]; !routed && GlobMatch(r.Match, table) {
+					out[table] = r.To
+				}
+			}
+		}
+	}
+	return out
+}
 
 // TruncateSources are the Debezium sources whose columns BeziSync truncates (column.truncate.to.N.chars,
 // named schema.table.column); Flink CDC truncates on any source.
@@ -241,6 +287,8 @@ func decodeTransformExtras(v *val.V, o *val.Object, out *Transform) {
 		decodeCustom(v, o, out)
 	case "truncate":
 		decodeTruncate(v, o, out)
+	case "route":
+		decodeRoutes(v, o, out)
 	}
 	if out.Tables != nil && !scoped[out.Type] {
 		v.ValueError(o.Loc().Add("tables"), out.Type+" steps apply to every table")
@@ -405,6 +453,42 @@ func decodeRenames(v *val.V, o *val.Object, out *Transform) {
 	}
 }
 
+func decodeRoutes(v *val.V, o *val.Object, out *Transform) {
+	f := o.Get("routes")
+	if !f.Required() {
+		return
+	}
+	items, ok := v.List(f.Loc, f.Raw)
+	if !ok || !v.ListLen(f.Loc, len(items), 1, maxRules) {
+		return
+	}
+	for i, item := range items {
+		ro := v.Model(f.Loc.Add(i), item, "Route")
+		if ro.Failed {
+			continue
+		}
+		var r Route
+		if g := ro.Get("match"); g.Required() {
+			if s, ok := v.Str(g.Loc, g.Raw); ok {
+				if !routeMatchRe.MatchString(s) {
+					v.ValueError(g.Loc, "a table pattern: schema.table, where * matches any run of characters")
+				}
+				r.Match = s
+			}
+		}
+		if g := ro.Get("to"); g.Required() {
+			if s, ok := v.Str(g.Loc, g.Raw); ok {
+				if !routeToRe.MatchString(s) {
+					v.ValueError(g.Loc, "a destination name: letters, digits, _, $, . and -, at most 200")
+				}
+				r.To = s
+			}
+		}
+		ro.Forbid()
+		out.Routes = append(out.Routes, r)
+	}
+}
+
 func decodeTruncate(v *val.V, o *val.Object, out *Transform) {
 	f := o.Get("columns")
 	if !f.Required() {
@@ -514,6 +598,28 @@ func validateTransforms(v *val.V, loc val.Loc, spec PipelineSpec) {
 	if len(steps) > maxSteps {
 		v.ValueError(loc, fmt.Sprintf("at most %d transform steps", maxSteps))
 		return
+	}
+	// T10: each table goes to one place; a table two routes match is refused.
+	first := -1
+	for i, t := range steps {
+		if t.Type == "route" && first < 0 {
+			first = i
+		}
+	}
+	if first >= 0 {
+		for _, table := range spec.Source.Tables.Include {
+			var hits []string
+			for _, t := range steps {
+				for _, r := range t.Routes {
+					if GlobMatch(r.Match, table) {
+						hits = append(hits, r.Match)
+					}
+				}
+			}
+			if len(hits) > 1 {
+				v.ValueError(loc.Add(first, "routes"), table+" matches more than one route ("+strings.Join(hits, ", ")+"): give it one")
+			}
+		}
 	}
 	ids := map[string]bool{}
 	unwrapAt := -1
@@ -668,6 +774,12 @@ func dumpTransform(t Transform) *om.Map {
 		m.Set("name", t.Name).Set("value", value)
 	case "flatten":
 		m.Set("delimiter", t.Delimiter)
+	case "route":
+		routes := make([]any, len(t.Routes))
+		for i, r := range t.Routes {
+			routes[i] = om.New().Set("match", r.Match).Set("to", r.To)
+		}
+		m.Set("routes", routes)
 	case "truncate":
 		cols := make([]any, len(t.Truncate))
 		for i, c := range t.Truncate {
@@ -736,6 +848,9 @@ func cloneTransform(t Transform) Transform {
 	}
 	if t.Truncate != nil {
 		t.Truncate = append([]Truncation{}, t.Truncate...)
+	}
+	if t.Routes != nil {
+		t.Routes = append([]Route{}, t.Routes...)
 	}
 	return t
 }

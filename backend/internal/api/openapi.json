@@ -6240,7 +6240,8 @@
                     "add_field",
                     "flatten",
                     "soft_delete",
-                    "truncate"
+                    "truncate",
+                    "route"
                   ],
                   "type": "string"
                 },
@@ -6688,6 +6689,27 @@
         ],
         "title": "Role",
         "type": "string"
+      },
+      "Route": {
+        "additionalProperties": false,
+        "properties": {
+          "match": {
+            "description": "schema.table, where * matches any run of characters.",
+            "title": "Match",
+            "type": "string"
+          },
+          "to": {
+            "description": "The destination name the matched tables go to.",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "match",
+          "to"
+        ],
+        "title": "Route",
+        "type": "object"
       },
       "RuleKind": {
         "properties": {
@@ -9844,6 +9866,14 @@
             "title": "Renames",
             "type": "array"
           },
+          "routes": {
+            "description": "route: tables a pattern matches to one destination (a table two routes match is refused).",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            },
+            "title": "Routes",
+            "type": "array"
+          },
           "rules": {
             "items": {
               "$ref": "#/components/schemas/FilterRule"
@@ -9871,7 +9901,8 @@
               "flatten",
               "custom",
               "soft_delete",
-              "truncate"
+              "truncate",
+              "route"
             ],
             "title": "Type",
             "type": "string"
