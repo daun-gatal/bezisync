@@ -116,7 +116,9 @@ src/
   `ImpactPill`; `settingError`/`canonicalSetting` mirror `engine.CheckSetting`/`CanonicalSetting`.
   `RawProperties` edits raw properties as key/value rows and shows the server's verdict per key
   (`settings:classify`, `useClassify`), never its own rules. Maps the server stores (`advanced`,
-  `tuning`) are compared in JSONB order (`jsonbSorted`), or autosave never settles. Review's Engine
+  `tuning`) are compared in JSONB order (`jsonbSorted`), or autosave never settles. Autosave never
+  retries a failed save by itself (`wizard/review.ts:useAutosave`): it waits for a change, Try again
+  or leaving the step. Review's Engine
   settings card (Expert) holds both: `tuningSettings` picks the pipeline's settings (Flink settings
   stay in `FlinkRunSettings`), and a raw key that is a setting converts with "Use the typed setting".
   `SettingsChangeList` (`components/SettingsChange.tsx`) shows preflight's or the diff's

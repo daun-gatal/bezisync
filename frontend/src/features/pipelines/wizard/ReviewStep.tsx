@@ -1,6 +1,6 @@
 import { captureOf, sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/connections';
 import type { JsonSchema } from '@/components/SchemaForm';
-import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Check as CheckIcon, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -19,7 +19,7 @@ import { CheckList } from '@/components/CheckList';
 import { useRuntimes } from '@/features/settings/RuntimesSection';
 import { ApiError } from '@/lib/api';
 import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
-import { canonicalSetting, jsonbSorted, settingError, tuningSettings, useClassify } from '@/lib/settings';
+import { canonicalSetting, jsonbSorted, rawErrors, settingError, tuningSettings, useClassify } from '@/lib/settings';
 import { slugify } from '@/lib/format';
 import { useDeploy, usePipelines, usePreflight, useSavedPositions, type Pipeline, type Preflight } from '@/lib/pipelines';
 import { clusterFromPreset, manualError, streamingError, usePackCluster } from '@/lib/cluster';
@@ -32,6 +32,7 @@ import { FlinkClusterEditor } from './FlinkClusterEditor';
 import { FlinkRunSettings } from './FlinkSettings';
 import { OwnerPicker } from './OwnerPicker';
 import { personalSummary } from './personal';
+import { rawLabel, useAutosave } from './review';
 import { StepHeader } from './shared';
 
 /** Changes save on their own this long after the last edit; the final checks then re-run. */
@@ -98,7 +99,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const [placement, setPlacement] = useState(spec.placement ?? '');
   const [force, setForce] = useState(false);
   const [reason, setReason] = useState('');
-  const { save, pending: saving, error: saveError } = useSaveSpec(pipeline);
+  const { save, pending: saving, error: saveError, reset: resetSave } = useSaveSpec(pipeline);
   // The project's setting limits: hidden ones aren't offered, pinned ones are shown as set by
   // the project, and a maximum bounds the control.
   const limits = policies?.setting_limits ?? {};
@@ -112,9 +113,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const caps = Object.fromEntries(
     tunable.filter((s) => s.type === 'int' && limits[s.key]?.max).map((s) => [s.key, Number(limits[s.key]!.max)]),
   );
-  const verdicts = useClassify(project.id, pipeline.id, rawRows, expert);
-  const rawKeys = rawRows.map((r) => r.key.trim()).filter(Boolean);
-  const rawError = rawKeys.length !== new Set(rawKeys).size ? 'A property is set twice: remove one.' : null;
+  // Classified in both modes: Guided hides the rows but they still block saving.
+  const verdicts = useClassify(project.id, pipeline.id, rawRows, rawRows.some((r) => r.key.trim() !== ''));
+  // Compared with the stored spec (pipeline.spec), as the server compares with the current version.
+  // Each row says why it blocks (RawProperties); the section only points at them.
+  const rawError = rawErrors(rawRows, verdicts, spec.advanced).size ? 'Fix or remove the highlighted properties.' : null;
   // Stored maps come back in JSONB order: build them the same way, or the draft never matches.
   const advancedValues = jsonbSorted(Object.fromEntries(rawRows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value])));
   const tuningError = Object.entries(tuning).some(([k, v]) => {
@@ -189,22 +192,19 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const clusterError = clusterOn && fc.cluster ? (manualError(fc.cluster) ?? streamingError(fc.cluster)) : null;
   const invalid = nameErr ?? rawError ?? tuningError ?? customError ?? clusterError;
 
-  // Save shortly after the last change; one save at a time, so versions never conflict.
-  const latest = useRef({ body, dirty, invalid, saving });
-  latest.current = { body, dirty, invalid, saving };
+  // Save shortly after the last change, one save at a time, so versions never conflict. A save
+  // the server refused is not repeated until the draft changes, Try again, or the step is left.
   const signature = JSON.stringify(body);
+  const autosave = useAutosave({ signature, dirty, invalid: Boolean(invalid), saving, save: () => save(body), delay: AUTOSAVE_MS });
+  const paused = autosave.paused && Boolean(saveError);
+  // Back to the stored values: nothing is unsaved, so no stale error stays on screen.
   useEffect(() => {
-    if (!dirty || invalid || saving) return;
-    const t = window.setTimeout(() => {
-      const now = latest.current;
-      if (now.dirty && !now.invalid && !now.saving) void save(now.body);
-    }, AUTOSAVE_MS);
-    return () => window.clearTimeout(t);
-  }, [signature, saving]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!dirty && saveError && !saving) resetSave();
+  }, [dirty, saveError, saving, resetSave]);
 
   useImperativeHandle(handle, () => ({
-    dirty: () => latest.current.dirty,
-    commit: async () => (!latest.current.dirty ? true : latest.current.invalid ? false : save(latest.current.body)),
+    dirty: () => dirty,
+    commit: async () => (!dirty ? true : invalid ? false : autosave.attempt()),
   }));
 
   // The final checks run against exactly what is saved: after each save.
@@ -240,7 +240,9 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     ? 'You can save this draft; someone with deploy permission deploys it.'
     : invalid
       ? 'Fix the highlighted settings first.'
-      : dirty || saving
+      : paused
+        ? `Not saved: ${saveError instanceof Error ? saveError.message : 'the server refused the change.'}`
+        : dirty || saving
         ? 'Saving your changes…'
         : !pipeline.runtime
           ? 'Choose a runtime first.'
@@ -277,14 +279,12 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               <>
                 <Loader2 className="size-3.5 animate-spin" aria-hidden /> Saving…
               </>
+            ) : dirty && invalid ? (
+              <span className="text-warn">Not saved: fix the highlighted field</span>
             ) : saveError ? (
               <span className="text-bad">Not saved</span>
             ) : dirty ? (
-              invalid ? (
-                <span className="text-warn">Not saved: fix the highlighted field</span>
-              ) : (
-                'Saving soon…'
-              )
+              'Saving soon…'
             ) : (
               <>
                 <CheckIcon className="size-3.5 text-ok" aria-hidden /> All changes saved
@@ -296,7 +296,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
         <InlineError
           error={saveError}
           doing="Couldn’t save your changes"
-          fix={saveError instanceof ApiError && saveError.code === 'managed_property' ? 'Remove those lines from Advanced Debezium properties, or set each one where its message says.' : undefined}
+          onRetry={invalid ? undefined : () => void autosave.attempt()}
+          fix={saveError instanceof ApiError && saveError.code === 'managed_property' ? `Remove those lines from ${rawLabel(flink)}, or set each one where its message says.` : undefined}
         />
         <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
           <Field label="Name" error={nameErr} hint={deployed ? 'Deployed pipelines keep their name.' : 'Used in URLs, YAML and the {pipeline} placeholder.'}>
@@ -506,7 +507,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               }
             </Field>
             <Field
-              label={flink ? 'Advanced Flink CDC options' : 'Advanced Debezium properties'}
+              label={rawLabel(flink)}
               optional
               group
               error={rawError}

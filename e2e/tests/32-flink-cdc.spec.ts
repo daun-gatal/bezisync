@@ -255,6 +255,14 @@ test('Flink CDC: an Expert sizes a custom cluster in Review, automatic then manu
     await page.getByLabel('Property 1 name').fill('sink.catalog.properties.uri');
     await page.getByLabel('Property 1 value').fill('http://elsewhere');
     await expect(page.getByText('Not allowed')).toBeVisible();
+    // A refused option blocks the save in the browser: no request loop, the engine's own label.
+    await expect(page.getByRole('group', { name: /Advanced Flink CDC options/ })).toBeVisible();
+    const refusedSaves: string[] = [];
+    const onSave = (r: { method(): string; url(): string }) => { if (r.method() === 'PATCH' && r.url().endsWith(url)) refusedSaves.push(r.url()); };
+    page.on('request', onSave);
+    await page.waitForTimeout(4_000);
+    page.off('request', onSave);
+    expect(refusedSaves.length, 'a refused option kept saving').toBeLessThanOrEqual(1);
     await page.getByLabel('Property 1 name').fill('sink.table.properties.write.parquet.compression-codec');
     await page.getByLabel('Property 1 value').fill('zstd');
     await expect(page.getByText('Not verified')).toBeVisible();

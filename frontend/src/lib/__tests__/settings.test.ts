@@ -1,4 +1,4 @@
-import { canonicalSetting, heaviest, jsonbSorted, settingError, type Setting } from '../settings';
+import { canonicalSetting, heaviest, jsonbSorted, rawErrors, settingError, type Setting } from '../settings';
 
 const base = { engine: 'debezium', scope: 'source', stage: 'snapshot', impact: 'restart', why: 'why', title: 'T', key: 'k' } as const;
 const int = { ...base, type: 'int', default: '1', min: '1', max: '16' } as Setting;
@@ -40,5 +40,25 @@ describe('settings', () => {
   it('picks the heaviest impact', () => {
     expect(heaviest(['restart', 'next_copy', 'first_copy'])).toBe('next_copy');
     expect(heaviest([])).toBeUndefined();
+  });
+});
+
+describe('rawErrors (mirrors RefuseNewAdvanced: new or changed refused keys block)', () => {
+  const refused = { class: 'modelled' as const, message: 'The event format is chosen on the Destination step.' };
+  const allowed = { class: 'allowed' as const, message: '' };
+  it.each([
+    ['a new refused key blocks', [{ key: 'k', value: 'v' }], { k: refused }, {}, ['k']],
+    ['a stored refused key with the same value saves', [{ key: 'k', value: 'v' }], { k: refused }, { k: 'v' }, []],
+    ['a stored refused key with a changed value blocks', [{ key: 'k', value: 'w' }], { k: refused }, { k: 'v' }, ['k']],
+    ['an allowed key saves', [{ key: 'k', value: 'v' }], { k: allowed }, {}, []],
+    ['a key with no verdict yet saves', [{ key: 'k', value: 'v' }], {}, {}, []],
+    ['a key set twice blocks', [{ key: 'k', value: 'v' }, { key: ' k ', value: 'w' }], { k: allowed }, {}, ['k']],
+    ['keys are trimmed and blank rows ignored', [{ key: ' k ', value: 'v' }, { key: ' ', value: '' }], { k: refused }, {}, ['k']],
+  ] as const)('%s', (_name, rows, verdicts, stored, want) => {
+    expect([...rawErrors([...rows], verdicts, stored).keys()]).toEqual(want);
+  });
+  it('says why', () => {
+    expect(rawErrors([{ key: 'k', value: 'v' }], { k: refused }, {}).get('k')).toBe(refused.message);
+    expect(rawErrors([{ key: 'k', value: 'v' }, { key: 'k', value: 'v' }], {}, {}).get('k')).toBe('A property is set twice: remove one.');
   });
 });

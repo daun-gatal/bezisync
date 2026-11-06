@@ -147,3 +147,106 @@ test('preflight suggests a setting from its evidence; one click uses it (Guided 
   expect((await api.get<{ spec: { tuning?: Record<string, string> } }>(url)).spec.tuning).toEqual({ 'debezium.source.skip.messages.without.change': 'true' });
   await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
 });
+
+/** A project with a Postgres source, a Kafka destination and a draft pipeline on them. */
+async function draftPipeline(api: Api, name: string, spec: Record<string, unknown> = {}, policies: Record<string, unknown> = {}) {
+  const tag = unique(name);
+  const project = await api.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `${name} ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  await api.send('PUT', `${base}/policies`, { allow_advanced_properties: true, ...policies });
+  const { password, ...pg } = SOURCE_PG;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'kafka', name: `k-${tag}`, config: KAFKA }, 201);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, spec: { source: { tables: { include: ['shop.orders'] } }, ...spec },
+  }, 201);
+  return { project, base, url: `${base}/pipelines/${p.id}`, pipelineId: p.id };
+}
+
+/** Counts the pipeline's saves (PATCH requests) from now on. */
+function countSaves(page: Page, url: string): { count: () => number; stop: () => void } {
+  let n = 0;
+  const on = (r: { method(): string; url(): string }) => {
+    if (r.method() === 'PATCH' && r.url().endsWith(url)) n++;
+  };
+  page.on('request', on);
+  return { count: () => n, stop: () => page.off('request', on) };
+}
+
+test('a refused advanced property never loops', async ({ page }) => {
+  test.setTimeout(180_000);
+  const api = await Api.signIn();
+  await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'expert' });
+  try {
+    const d = await draftPipeline(api, 'refuse');
+    await signIn(page);
+    await page.goto(`/p/${d.project.slug}/pipelines/new?draft=${d.pipelineId}&step=review`);
+    await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+    const saves = countSaves(page, d.url);
+    await page.getByRole('button', { name: 'Add a property' }).click();
+    await page.getByLabel('Property 1 name').fill('debezium.format.value');
+    await page.getByLabel('Property 1 value').fill('json');
+    await expect(page.getByText('The event format is chosen on the Destination step.')).toBeVisible();
+    await expect(page.getByText(/^Not saved/)).toBeVisible();
+    await page.waitForTimeout(4_000);
+    expect(saves.count(), 'a refused key kept saving').toBeLessThanOrEqual(1);
+    // Removing it saves once more, then nothing.
+    await page.getByRole('button', { name: 'Remove property 1' }).click();
+    await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+    const settled = saves.count();
+    await page.waitForTimeout(4_000);
+    expect(saves.count()).toBe(settled);
+    saves.stop();
+  } finally {
+    await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'guided' });
+  }
+});
+
+test('a save the server refuses pauses until the draft changes', async ({ page }) => {
+  test.setTimeout(180_000);
+  const api = await Api.signIn();
+  await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'expert' });
+  try {
+    const d = await draftPipeline(api, 'pause');
+    await signIn(page);
+    await page.goto(`/p/${d.project.slug}/pipelines/new?draft=${d.pipelineId}&step=review`);
+    await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+    // Batch size must stay below the queue size: a rule only the server checks.
+    await addSetting(page, 'Queue size');
+    await addSetting(page, 'Batch size');
+    const queue = page.locator('[id="tuning-debezium.source.max.queue.size"]');
+    const batch = page.locator('[id="tuning-debezium.source.max.batch.size"]');
+    await queue.fill('8192');
+    await queue.press('Enter');
+    const saves = countSaves(page, d.url);
+    await batch.fill('8192');
+    await batch.press('Enter');
+    await expect(page.getByText('Couldn’t save your changes')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('alert').filter({ hasText: /batch size \(8192\) must stay below the queue size/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+    await page.waitForTimeout(4_000);
+    expect(saves.count(), 'a refused save was repeated').toBe(1);
+    // Changing the draft tries again, and it saves.
+    await queue.fill('16384');
+    await queue.press('Enter');
+    await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Couldn’t save your changes')).toHaveCount(0);
+    saves.stop();
+    const saved = await api.get<{ spec: { tuning?: Record<string, string> } }>(d.url);
+    expect(saved.spec.tuning).toEqual({ 'debezium.source.max.batch.size': '8192', 'debezium.source.max.queue.size': '16384' });
+  } finally {
+    await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'guided' });
+  }
+});
+
+test('Guided mode still checks the raw properties a pipeline holds', async ({ page }) => {
+  test.setTimeout(120_000);
+  const api = await Api.signIn();
+  const d = await draftPipeline(api, 'guidedraw', { advanced: { 'debezium.source.provide.transaction.metadata': 'false' } });
+  await signIn(page);
+  const classified = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith(`/pipelines/${d.pipelineId}/settings:classify`), { timeout: 20_000 });
+  await page.goto(`/p/${d.project.slug}/pipelines/new?draft=${d.pipelineId}&step=review`);
+  await classified;
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+});
