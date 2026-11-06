@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
+import { RawProperties, type RawRow } from '@/components/RawProperties';
+import { SettingsEditor } from '@/components/SettingsEditor';
 import { Button } from '@/components/ui/button';
 import { Empty, InlineError, Meter, Notice, Pill, Skeleton } from '@/components/ui/feedback';
 import { Check, ChipsInput, Field, Input, RadioCards, Search, Segmented, SlugInput, Stepper, Switch } from '@/components/ui/form';
@@ -33,6 +35,8 @@ export function Gallery() {
   const [win, setWin] = useState<string | null>('22:00-06:00');
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [tuning, setTuning] = useState<Record<string, string>>({ [`debezium.source.${LONG}`]: '7', 'debezium.source.flag': 'true' });
+  const [raw, setRaw] = useState<RawRow[]>([{ key: `debezium.source.${LONG}`, value: LONG }]);
   const options = [
     { value: 'small', label: 'Small', description: '0.5 CPU · 768 MiB' },
     { value: 'medium', label: 'Medium', description: '1 CPU · 1.5 GiB' },
@@ -149,6 +153,30 @@ export function Gallery() {
             <Button variant="danger" onClick={() => setConfirm(true)}>
               Open a confirmation
             </Button>
+          </Card>
+          <Card title="Engine settings">
+            <SettingsEditor
+              idBase="gs"
+              value={tuning}
+              onChange={setTuning}
+              caps={{ [`debezium.source.${LONG}`]: 8 }}
+              settings={[
+                {
+                  engine: 'debezium', scope: 'source', stage: 'snapshot', impact: 'breaks_positions', key: `debezium.source.${LONG}`,
+                  title: `A setting called ${LONG}`, type: 'int', default: '1', min: '1', max: '16', why: `${LONG} explains why at length. `.repeat(3),
+                },
+                { engine: 'debezium', scope: 'source', stage: 'streaming', impact: 'restart', key: 'debezium.source.flag', title: 'A switch', type: 'bool', default: 'false', why: 'On or off.' },
+              ]}
+            />
+          </Card>
+          <Card title="Raw properties">
+            <RawProperties
+              idBase="gr"
+              rows={raw}
+              onChange={setRaw}
+              keyPlaceholder="debezium.source.…"
+              verdicts={{ [`debezium.source.${LONG}`]: { key: `debezium.source.${LONG}`, class: 'modelled', message: `${LONG} is chosen elsewhere. `.repeat(2), fix: 'tables', setting: null } }}
+            />
           </Card>
         </TabPanel>
       </Page>

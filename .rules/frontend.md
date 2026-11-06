@@ -110,6 +110,13 @@ src/
 - Settings' project picker sets `?scope=<slug>` for per-project sections (rendered in a nested
   `ProjectProvider`); it never navigates to another project.
 - `/__ui` (development builds only) renders every component with stress data.
+- Engine settings (`lib/settings.ts`, `components/SettingsEditor.tsx`, `components/RawProperties.tsx`):
+  `SettingsEditor` edits typed settings from `GET /engines` grouped by stage (a Stepper bounded by the
+  registry and any project cap, a two-way choice for booleans, a Select for choices), each with its
+  `ImpactPill`; `settingError`/`canonicalSetting` mirror `engine.CheckSetting`/`CanonicalSetting`.
+  `RawProperties` edits raw properties as key/value rows and shows the server's verdict per key
+  (`settings:classify`), never its own rules. Maps the server stores (`advanced`, `tuning`) are
+  compared in JSONB order (`jsonbSorted`), or autosave never settles.
 - `SchemaForm` renders descriptor JSON Schemas (connections, a sink's pipeline options): `ui.group`,
   `ui.expert`, `ui.labels` / `ui.descriptions` for enum values and `ui.when` (shown only while other
   fields hold listed values; hidden fields are dropped by `cleanValues`; `context` passes the sibling
