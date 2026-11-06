@@ -1471,6 +1471,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings:classify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Classify advanced properties
+         * @description What BeziSync makes of advanced (raw) properties for this pipeline, so the wizard can say it as they are typed: allowed (passed through, not verified), or refused with why and where to set it instead. A key that is also a typed setting returns that setting. Pure; values are never echoed. Keys BeziSync compiles for the pipeline are refused by preflight.
+         */
+        post: operations["classify_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_classify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/snapshots": {
         parameters: {
             query?: never;
@@ -2512,6 +2532,45 @@ export interface components {
         CheckRequest: {
             /** Tables */
             tables?: string[] | null;
+        };
+        /** ClassifyItem */
+        ClassifyItem: {
+            /** Key */
+            key: string;
+            /**
+             * Value
+             * @default
+             */
+            value: string;
+        };
+        /** ClassifyRead */
+        ClassifyRead: {
+            /**
+             * Class
+             * @enum {string}
+             */
+            class: "allowed" | "invalid" | "credential" | "forbidden" | "modelled" | "owned";
+            /**
+             * Fix
+             * @description Where the value is set instead: tables, sink, transform, review or connection ("" when allowed).
+             */
+            fix: string;
+            /** Key */
+            key: string;
+            /** Message */
+            message: string;
+            /** @description The typed setting with this key, when there is one. */
+            setting: components["schemas"]["FlinkSetting"] | null;
+        };
+        /** ClassifyRequest */
+        ClassifyRequest: {
+            /** Items */
+            items: components["schemas"]["ClassifyItem"][];
+        };
+        /** ClassifyResponse */
+        ClassifyResponse: {
+            /** Items */
+            items: components["schemas"]["ClassifyRead"][];
         };
         /** Column */
         Column: {
@@ -9187,6 +9246,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SchemaRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    classify_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_classify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassifyResponse"];
                 };
             };
             /** @description Validation Error */

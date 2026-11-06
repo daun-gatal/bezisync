@@ -1206,6 +1206,110 @@
         "title": "CheckRequest",
         "type": "object"
       },
+      "ClassifyItem": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "maxLength": 300,
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "maxLength": 5000,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "ClassifyItem",
+        "type": "object"
+      },
+      "ClassifyRead": {
+        "properties": {
+          "class": {
+            "enum": [
+              "allowed",
+              "invalid",
+              "credential",
+              "forbidden",
+              "modelled",
+              "owned"
+            ],
+            "title": "Class",
+            "type": "string"
+          },
+          "fix": {
+            "description": "Where the value is set instead: tables, sink, transform, review or connection (\"\" when allowed).",
+            "title": "Fix",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "setting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlinkSetting"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The typed setting with this key, when there is one."
+          }
+        },
+        "required": [
+          "key",
+          "class",
+          "message",
+          "fix",
+          "setting"
+        ],
+        "title": "ClassifyRead",
+        "type": "object"
+      },
+      "ClassifyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClassifyItem"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ClassifyRequest",
+        "type": "object"
+      },
+      "ClassifyResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClassifyRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ClassifyResponse",
+        "type": "object"
+      },
       "Column": {
         "properties": {
           "name": {
@@ -14976,6 +15080,70 @@
           }
         },
         "summary": "Review Schema",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings:classify": {
+      "post": {
+        "description": "What BeziSync makes of advanced (raw) properties for this pipeline, so the wizard can say it as they are typed: allowed (passed through, not verified), or refused with why and where to set it instead. A key that is also a typed setting returns that setting. Pure; values are never echoed. Keys BeziSync compiles for the pipeline are refused by preflight.",
+        "operationId": "classify_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_classify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassifyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Classify advanced properties",
         "tags": [
           "pipelines"
         ]

@@ -321,7 +321,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                 onChange={setFc}
                 sinkType={pipeline.sink?.type}
                 expert={expert}
-                catalogue={flinkEngine?.settings ?? []}
+                catalogue={(flinkEngine?.settings ?? []).filter((s) => s.scope === 'engine')}
                 deployed={deployed}
               />
             )}
