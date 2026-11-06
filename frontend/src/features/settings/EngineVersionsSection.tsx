@@ -9,7 +9,7 @@ import { Check, Field, Input, Textarea } from '@/components/ui/form';
 import { Card, QueryState } from '@/components/ui/layout';
 import { Confirm } from '@/components/ui/overlays';
 import { List, ListRow } from '@/components/ui/table';
-import { Tabs } from '@/components/ui/tabs';
+import { TabPanel, Tabs } from '@/components/ui/tabs';
 import { Ident, Meta, plural } from '@/components/ui/text';
 import { client, unwrap, type Schemas } from '@/lib/api';
 import { catalogKey } from '@/lib/debezium';
@@ -44,16 +44,18 @@ export function EngineVersionsSection() {
           { id: 'flink-cdc', label: flink && !flink.available ? 'Flink CDC (off)' : 'Flink CDC' },
         ]}
       />
-      {engine === 'flink-cdc' && flink && !flink.available ? (
-        <Card title="Flink CDC is off">
-          <p className="m-0 max-w-3xl text-base text-muted">
-            BeziSync doesn’t publish a Flink CDC image: build one with Flink 2.2.1, Flink CDC 3.7.0 and the connectors you need in the layout the guide describes
-            (Flink CDC engine; MySQL and MariaDB sources also need MySQL Connector/J), push it to a registry your runtimes pull from, and add it below. Pipelines can then choose Flink CDC where it fits: StarRocks, Doris, Fluss, and Iceberg from MySQL, MariaDB,
-            PostgreSQL or SQL Server.
-          </p>
-        </Card>
-      ) : null}
-      <CatalogPanel key={engine} engine={engine} />
+      <TabPanel idBase="engine-versions" value={engine}>
+        {engine === 'flink-cdc' && flink && !flink.available ? (
+          <Card title="Flink CDC is off">
+            <p className="m-0 max-w-3xl text-base text-muted">
+              BeziSync doesn’t publish a Flink CDC image: build one with Flink 2.2.1, Flink CDC 3.7.0 and the connectors you need in the layout the guide describes
+              (Flink CDC engine; MySQL and MariaDB sources also need MySQL Connector/J), push it to a registry your runtimes pull from, and add it below. Pipelines can then choose Flink CDC where it fits: StarRocks, Doris, Fluss, and Iceberg from MySQL, MariaDB,
+              PostgreSQL or SQL Server.
+            </p>
+          </Card>
+        ) : null}
+        <CatalogPanel key={engine} engine={engine} />
+      </TabPanel>
     </div>
   );
 }
