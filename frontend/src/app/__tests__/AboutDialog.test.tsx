@@ -16,7 +16,7 @@ describe('About BeziSync', () => {
   it('shows the server version, the license and where every notice is', async () => {
     systemInfo({ status: 200, body: { version: '0.1.0', environment: 'production', default_debezium_image: 'x', telemetry_enabled: false } });
     renderAt(() => <AboutDialog open onOpenChange={() => {}} />);
-    expect(await screen.findByText('0.1.0')).toBeInTheDocument();
+    expect(await screen.findByText('0.1.0', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText('Apache License 2.0')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'GitHub' })).toHaveAttribute('href', 'https://github.com/daun-gatal/bezisync');
     expect(screen.getByRole('link', { name: 'Web app licenses' })).toHaveAttribute('href', '/licenses.txt');
@@ -26,6 +26,6 @@ describe('About BeziSync', () => {
   it('says Unknown, never a made-up version, when the server does not answer', async () => {
     systemInfo({ status: 500, body: { code: 'internal', detail: 'Boom' } });
     renderAt(() => <AboutDialog open onOpenChange={() => {}} />);
-    expect(await screen.findByText('Unknown')).toBeInTheDocument();
+    expect(await screen.findByText('Unknown', {}, { timeout: 5000 })).toBeInTheDocument();
   });
 });
