@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
@@ -745,6 +747,99 @@ type ChangeSummary struct {
 	FormatChanged       bool     `json:"format_changed"`
 	RestartsConnector   bool     `json:"restarts_connector"`
 	Notes               []string `json:"notes"`
+}
+
+// SettingsChange is what a deploy changes in a pipeline's settings: the typed settings, Flink
+// settings and advanced properties that differ, each with what it does to a running pipeline, and
+// the heaviest of those. Reported next to ChangeSummary (whose shape is the recorded contract).
+type SettingsChange struct {
+	Settings []SettingChange `json:"settings"`
+	Impact   engine.Impact   `json:"impact"`
+}
+
+// SummarizeSettings is SettingsChange between two specs (nil when nothing differs).
+func SummarizeSettings(old *PipelineSpec, new PipelineSpec) *SettingsChange {
+	before := PipelineSpec{}
+	if old != nil {
+		before = *old
+	}
+	changes := SettingChanges(before, new)
+	if len(changes) == 0 {
+		return nil
+	}
+	return &SettingsChange{Settings: changes, Impact: HeaviestImpact(changes)}
+}
+
+// SettingChange is one setting a deploy changes. From or To is nil when the setting is unset
+// (its default applies).
+type SettingChange struct {
+	Key    string        `json:"key"`
+	Title  string        `json:"title"`
+	From   *string       `json:"from"`
+	To     *string       `json:"to"`
+	Impact engine.Impact `json:"impact"`
+	// Unverified: an advanced property, passed as typed; BeziSync can't say what it does beyond
+	// the restart.
+	Unverified bool `json:"unverified,omitempty"`
+}
+
+// SettingChanges lists what changes between two specs' settings, sorted by key within each kind:
+// typed settings, then Flink settings, then advanced properties.
+func SettingChanges(old, new PipelineSpec) []SettingChange {
+	var out []SettingChange
+	diff := func(a, b map[string]string, describe func(key string) (string, engine.Impact, bool)) {
+		keys := map[string]bool{}
+		for k := range a {
+			keys[k] = true
+		}
+		for k := range b {
+			keys[k] = true
+		}
+		sorted := make([]string, 0, len(keys))
+		for k := range keys {
+			sorted = append(sorted, k)
+		}
+		slices.Sort(sorted)
+		for _, k := range sorted {
+			from, hadFrom := a[k]
+			to, hasTo := b[k]
+			if hadFrom == hasTo && from == to {
+				continue
+			}
+			title, impact, unverified := describe(k)
+			c := SettingChange{Key: k, Title: title, Impact: impact, Unverified: unverified}
+			if hadFrom {
+				c.From = &from
+			}
+			if hasTo {
+				c.To = &to
+			}
+			out = append(out, c)
+		}
+	}
+	registry := func(key string) (string, engine.Impact, bool) {
+		for _, id := range engine.All {
+			if s := engine.SettingOf(id, key); s != nil {
+				return s.Title, s.Impact, false
+			}
+		}
+		return key, engine.ImpactRestart, false // a setting no longer in the registry: a restart
+	}
+	diff(old.Tuning, new.Tuning, registry)
+	diff(old.FlinkCDC.FlinkConf, new.FlinkCDC.FlinkConf, registry)
+	diff(old.Advanced, new.Advanced, func(key string) (string, engine.Impact, bool) { return key, engine.ImpactRestart, true })
+	return out
+}
+
+// HeaviestImpact is the heaviest impact of changes ("" when there are none).
+func HeaviestImpact(changes []SettingChange) engine.Impact {
+	var out engine.Impact
+	for _, c := range changes {
+		if out == "" || c.Impact.Rank() > out.Rank() {
+			out = c.Impact
+		}
+	}
+	return out
 }
 
 // SummarizeChange explains, in plain words, what deploying new over old does.

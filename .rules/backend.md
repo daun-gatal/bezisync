@@ -342,7 +342,8 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `services.ValidateTuning` (engine, connectors, bounds, canonical value), and the compilers apply
   them after BeziSync's own keys and before advanced properties (so advanced can't change a tuned
   key). A registry key BeziSync compiles must be `Derived`; `TestRegistryKeysAreNotCompiledByBeziSync`
-  holds that.
+  holds that. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
 - Transforms (`domain/transforms.go`, `compiler/transforms.go`): `spec.transforms` steps are
   `unwrap`, `filter`, `outbox` (the Python types: fixed four-field dump) and the typed `rename`,
   `add_field`, `flatten`, `custom`; filters are either typed (`operations` + `rules`) or a raw

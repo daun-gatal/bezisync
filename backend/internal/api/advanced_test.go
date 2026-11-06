@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -100,7 +101,7 @@ func TestAdvancedPropertiesFromBeforeKeepSavingButCantDeploy(t *testing.T) {
 	}
 	msg := check["message"].(string)
 	if !strings.Contains(msg, "debezium.source.heartbeat.action.query") || !strings.Contains(msg, "debezium.source.max.queue.size") ||
-		strings.Contains(msg, "poll.interval") || strings.Contains(string(pre.Raw), "INSERT INTO x") {
+		strings.Contains(msg, "poll.interval") || strings.Contains(msg+fmt.Sprint(check["technical"]), "INSERT INTO x") {
 		t.Fatal(msg)
 	}
 	// A forced deploy can't skip it.
@@ -144,5 +145,33 @@ func TestAdvancedPropertiesFromBeforeKeepSavingButCantDeploy(t *testing.T) {
 	got := admin.put("/api/v1/projects/"+e.pid+"/policies", map[string]any{}).expect(200)
 	if _, present := got.JSON().(map[string]any)["allow_advanced_properties"]; present {
 		t.Fatal(string(got.Raw))
+	}
+}
+
+// I5: an older pipeline's credential-looking advanced property is never repeated in what a
+// deploy would change.
+func TestSettingsChangeHidesCredentials(t *testing.T) {
+	e := newPipelineEnv(t)
+	admin := e.admin
+	p := createPipeline(t, admin, e.pid, e.ids, "shop.orders")
+	u := "/api/v1/projects/" + e.pid + "/pipelines/" + p.Str("id")
+	old := map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"advanced": map[string]any{"debezium.source.database.sslpassword": "legacy-s3cret"}}
+	raw, _ := json.Marshal(old)
+	ctx := context.Background()
+	if _, err := db.MustPool(ctx).Exec(ctx, `UPDATE pipeline_versions SET spec = $1 WHERE pipeline_id = $2`, raw, p.Str("id")); err != nil {
+		t.Fatal(err)
+	}
+	pre := admin.post(u+"/preflight", nil).expect(200)
+	if strings.Contains(string(pre.Raw), "legacy-s3cret") {
+		t.Fatal(string(pre.Raw))
+	}
+	if at(t, pre.JSON(), "settings_change", "settings").([]any)[0].(map[string]any)["to"] != "(hidden)" ||
+		!strings.Contains(pre.Str("properties"), "debezium.source.database.sslpassword=(hidden)") {
+		t.Fatal(string(pre.Raw))
+	}
+	cfg := admin.get(u + "/config").expect(200)
+	if strings.Contains(string(cfg.Raw), "legacy-s3cret") {
+		t.Fatal(string(cfg.Raw))
 	}
 }

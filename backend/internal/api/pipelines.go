@@ -663,7 +663,8 @@ func pipelineRoutes(r chi.Router) {
 		if row == nil {
 			return problem.NotFound("Version")
 		}
-		compiled, err := services.CompileFor(ctx, q, p, domain.MustSpec(map[string]any(row.Spec)), "")
+		spec := domain.MustSpec(map[string]any(row.Spec))
+		compiled, err := services.CompileFor(ctx, q, p, spec, "")
 		if err != nil {
 			return err
 		}
@@ -676,7 +677,7 @@ func pipelineRoutes(r chi.Router) {
 		if dest == nil {
 			dest = map[string]string{}
 		}
-		httpapi.JSON(w, http.StatusOK, obj("version", row.Number, "properties", compiled.Render(), "secret_env", env, "destinations", dest, "image", compiled.Image))
+		httpapi.JSON(w, http.StatusOK, obj("version", row.Number, "properties", services.RenderForPeople(compiled, spec), "secret_env", env, "destinations", dest, "image", compiled.Image))
 		return nil
 	}))
 	r.Get(base+"/{pipeline_id}/logs", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
@@ -1093,7 +1094,11 @@ func pipelineRoutes(r chi.Router) {
 		if err != nil {
 			return err
 		}
-		httpapi.JSON(w, http.StatusOK, om.New().Set("from", out["from"]).Set("to", out["to"]).Set("lines", out["lines"]).Set("change", out["change"]))
+		res := om.New().Set("from", out["from"]).Set("to", out["to"]).Set("lines", out["lines"]).Set("change", out["change"])
+		if sc, ok := out["settings_change"]; ok {
+			res.Set("settings_change", sc)
+		}
+		httpapi.JSON(w, http.StatusOK, res)
 		return nil
 	}))
 	r.Get(base+"/{pipeline_id}/schema", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {

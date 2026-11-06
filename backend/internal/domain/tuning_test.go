@@ -75,3 +75,45 @@ func TestTuningRoundTripsThroughYAML(t *testing.T) {
 		t.Fatal(parsed.Spec.Tuning)
 	}
 }
+
+func TestSettingChanges(t *testing.T) {
+	old := domain.DefaultSpec()
+	old.Tuning = map[string]string{"debezium.source.poll.interval.ms": "500", "debezium.source.snapshot.max.threads": "1"}
+	old.Advanced = map[string]string{"debezium.source.driver.a": "1", "debezium.source.driver.b": "1"}
+	next := old.Clone()
+	next.Tuning = map[string]string{"debezium.source.snapshot.max.threads": "4"}                        // poll removed, threads changed
+	next.Advanced = map[string]string{"debezium.source.driver.b": "1", "debezium.source.driver.c": "2"} // a removed, c added
+	got := domain.SettingChanges(old, next)
+	str := func(p *string) string {
+		if p == nil {
+			return "<unset>"
+		}
+		return *p
+	}
+	var lines []string
+	for _, c := range got {
+		lines = append(lines, c.Key+" "+str(c.From)+"→"+str(c.To)+" "+string(c.Impact)+map[bool]string{true: " unverified", false: ""}[c.Unverified])
+	}
+	want := []string{
+		"debezium.source.poll.interval.ms 500→<unset> restart",
+		"debezium.source.snapshot.max.threads 1→4 first_copy",
+		"debezium.source.driver.a 1→<unset> restart unverified",
+		"debezium.source.driver.c <unset>→2 restart unverified",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+	if got[1].Title != "Snapshot threads" || domain.HeaviestImpact(got) != "first_copy" {
+		t.Fatal(got[1].Title, domain.HeaviestImpact(got))
+	}
+	if domain.SummarizeSettings(&old, old) != nil || domain.HeaviestImpact(nil) != "" {
+		t.Fatal("no change, no summary")
+	}
+	// Flink settings count too; a first deploy lists everything set.
+	f := domain.DefaultSpec()
+	f.FlinkCDC.FlinkConf = map[string]string{"heartbeat.timeout": "60 s"}
+	s := domain.SummarizeSettings(nil, f)
+	if s == nil || len(s.Settings) != 1 || s.Settings[0].Title != "Heartbeat timeout" || s.Impact != "restart" || s.Settings[0].From != nil {
+		t.Fatal(s)
+	}
+}

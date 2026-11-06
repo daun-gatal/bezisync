@@ -45,6 +45,8 @@ type PreflightReport struct {
 	Properties   *string              `json:"properties"`
 	Destinations map[string]string    `json:"destinations"`
 	Change       domain.ChangeSummary `json:"change"`
+	// SettingsChange is what the deploy changes in the pipeline's settings (omitted when nothing).
+	SettingsChange *domain.SettingsChange `json:"settings_change,omitempty"`
 }
 
 // ParseSpec validates a spec from a request (422 invalid_spec).
@@ -676,6 +678,45 @@ func advancedCheck(spec domain.PipelineSpec, managed map[string]bool) *checks.Ch
 		Technical: strings.Join(why, " ")}
 }
 
+// RenderForPeople is the compiled configuration as people see it (preflight, Config): what runs,
+// except that advanced properties that look like credentials show as hidden. Pipelines saved
+// before those were refused may still hold one; the workload keeps the real value.
+func RenderForPeople(c *compiler.Compiled, spec domain.PipelineSpec) string {
+	if c.Flink != nil {
+		return c.Render()
+	}
+	props := make(map[string]string, len(c.Properties))
+	for k, v := range c.Properties {
+		props[k] = v
+	}
+	for k := range spec.Advanced {
+		if _, ok := props[k]; ok && compiler.ClassifyAdvanced(k, "", nil).Class == compiler.AdvancedCredential {
+			props[k] = "(hidden)"
+		}
+	}
+	return compiler.RenderProperties(props)
+}
+
+// redactSettings hides the values of advanced properties that look like credentials: pipelines
+// saved before those were refused may still hold one, and a change summary never repeats it.
+func redactSettings(sc *domain.SettingsChange) *domain.SettingsChange {
+	if sc == nil {
+		return nil
+	}
+	hidden := "(hidden)"
+	for i, c := range sc.Settings {
+		if c.Unverified && compiler.ClassifyAdvanced(c.Key, "", nil).Class == compiler.AdvancedCredential {
+			if c.From != nil {
+				sc.Settings[i].From = &hidden
+			}
+			if c.To != nil {
+				sc.Settings[i].To = &hidden
+			}
+		}
+	}
+	return sc
+}
+
 // unverifiedCheck says which advanced properties are passed through as typed: BeziSync can't
 // check what they do, so they are Unknown (grey), never a pass.
 func unverifiedCheck(spec domain.PipelineSpec) *checks.Check {
@@ -965,7 +1006,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	var prob *problem.Problem
 	switch {
 	case err == nil:
-		s := compiled.Render()
+		s := RenderForPeople(compiled, spec)
 		properties = &s
 		destinations = compiled.Destinations
 		cfgCheck = checks.Check{Code: "config_valid", Title: "Configuration", Category: checks.CatDestination, Status: checks.Pass,
@@ -1089,7 +1130,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		return nil, err
 	}
 	return &PreflightReport{OK: overall.OK, Summary: overall.Summary, Sections: sections, Properties: properties,
-		Destinations: destinations, Change: domain.SummarizeChange(old, spec)}, nil
+		Destinations: destinations, Change: domain.SummarizeChange(old, spec), SettingsChange: redactSettings(domain.SummarizeSettings(old, spec))}, nil
 }
 
 // ReportExtra is report.model_dump(mode="json") for problem bodies.
@@ -1429,7 +1470,11 @@ func DiffVersions(ctx context.Context, q db.Querier, p *models.Pipeline, a, b in
 	old, new := domain.MustSpec(map[string]any(ra.Spec)), domain.MustSpec(map[string]any(rb.Spec))
 	change, _ := ToMap(domain.SummarizeChange(&old, new))
 	lines := domain.SpecDiff(&old, new, fmt.Sprintf("v%d", a), fmt.Sprintf("v%d", b))
-	return map[string]any{"from": a, "to": b, "lines": lines, "change": change}, nil
+	out := map[string]any{"from": a, "to": b, "lines": lines, "change": change}
+	if sc := redactSettings(domain.SummarizeSettings(&old, new)); sc != nil {
+		out["settings_change"] = sc
+	}
+	return out, nil
 }
 
 // PolicyChecks is the policy section of preflight.

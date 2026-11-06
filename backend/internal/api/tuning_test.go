@@ -50,3 +50,36 @@ func TestTuningSavedCompiledAndRefused(t *testing.T) {
 		t.Fatal("empty tuning is dumped")
 	}
 }
+
+// Preflight and the version diff say what a deploy changes in the settings, and how heavily.
+func TestSettingsChangeInPreflightAndDiff(t *testing.T) {
+	e := newPipelineEnv(t)
+	admin := e.admin
+	p := createPipeline(t, admin, e.pid, e.ids, "shop.orders")
+	u := "/api/v1/projects/" + e.pid + "/pipelines/" + p.Str("id")
+	pre := admin.post(u+"/preflight", nil).expect(200)
+	if pre.At("settings_change") != nil {
+		t.Fatal("nothing set, nothing changes:", string(pre.Raw))
+	}
+	admin.post(u+"/deploy", map[string]any{}).expect(200)
+	e.tick()
+	admin.put("/api/v1/projects/"+e.pid+"/policies", map[string]any{"allow_advanced_properties": true}).expect(200)
+	cur := admin.get(u)
+	admin.patch(u, map[string]any{"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}},
+		"tuning":   map[string]any{"debezium.source.snapshot.max.threads": "4"},
+		"advanced": map[string]any{"debezium.source.driver.loginTimeout": "30"}}}, ifMatch(cur.At("version"))...).expect(200)
+	pre = admin.post(u+"/preflight", nil).expect(200)
+	sc := pre.At("settings_change")
+	if sc == nil || at(t, sc, "impact") != "first_copy" {
+		t.Fatal(string(pre.Raw))
+	}
+	settings := at(t, sc, "settings").([]any)
+	if len(settings) != 2 || at(t, settings[0], "title") != "Snapshot threads" || at(t, settings[0], "from") != nil || at(t, settings[0], "to") != "4" ||
+		at(t, settings[1], "unverified") != true || at(t, settings[1], "impact") != "restart" {
+		t.Fatal(settings)
+	}
+	diff := admin.get(u + "/diff?from=1&to=2").expect(200)
+	if at(t, diff.JSON(), "settings_change", "impact") != "first_copy" {
+		t.Fatal(string(diff.Raw))
+	}
+}

@@ -1989,6 +1989,10 @@
             "title": "Lines",
             "type": "array"
           },
+          "settings_change": {
+            "$ref": "#/components/schemas/SettingsChange",
+            "description": "Omitted when no setting changes."
+          },
           "to": {
             "title": "To",
             "type": "integer"
@@ -5181,6 +5185,10 @@
             "title": "Sections",
             "type": "array"
           },
+          "settings_change": {
+            "$ref": "#/components/schemas/SettingsChange",
+            "description": "Omitted when no setting changes."
+          },
           "summary": {
             "title": "Summary",
             "type": "string"
@@ -7426,6 +7434,95 @@
           "path"
         ],
         "title": "SecretKeysRequest",
+        "type": "object"
+      },
+      "SettingChange": {
+        "description": "One setting a deploy changes. from or to is null when the setting is unset (its default applies).",
+        "properties": {
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "impact": {
+            "enum": [
+              "live",
+              "restart",
+              "first_copy",
+              "next_copy",
+              "breaks_positions"
+            ],
+            "title": "Impact",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "unverified": {
+            "description": "An advanced property: passed as typed, so BeziSync can only say it restarts the pipeline.",
+            "title": "Unverified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "from",
+          "to",
+          "impact"
+        ],
+        "title": "SettingChange",
+        "type": "object"
+      },
+      "SettingsChange": {
+        "description": "What a deploy changes in the pipeline\u2019s settings, and the heaviest impact of it.",
+        "properties": {
+          "impact": {
+            "enum": [
+              "live",
+              "restart",
+              "first_copy",
+              "next_copy",
+              "breaks_positions"
+            ],
+            "title": "Impact",
+            "type": "string"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/SettingChange"
+            },
+            "title": "Settings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "settings",
+          "impact"
+        ],
+        "title": "SettingsChange",
         "type": "object"
       },
       "SignInOption": {

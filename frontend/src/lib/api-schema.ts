@@ -2871,6 +2871,8 @@ export interface components {
             from: number;
             /** Lines */
             lines: string[];
+            /** @description Omitted when no setting changes. */
+            settings_change?: components["schemas"]["SettingsChange"];
             /** To */
             to: number;
         };
@@ -4133,6 +4135,8 @@ export interface components {
             properties: string | null;
             /** Sections */
             sections: components["schemas"]["PreflightSection"][];
+            /** @description Omitted when no setting changes. */
+            settings_change?: components["schemas"]["SettingsChange"];
             /** Summary */
             summary: string;
         };
@@ -4983,6 +4987,43 @@ export interface components {
         SecretKeysRequest: {
             /** Path */
             path: string;
+        };
+        /**
+         * SettingChange
+         * @description One setting a deploy changes. from or to is null when the setting is unset (its default applies).
+         */
+        SettingChange: {
+            /** From */
+            from: string | null;
+            /**
+             * Impact
+             * @enum {string}
+             */
+            impact: "live" | "restart" | "first_copy" | "next_copy" | "breaks_positions";
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /** To */
+            to: string | null;
+            /**
+             * Unverified
+             * @description An advanced property: passed as typed, so BeziSync can only say it restarts the pipeline.
+             */
+            unverified?: boolean;
+        };
+        /**
+         * SettingsChange
+         * @description What a deploy changes in the pipeline’s settings, and the heaviest impact of it.
+         */
+        SettingsChange: {
+            /**
+             * Impact
+             * @enum {string}
+             */
+            impact: "live" | "restart" | "first_copy" | "next_copy" | "breaks_positions";
+            /** Settings */
+            settings: components["schemas"]["SettingChange"][];
         };
         /** SignInOption */
         SignInOption: {

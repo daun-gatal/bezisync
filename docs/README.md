@@ -983,6 +983,10 @@ pipeline's engine, source and destination, and its value be written the one way 
 (`4`, not `04`); otherwise saving refuses it and says why. Debezium keys start with `debezium.`,
 Flink CDC ones with the block they go in (`source.`, `sink.`, `pipeline.`); Flink settings stay
 under `flink_cdc.flink_conf`. A setting always wins over an advanced property with the same key.
+Preflight (and the version diff) lists every setting a deploy changes, typed settings, Flink
+settings and advanced properties, from what to what, with what it does to the running pipeline
+(applies live, restarts it, matters only for the first copy, takes effect on the next copy, or
+starts it over) and the heaviest of those (`settings_change`).
 
 Connections and runtimes are referenced by name. Apply from **Import YAML** or CI:
 
