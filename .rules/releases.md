@@ -1,6 +1,6 @@
 # Releases, images and charts
 
-> Part of the BeziSync engineering guide. See [CLAUDE.md](../CLAUDE.md) / [AGENTS.md](../AGENTS.md)
+> Part of the BeziSync engineering guide. See [AGENTS.md](../AGENTS.md)
 > for the overview, architecture, and golden rules. What CI runs lives in [testing.md](testing.md).
 
 ## Branches

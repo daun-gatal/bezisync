@@ -20,3 +20,7 @@ e2e/playwright-report/
 .vscode/
 *.swp
 .DS_Store
+
+# EGM working files (concept briefs, design drafts, review and drift reports).
+# Only finished designs are committed, as ADRs in docs/adr/. See .rules/egm.md.
+.egm/
