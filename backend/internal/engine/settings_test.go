@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -49,8 +50,30 @@ func TestRegistry(t *testing.T) {
 		t.Fatal(count(FlinkCDC, "postgresql", "iceberg"))
 	}
 	// Connector-specific settings are offered only where they apply.
-	if count(FlinkCDC, "sqlserver", "iceberg") != len(FlinkSettings) || count(Debezium, "vitess", "kafka") != len(DebeziumSettings)-1 {
+	if count(FlinkCDC, "sqlserver", "iceberg") != len(FlinkSettings) {
 		t.Fatal("connector filter")
+	}
+	// C19: a connector's own entries only for that connector, source and destination alike.
+	for _, pair := range [][2]string{{"vitess", "kafka"}, {"postgresql", "http"}, {"mongodb", "pubsub"}, {"oracle", "redis"}} {
+		for _, st := range SettingsFor(Debezium, pair[0], pair[1]) {
+			want := map[string]string{ScopeSource: pair[0], ScopeSink: pair[1]}[st.Scope]
+			if st.Connectors != nil && !slices.Contains(st.Connectors, want) {
+				t.Errorf("%v offers %s", pair, st.Key)
+			}
+		}
+	}
+	has := func(src, snk, key string) bool {
+		return slices.ContainsFunc(SettingsFor(Debezium, src, snk), func(st Setting) bool { return st.Key == key })
+	}
+	if !has("postgresql", "kafka", "debezium.source.slot.max.retries") || has("mysql", "kafka", "debezium.source.slot.max.retries") ||
+		!has("mysql", "kafka", "debezium.sink.kafka.producer.linger.ms") || has("mysql", "http", "debezium.sink.kafka.producer.linger.ms") {
+		t.Fatal("per-connector entries")
+	}
+	// C20: no destination entry for a key a connection field sets.
+	for _, k := range []string{"debezium.sink.http.timeout.ms", "debezium.sink.http.retries", "debezium.sink.kafka.producer.bootstrap.servers", "debezium.sink.redis.address"} {
+		if SettingOf(Debezium, k) != nil {
+			t.Errorf("%s is set by the connection", k)
+		}
 	}
 	if SettingOf(FlinkCDC, "heartbeat.timeout") == nil || SettingOf(Debezium, "heartbeat.timeout") != nil {
 		t.Fatal("SettingOf is per engine")

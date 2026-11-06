@@ -73,6 +73,10 @@ func settingsRoutes(r chi.Router) {
 			return err
 		}
 		id := services.EngineOf(p)
+		sourceType := ""
+		if src, err := services.GetConnection(r.Context(), db.MustPool(r.Context()), p.SourceID); err == nil && src != nil {
+			sourceType = src.Type
+		}
 		out := make([]classifyRead, 0, len(items))
 		for _, it := range items {
 			res := classifyRead{Key: it.Key}
@@ -81,6 +85,8 @@ func settingsRoutes(r chi.Router) {
 			}
 			if id != engine.Debezium {
 				res.Class, res.Message = string(compiler.AdvancedInvalid), "Advanced properties apply only to pipelines that run on Debezium."
+			} else if why := services.DriverPropertyRefusal(sourceType, it.Key); why != "" {
+				res.Class, res.Message = string(compiler.AdvancedInvalid), why
 			} else {
 				v := compiler.ClassifyAdvanced(it.Key, it.Value, nil)
 				res.Class, res.Message, res.Fix = string(v.Class), v.Message, v.Fix

@@ -220,7 +220,13 @@ engine): each has its bounds, default and what changing it does to a running pip
 the searchable list; removing it restores the default. Debezium pipelines offer snapshot threads, the
 poll interval, the queue and batch sizes (BeziSync sets them from the size; the batch stays below the
 queue), a queue memory limit, the wait before reconnecting, skipping unchanged updates, the position
-save interval and the log level. Preflight checks them against this run's evidence: each tuned
+save interval and the log level, and each connector's own: PostgreSQL's slot feedback interval and
+slot retries, MySQL's keep-alive, connect timeout and binlog look-ahead, Oracle LogMiner's batch and
+pause, MongoDB's check for new collections; Kafka's producer linger, batch bytes and compression,
+Pub/Sub's batch delay and size, Redis's batch size and retry delay. A connector's setting is offered
+only on that connector, a destination key a connection field sets is never a setting, and sources
+without JDBC (MongoDB, Spanner) refuse `debezium.source.driver.*` properties. Preflight checks them
+against this run's evidence: each tuned
 setting exists in the image's Debezium release (`setting_version`; unknown for an image BeziSync
 can't place), snapshot threads fit the source's free connections (`setting_threads`; read from
 PostgreSQL and MySQL, unknown otherwise), and a full queue and a copy fetch fit the heap

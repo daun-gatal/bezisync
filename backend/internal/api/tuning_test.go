@@ -151,3 +151,46 @@ func TestSettingChecksAndRecommendations(t *testing.T) {
 		t.Fatal(recs)
 	}
 }
+
+// C19: a connector's own setting is refused on another connector; C21: MongoDB (no JDBC) refuses
+// driver.* properties, when classified and when saved.
+func TestPerConnectorSettings(t *testing.T) {
+	e := newPipelineEnv(t)
+	admin := e.admin
+	base := "/api/v1/projects/" + e.pid
+	p := createPipeline(t, admin, e.pid, e.ids, "shop.orders")
+	u := base + "/pipelines/" + p.Str("id")
+	src := map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}
+	cur := admin.get(u).expect(200)
+	r := admin.patch(u, map[string]any{"spec": map[string]any{"source": src, "tuning": map[string]any{"debezium.source.connect.keep.alive.interval.ms": "30000"}}},
+		ifMatch(cur.At("version"))...).expect(422)
+	if !strings.Contains(string(r.Raw), "doesn't apply to this source or destination") {
+		t.Fatal(string(r.Raw))
+	}
+	ok := admin.patch(u, map[string]any{"spec": map[string]any{"source": src, "tuning": map[string]any{"debezium.source.slot.max.retries": "10",
+		"debezium.sink.kafka.producer.linger.ms": "20"}}}, ifMatch(cur.At("version"))...).expect(200)
+	pre := admin.post(u+"/preflight", nil).expect(200).Str("properties")
+	if !strings.Contains(pre, "debezium.source.slot.max.retries=10") || !strings.Contains(pre, "debezium.sink.kafka.producer.linger.ms=20") {
+		t.Fatal(pre)
+	}
+	_ = ok
+	// MongoDB has no JDBC driver.
+	admin.put(base+"/policies", map[string]any{"allow_advanced_properties": true}).expect(200)
+	mongo := admin.post(base+"/connections", map[string]any{"kind": "source", "type": "mongodb", "name": "docs",
+		"config": map[string]any{"hosts": "mongo.internal:27017", "user": "cdc"}, "secrets": map[string]any{"password": "pw"}}).expect(201)
+	body := e.ids.body()
+	body["name"], body["source_id"] = "docs-cdc", mongo.Str("id")
+	body["spec"] = map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}},
+		"advanced": map[string]any{"debezium.source.driver.loginTimeout": "30"}}
+	if r := admin.post(base+"/pipelines", body).expect(422); !strings.Contains(string(r.Raw), "no JDBC driver") {
+		t.Fatal(string(r.Raw))
+	}
+	body["spec"] = map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}}
+	m := admin.post(base+"/pipelines", body).expect(201)
+	c := admin.post(base+"/pipelines/"+m.Str("id")+"/settings:classify", map[string]any{"items": []any{map[string]any{"key": "debezium.source.driver.ssl", "value": "x"},
+		map[string]any{"key": "debezium.source.mongodb.poll.interval.ms", "value": "5000"}}}).expect(200)
+	items := c.List("items")
+	if at(t, items[0], "class") != "invalid" || !strings.Contains(at(t, items[0], "message").(string), "no JDBC driver") || at(t, items[1], "setting", "key") != "debezium.source.mongodb.poll.interval.ms" {
+		t.Fatal(string(c.Raw))
+	}
+}

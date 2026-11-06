@@ -385,7 +385,10 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   (`Setting.Since`/`Until`/`Renamed`), `connectors.ConnectionCounter` (PostgreSQL, MySQL; never
   through an agent), discovery's size estimates — and are Unknown or absent without it;
   `PreflightReport.recommendations` carry `evidence_at`. `ValidateTuning` keeps Debezium's batch
-  below its queue (size-derived defaults included). `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  below its queue (size-derived defaults included). Registry entries are only documented Debezium
+  properties (per connector by `Connectors`; never a key a connection field sets — those are
+  modelled); `DriverPropertyRefusal` refuses `driver.*` on `NoJDBC` sources when saved and in
+  classify. CockroachDB, Vitess, Spanner and SQL Server have no entries of their own yet. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
   diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
   `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
   most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the

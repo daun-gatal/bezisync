@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -348,6 +349,9 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	if err := RefuseNewAdvanced(nil, n.Spec); err != nil {
 		return nil, err
 	}
+	if err := refuseDriverProps(ctx, q, n.SourceID, nil, n.Spec); err != nil {
+		return nil, err
+	}
 	if err := ValidateTuning(eng, source.Type, sinkType, n.Spec); err != nil {
 		return nil, err
 	}
@@ -535,6 +539,9 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		if err := RefuseNewAdvanced(prev, *e.Spec); err != nil {
 			return nil, err
 		}
+		if err := refuseDriverProps(ctx, q, p.SourceID, prev, *e.Spec); err != nil {
+			return nil, err
+		}
 		if len(e.Spec.Tuning) > 0 {
 			src, err := GetConnection(ctx, q, p.SourceID)
 			if err != nil {
@@ -649,6 +656,41 @@ func RefuseNewAdvanced(prev *domain.PipelineSpec, next domain.PipelineSpec) erro
 		}
 		if v := compiler.ClassifyAdvanced(k, value, nil); v.Refused() {
 			errs = append(errs, map[string]any{"loc": []string{"advanced", k}, "message": v.Message})
+		}
+	}
+	if len(errs) > 0 {
+		return problem.New(422, "managed_property", "Some advanced properties cannot be set.").WithErrors(errs)
+	}
+	return nil
+}
+
+// NoJDBC are sources without a JDBC driver: debezium.source.driver.* means nothing to them (C21).
+var NoJDBC = []string{"mongodb", "spanner"}
+
+// DriverPropertyRefusal is why a raw key can't be set for a source type ("" when it can).
+func DriverPropertyRefusal(sourceType, key string) string {
+	if strings.HasPrefix(key, "debezium.source.driver.") && slices.Contains(NoJDBC, sourceType) {
+		return "this source has no JDBC driver, so driver.* properties do nothing"
+	}
+	return ""
+}
+
+// refuseDriverProps refuses new driver.* advanced properties on a source without JDBC.
+func refuseDriverProps(ctx context.Context, q db.Querier, sourceID uuid.UUID, prev *domain.PipelineSpec, next domain.PipelineSpec) error {
+	if len(next.Advanced) == 0 {
+		return nil
+	}
+	src, err := GetConnection(ctx, q, sourceID)
+	if err != nil || src == nil {
+		return err
+	}
+	var errs []map[string]any
+	for _, k := range tuningKeys(next.Advanced) {
+		if prev != nil && prev.Advanced[k] == next.Advanced[k] {
+			continue
+		}
+		if why := DriverPropertyRefusal(src.Type, k); why != "" {
+			errs = append(errs, map[string]any{"loc": []string{"advanced", k}, "message": why})
 		}
 	}
 	if len(errs) > 0 {
