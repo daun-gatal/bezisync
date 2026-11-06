@@ -344,6 +344,9 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	if err := RefuseNewAdvanced(nil, n.Spec); err != nil {
 		return nil, err
 	}
+	if err := ValidateTuning(eng, source.Type, sinkType, n.Spec); err != nil {
+		return nil, err
+	}
 	if err := enforceEnginePolicy(ctx, q, a.Project.ID, eng); err != nil {
 		return nil, err
 	}
@@ -527,6 +530,19 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		}
 		if err := RefuseNewAdvanced(prev, *e.Spec); err != nil {
 			return nil, err
+		}
+		if len(e.Spec.Tuning) > 0 {
+			src, err := GetConnection(ctx, q, p.SourceID)
+			if err != nil {
+				return nil, err
+			}
+			sinkType, err := connectionType(ctx, q, sinkID)
+			if err != nil {
+				return nil, err
+			}
+			if err := ValidateTuning(eng, src.Type, sinkType, *e.Spec); err != nil {
+				return nil, err
+			}
 		}
 		switch {
 		case current != nil && current.SpecHash == domain.SpecHash(*e.Spec):

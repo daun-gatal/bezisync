@@ -26,6 +26,8 @@ export interface FullSpec {
   };
   debezium_image: string | null;
   advanced: Record<string, string>;
+  /** Typed settings from the registry (GET /engines), key → canonical value; absent = none. */
+  tuning?: Record<string, string>;
   /** Connector value encodings; absent = connector defaults. */
   values?: ValueFormats;
   /** Message key columns per captured table; absent = primary keys. On Flink CDC: the
@@ -38,15 +40,25 @@ export interface FullSpec {
 
 /** The spec with only the settings of its engine: Flink CDC and Debezium refuse each other's. */
 export function specForEngine(spec: FullSpec, engine: EngineId): FullSpec {
+  const tuning = tuningFor(spec.tuning, engine);
   if (engine === 'flink-cdc') {
-    const { values: _values, ...rest } = spec;
+    const { values: _values, tuning: _t, ...rest } = spec;
     void _values;
-    return { ...rest, debezium_image: null, advanced: {}, snapshot: { ...spec.snapshot, delay_seconds: 0, window: null } };
+    void _t;
+    return { ...rest, debezium_image: null, advanced: {}, snapshot: { ...spec.snapshot, delay_seconds: 0, window: null }, ...(tuning ? { tuning } : {}) };
   }
-  const { flink_cdc: _fc, flink_cdc_image: _img, ...rest } = spec;
+  const { flink_cdc: _fc, flink_cdc_image: _img, tuning: _t, ...rest } = spec;
   void _fc;
   void _img;
-  return rest;
+  void _t;
+  return { ...rest, ...(tuning ? { tuning } : {}) };
+}
+
+/** The settings of one engine: Debezium keys start with "debezium.", Flink CDC keys with the YAML
+ *  block they go in ("source.", "sink.", "pipeline."). Undefined when none are left. */
+export function tuningFor(tuning: Record<string, string> | null | undefined, engine: EngineId): Record<string, string> | undefined {
+  const kept = Object.entries(tuning ?? {}).filter(([k]) => (engine === 'debezium') === k.startsWith('debezium.'));
+  return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
 export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom';

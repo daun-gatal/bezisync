@@ -974,7 +974,15 @@ spec:
   sink: {connection: events, naming: "cdc.{schema}.{table}", format: {type: json}}
   snapshot: {mode: initial}
   policies: {resources: medium}
+  tuning: {debezium.source.snapshot.max.threads: "4"}
 ```
+
+`tuning` holds typed engine settings from BeziSync's registry (`GET /api/v1/engines` lists them per
+engine, with their bounds and what changing one does to a running pipeline). Each must apply to the
+pipeline's engine, source and destination, and its value be written the one way BeziSync stores it
+(`4`, not `04`); otherwise saving refuses it and says why. Debezium keys start with `debezium.`,
+Flink CDC ones with the block they go in (`source.`, `sink.`, `pipeline.`); Flink settings stay
+under `flink_cdc.flink_conf`. A setting always wins over an advanced property with the same key.
 
 Connections and runtimes are referenced by name. Apply from **Import YAML** or CI:
 

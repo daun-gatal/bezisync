@@ -175,6 +175,22 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	if err := startupOptions(&srcBlock.Options, spec, in.Startup, source.Type); err != nil {
 		return nil, err
 	}
+	tuned, err := tuningSettings(engine.FlinkCDC, source.Type, sink.Type, spec.Tuning)
+	if err != nil {
+		return nil, err
+	}
+	pipelineTuning := connectors.FlinkOptions{}
+	for _, s := range tuned {
+		block, option := flinkTuningBlock(s.Key)
+		target := map[string]*connectors.FlinkOptions{"source": &srcBlock.Options, "sink": &snkBlock.Options, "pipeline": &pipelineTuning}[block]
+		if target == nil {
+			return nil, fmt.Errorf("compiler: setting %s has no block", s.Key)
+		}
+		if err := ownedByBeziSync(s, target.Get(option) != ""); err != nil {
+			return nil, err
+		}
+		target.Set(option, spec.Tuning[s.Key])
+	}
 
 	// Routes: each table to its destination, first match only.
 	destinations := map[string]string{}
@@ -202,13 +218,22 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	if len(transforms) > 0 {
 		doc = append(doc, yamlKV{"transform", transforms})
 	}
-	doc = append(doc, yamlKV{"pipeline", yamlMap{
+	pipeline := yamlMap{
 		{"name", "bezisync " + c.Name},
 		{"parallelism", strconv.Itoa(parallelism)},
 		{"operator.uid.prefix", "bz-" + c.ShortID},
 		{"schema.change.behavior", behavior},
 		{"route-mode", "FIRST_MATCH"},
-	}})
+	}
+	for _, o := range pipelineTuning {
+		for _, kv := range pipeline {
+			if kv.k == o[0] {
+				return nil, problem.New(422, "tuning", "pipeline."+o[0]+" is set by BeziSync and can't be tuned.")
+			}
+		}
+		pipeline = append(pipeline, yamlKV{o[0], o[1]})
+	}
+	doc = append(doc, yamlKV{"pipeline", pipeline})
 
 	conf, err := flinkConf(c, in.RuntimeKind, size, fc)
 	if err != nil {

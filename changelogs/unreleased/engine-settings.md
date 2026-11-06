@@ -1,6 +1,7 @@
 type: minor
 
 ### Added
+- **Typed engine settings** - a pipeline spec takes `tuning`: settings from BeziSync's registry, each checked against the pipeline's engine, source and destination and its bounds, and carried by YAML, the API and MCP. The first ones: snapshot threads and the poll interval (Debezium), the connection pool (Flink CDC). `GET /engines` lists every setting with what changing it does to a running pipeline.
 - **A project policy for advanced Debezium properties** - Admins decide whether pipelines may pass raw properties (Settings → Policies, *Allow advanced properties*); without it their deploy is blocked. Upgrading turns it on for every project that already has a pipeline using them, with an audit entry.
 
 ### Changed

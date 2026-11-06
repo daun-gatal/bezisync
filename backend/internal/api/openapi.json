@@ -4874,6 +4874,14 @@
             "title": "Transforms",
             "type": "array"
           },
+          "tuning": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Typed settings from the registry (GET /engines, settings), setting key \u2192 value in its canonical form. Debezium keys start with debezium.; Flink CDC keys with source., sink. or pipeline. (Flink settings go in flink_cdc.flink_conf). Returned only when set.",
+            "title": "Tuning",
+            "type": "object"
+          },
           "values": {
             "$ref": "#/components/schemas/ValueFormats"
           }

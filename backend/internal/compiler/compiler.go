@@ -18,6 +18,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
 )
@@ -380,6 +381,17 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 	props["debezium.transforms.bzroute.replacement"] = replacement
 	chain = append(chain, "bzroute")
 	props["debezium.transforms"] = strings.Join(chain, ",")
+	tuned, err := tuningSettings(engine.Debezium, source.Type, sink.Type, spec.Tuning)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range tuned {
+		_, set := props[s.Key]
+		if err := ownedByBeziSync(s, set); err != nil {
+			return nil, err
+		}
+		props[s.Key] = spec.Tuning[s.Key]
+	}
 	managed := make(map[string]bool, len(props)+1)
 	for k := range props {
 		managed[k] = true

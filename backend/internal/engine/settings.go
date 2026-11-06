@@ -71,10 +71,65 @@ type Setting struct {
 	Why string `json:"why"`
 	// Connectors are the source or destination types it applies to (nil: every one).
 	Connectors []string `json:"connectors,omitempty"`
+	// Derived: BeziSync sets a default for it (from the size), which the setting replaces. Any
+	// other key BeziSync compiles is never in the registry.
+	Derived bool `json:"derived,omitempty"`
 }
 
 // Settings is the registry, in the order the wizard lists it.
-func Settings() []Setting { return slices.Clone(FlinkSettings) }
+func Settings() []Setting {
+	return slices.Concat(DebeziumSettings, FlinkSettings, FlinkPipelineSettings)
+}
+
+// TuningScopes are the scopes a spec's tuning holds (a Flink CDC pipeline's engine-scoped Flink
+// settings live in flink_cdc.flink_conf).
+func TuningScopes(id ID) []string {
+	if id == FlinkCDC {
+		return []string{ScopeSource, ScopeSink, ScopePipeline}
+	}
+	return []string{ScopeEngine, ScopeSource, ScopeSink, ScopePipeline}
+}
+
+// Relational Debezium sources that copy with snapshot threads.
+var threadedSources = []string{"postgresql", "mysql", "sqlserver", "oracle", "mongodb"}
+
+// DebeziumSettings are the Debezium Server options a pipeline may tune.
+var DebeziumSettings = []Setting{
+	{Engine: Debezium, Scope: ScopeSource, Stage: StageSnapshot, Impact: ImpactFirstCopy, Key: "debezium.source.snapshot.max.threads",
+		Title: "Snapshot threads", Type: "int", Default: "1", Min: "1", Max: "16", Connectors: threadedSources,
+		Why: "Copies several chunks of a table at once. Each thread opens one more connection to the source."},
+	{Engine: Debezium, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "debezium.source.poll.interval.ms",
+		Title: "Poll interval", Type: "int", Default: "500", Min: "50", Max: "10000",
+		Why: "How long, in milliseconds, to wait for new changes before passing on a batch. Lower is fresher but busier."},
+}
+
+// FlinkPipelineSettings are Flink CDC source, destination and pipeline options a pipeline may
+// tune; their keys carry the YAML block they go in (source., sink., pipeline.).
+var FlinkPipelineSettings = []Setting{
+	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.connection.pool.size",
+		Title: "Connection pool size", Type: "int", Default: "20", Min: "2", Max: "100", Connectors: []string{"mysql", "postgresql"},
+		Why: "Connections the readers share. Each one counts against the database's connection limit."},
+}
+
+// CanonicalSetting is value written the one way a spec stores it ("" when it isn't valid).
+func CanonicalSetting(s Setting, value string) string {
+	if CheckSetting(s, value) != "" {
+		return ""
+	}
+	switch s.Type {
+	case "int":
+		n, _ := strconv.Atoi(value)
+		return strconv.Itoa(n)
+	case "fraction":
+		f, _ := strconv.ParseFloat(value, 64)
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	case "duration":
+		m := flinkDuration.FindStringSubmatch(strings.TrimSpace(value))
+		n, _ := strconv.Atoi(m[1])
+		return strconv.Itoa(n) + " " + m[2]
+	}
+	return value
+}
 
 // SettingsFor are the settings a pipeline on engine id, from sourceType to sinkType, may tune.
 func SettingsFor(id ID, sourceType, sinkType string) []Setting {

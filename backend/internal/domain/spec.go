@@ -106,6 +106,10 @@ type Policies struct {
 	DeliveryCanary        bool         `json:"delivery_canary"`
 }
 
+// tuningKeyRe is a setting name: lower-case ASCII parts separated by dots (registry keys only;
+// which ones a pipeline may use is checked against engine.SettingsFor).
+var tuningKeyRe = regexp.MustCompile(`^[a-z][a-zA-Z0-9_-]*(\.[a-zA-Z0-9_-]+)+$`)
+
 // PipelineSpec is the full spec with every default filled in.
 type PipelineSpec struct {
 	Source        SourceSpec        `json:"source"`
@@ -122,6 +126,9 @@ type PipelineSpec struct {
 	// like DebeziumImage does for Debezium. Both are dumped only when set.
 	FlinkCDC      FlinkCDCSpec `json:"flink_cdc"`
 	FlinkCDCImage *string      `json:"flink_cdc_image"`
+	// Tuning are typed settings from the registry (engine.SettingsFor), key → canonical value.
+	// Dumped only when set.
+	Tuning map[string]string `json:"tuning"`
 }
 
 // DefaultTransform is Transform(type=...) with defaults.
@@ -177,6 +184,12 @@ func (s PipelineSpec) Clone() PipelineSpec {
 	out.Advanced = make(map[string]string, len(s.Advanced))
 	for k, v := range s.Advanced {
 		out.Advanced[k] = v
+	}
+	if s.Tuning != nil {
+		out.Tuning = make(map[string]string, len(s.Tuning))
+		for k, v := range s.Tuning {
+			out.Tuning[k] = v
+		}
 	}
 	out.FlinkCDC = s.FlinkCDC.clone()
 	if s.FlinkCDCImage != nil {
@@ -268,6 +281,13 @@ func (s PipelineSpec) Dump() *om.Map {
 	}
 	if s.FlinkCDCImage != nil {
 		out.Set("flink_cdc_image", *s.FlinkCDCImage)
+	}
+	if len(s.Tuning) > 0 {
+		tuning := om.New()
+		for _, k := range sortedStrKeys(s.Tuning) {
+			tuning.Set(k, s.Tuning[k])
+		}
+		out.Set("tuning", tuning)
 	}
 	return out
 }
@@ -375,6 +395,20 @@ func decodeSpec(v *val.V, loc val.Loc, raw any) PipelineSpec {
 	if f := o.Get("advanced"); f.Present {
 		if m, ok := v.StrDict(f.Loc, f.Raw); ok {
 			spec.Advanced = m
+		}
+	}
+	if f := o.Get("tuning"); f.Present && !f.IsNull() {
+		if m, ok := v.StrDict(f.Loc, f.Raw); ok {
+			for _, k := range sortedStrKeys(m) {
+				if len(k) > 255 || !tuningKeyRe.MatchString(k) {
+					v.Fail(f.Loc.Add(k), "value_error", "Value error, not a setting name")
+				} else if len(m[k]) > 256 || strings.ContainsAny(m[k], "\r\n\t\x00") || strings.Contains(m[k], "${") {
+					v.Fail(f.Loc.Add(k), "value_error", "Value error, a setting's value is at most 256 characters, on one line, without ${…}")
+				}
+			}
+			if len(m) > 0 {
+				spec.Tuning = m
+			}
 		}
 	}
 	if f := o.Get("values"); f.Present && !f.IsNull() {

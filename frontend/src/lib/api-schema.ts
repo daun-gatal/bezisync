@@ -4010,6 +4010,13 @@ export interface components {
             source?: components["schemas"]["SourceSpec"];
             /** Transforms */
             transforms?: components["schemas"]["Transform"][];
+            /**
+             * Tuning
+             * @description Typed settings from the registry (GET /engines, settings), setting key → value in its canonical form. Debezium keys start with debezium.; Flink CDC keys with source., sink. or pipeline. (Flink settings go in flink_cdc.flink_conf). Returned only when set.
+             */
+            tuning?: {
+                [key: string]: string;
+            };
             values?: components["schemas"]["ValueFormats"];
         };
         /** PipelineUpdate */

@@ -127,7 +127,15 @@ describe('specForEngine', () => {
     debezium_image: 'quay.io/debezium/server:3.7.0.Final',
     snapshot: { mode: 'initial', delay_seconds: 30, window: '01:00-02:00' },
     flink_cdc: { new_columns: 'send' },
+    tuning: { 'debezium.source.snapshot.max.threads': '4', 'source.connection.pool.size': '8' },
   } as never);
+  it('keeps each engine’s own typed settings, and none when none are left', () => {
+    expect(specForEngine(base, 'flink-cdc').tuning).toEqual({ 'source.connection.pool.size': '8' });
+    expect(specForEngine(base, 'debezium').tuning).toEqual({ 'debezium.source.snapshot.max.threads': '4' });
+    const noFlink = fullSpec({ source: { tables: { include: ['s.t'] } }, tuning: { 'debezium.source.poll.interval.ms': '250' } } as never);
+    expect('tuning' in specForEngine(noFlink, 'flink-cdc')).toBe(false);
+    expect('tuning' in specForEngine(fullSpec({ source: { tables: { include: ['s.t'] } } } as never), 'debezium')).toBe(false);
+  });
   it('keeps only Flink CDC settings on Flink CDC', () => {
     const s = specForEngine(base, 'flink-cdc');
     expect(s.advanced).toEqual({});

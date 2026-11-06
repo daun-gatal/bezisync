@@ -338,6 +338,11 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `SettingsFor`, `SettingOf` and `CheckSetting` are the only way to read and check one; the Flink
   settings (`flink_conf`) are its engine-scoped Flink CDC entries. `CheckSetting` must keep accepting
   what it accepted before (the compiler re-checks deployed specs on every reconcile).
+  `spec.tuning` (dumped only when set) holds the other settings: saving checks them with
+  `services.ValidateTuning` (engine, connectors, bounds, canonical value), and the compilers apply
+  them after BeziSync's own keys and before advanced properties (so advanced can't change a tuned
+  key). A registry key BeziSync compiles must be `Derived`; `TestRegistryKeysAreNotCompiledByBeziSync`
+  holds that.
 - Transforms (`domain/transforms.go`, `compiler/transforms.go`): `spec.transforms` steps are
   `unwrap`, `filter`, `outbox` (the Python types: fixed four-field dump) and the typed `rename`,
   `add_field`, `flatten`, `custom`; filters are either typed (`operations` + `rules`) or a raw

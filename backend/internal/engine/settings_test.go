@@ -44,11 +44,13 @@ func TestFlinkSettingsUnchanged(t *testing.T) {
 }
 
 func TestRegistry(t *testing.T) {
-	if got := SettingsFor(FlinkCDC, "postgresql", "iceberg"); len(got) != len(FlinkSettings) {
-		t.Fatal(len(got))
+	count := func(id ID, src, snk string) int { return len(SettingsFor(id, src, snk)) }
+	if count(FlinkCDC, "postgresql", "iceberg") != len(FlinkSettings)+len(FlinkPipelineSettings) {
+		t.Fatal(count(FlinkCDC, "postgresql", "iceberg"))
 	}
-	if got := SettingsFor(Debezium, "postgresql", "kafka"); len(got) != 0 {
-		t.Fatal(got)
+	// Connector-specific settings are offered only where they apply.
+	if count(FlinkCDC, "sqlserver", "iceberg") != len(FlinkSettings) || count(Debezium, "vitess", "kafka") != len(DebeziumSettings)-1 {
+		t.Fatal("connector filter")
 	}
 	if SettingOf(FlinkCDC, "heartbeat.timeout") == nil || SettingOf(Debezium, "heartbeat.timeout") != nil {
 		t.Fatal("SettingOf is per engine")
