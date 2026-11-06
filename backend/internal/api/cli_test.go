@@ -244,3 +244,52 @@ func TestCLIFlinkPositions(t *testing.T) {
 		t.Fatal(code, out, stderr)
 	}
 }
+
+// D18: diff says what deploying a manifest does to the running pipeline — each setting with what
+// it does, raw properties' classes, what breaks — and exits 3 on a breaking change
+// without --confirm; apply --deploy changes nothing until confirmed. D17: the CLI never parses a
+// manifest, so fields it doesn't know reach the server as written.
+func TestCLIDiffBreaking(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
+	base := "/api/v1/projects/" + e.pid
+	e.admin.put(base+"/policies", map[string]any{"allow_advanced_properties": true}).expect(200)
+	e.admin.post(base+"/pipelines/"+pipe.Str("id")+"/deploy", map[string]any{}).expect(200)
+	token := e.admin.post("/api/v1/auth/tokens", map[string]any{"name": "cli"}).expect(201).Str("token")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("BEZISYNC_URL", e.srv.URL)
+	t.Setenv("BEZISYNC_TOKEN", token)
+	_, exported, _ := runCLI(t, "", "remote", "export", "orders-cdc")
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(exported), &doc); err != nil {
+		t.Fatal(err)
+	}
+	spec := doc["spec"].(map[string]any)
+	spec["sink"].(map[string]any)["naming"] = "moved.{table}"
+	spec["tuning"] = map[string]any{"debezium.source.snapshot.max.threads": "4"}
+	spec["advanced"] = map[string]any{"debezium.source.status.update.interval.ms": "12345"}
+	raw, _ := yaml.Marshal(doc)
+	file := filepath.Join(dir, "orders.yaml")
+	if err := os.WriteFile(file, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr := runCLI(t, "", "remote", "diff", "-f", file)
+	if code != 3 || !strings.Contains(out, "! breaks: the destination naming changes") || !strings.Contains(out, "setting Snapshot threads: default → 4 (matters for the first copy only)") ||
+		!strings.Contains(out, "raw debezium.source.status.update.interval.ms: passed through") || !strings.Contains(stderr, "--confirm") {
+		t.Fatal(code, out, stderr)
+	}
+	if code, out, _ := runCLI(t, "", "remote", "diff", "-f", file, "--confirm"); code != 0 {
+		t.Fatal(code, out)
+	}
+	before := e.admin.get(base + "/pipelines/" + pipe.Str("id")).expect(200).At("current_version")
+	if code, _, stderr := runCLI(t, "", "remote", "apply", "-f", file, "--deploy"); code != 3 || !strings.Contains(stderr, "--confirm") {
+		t.Fatal(code, stderr)
+	}
+	if after := e.admin.get(base + "/pipelines/" + pipe.Str("id")).expect(200).At("current_version"); after != before {
+		t.Fatalf("an unconfirmed apply changed the pipeline: v%v → v%v", before, after)
+	}
+	if code, out, stderr := runCLI(t, "", "remote", "apply", "-f", file, "--deploy", "--confirm"); code != 0 || !strings.Contains(out, "orders-cdc: updated") {
+		t.Fatal(code, out, stderr)
+	}
+}

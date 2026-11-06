@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { Pause, Play, RotateCw, Trash2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
+import { SettingsChangeList } from '@/components/SettingsChange';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { InlineError, Notice, Pill, Skeleton } from '@/components/ui/feedback';
 import { Field, RadioCards, Textarea } from '@/components/ui/form';
@@ -13,7 +14,7 @@ import { ErrorPanel } from '@/app/ErrorPanel';
 import { PIPELINE_TABS, type PipelineTab } from '@/app/router';
 import { ApiError } from '@/lib/api';
 import { ago } from '@/lib/format';
-import { useDecideChange, useDeletePipeline, useLifecycle, usePipeline, type Pipeline } from '@/lib/pipelines';
+import { useDecideChange, useDeletePipeline, useDiff, useLifecycle, usePipeline, type Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { HealthBadge, LifecycleBadge, statusOf } from '@/lib/status';
 import { ChangeDebeziumDialog } from './ChangeDebeziumDialog';
@@ -344,6 +345,7 @@ function ApprovalBanner({ pipeline: p }: { pipeline: Pipeline }) {
         <div className="mt-3">
           <OutputImpact pipeline={p} version={cr.version} />
         </div>
+        <RequestSettingsChange pipeline={p} version={cr.version} />
       </Notice>
       {!rejecting ? <InlineError error={decide.error} doing="Couldn’t record the decision" /> : null}
       <Modal
@@ -368,5 +370,19 @@ function ApprovalBanner({ pipeline: p }: { pipeline: Pipeline }) {
         <InlineError error={decide.error} doing="Couldn’t reject the request" />
       </Modal>
     </>
+  );
+}
+
+/** What an approval request changes in the settings, against the deployed version. */
+function RequestSettingsChange({ pipeline: p, version }: { pipeline: Pipeline; version: number }) {
+  const { project } = useProject();
+  const diff = useDiff(project.id, p.id, p.deployed_version ?? undefined, p.deployed_version ? version : undefined);
+  const change = diff.data?.settings_change;
+  if (!change) return null;
+  return (
+    <div className="mt-3 flex min-w-0 flex-col gap-2">
+      <strong className="text-sm font-semibold">What changes in the settings</strong>
+      <SettingsChangeList change={change} />
+    </div>
   );
 }

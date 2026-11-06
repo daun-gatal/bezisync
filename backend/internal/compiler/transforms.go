@@ -3,6 +3,7 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
@@ -49,6 +50,36 @@ func stepProps(c connectors.CompileContext, src connectors.Source, desc *connect
 	for i, t := range spec.Transforms {
 		name := domain.StepName(i, t)
 		key := "debezium.transforms." + name + "."
+		if t.Type == "route" {
+			continue // compiled after BeziSync's own router (routeProps)
+		}
+		if t.Type == "computed" {
+			// T16: Debezium has no expressions short of scripting, which has its own policy.
+			return nil, nil, nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Step %d: a computed column runs only on Flink CDC.", i+1))
+		}
+		if t.Type == "truncate" {
+			// A source option, not a transform in the chain: exactly the property a raw one
+			// would be, so a pipeline moved to the step keeps its hash (T7).
+			if desc == nil || !slices.Contains(domain.TruncateSources, desc.Type) {
+				return nil, nil, nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Truncating columns is not available for %s.", title))
+			}
+			byLength := map[int][]string{}
+			var lengths []int
+			for _, c := range t.Truncate {
+				if _, seen := byLength[c.Length]; !seen {
+					lengths = append(lengths, c.Length)
+				}
+				byLength[c.Length] = append(byLength[c.Length], c.Table+"."+c.Column)
+			}
+			for _, n := range lengths {
+				k := fmt.Sprintf("debezium.source.column.truncate.to.%d.chars", n)
+				if props[k] != "" {
+					props[k] += ","
+				}
+				props[k] += strings.Join(byLength[n], ",")
+			}
+			continue
+		}
 		switch t.Type {
 		case "unwrap":
 			props[key+"type"] = desc.UnwrapTransform
@@ -268,4 +299,37 @@ func groovyString(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `'`, `\'`)
 	return "'" + s + "'"
+}
+
+// routeProps sends the tables route steps match to their destination: after bzroute (which
+// names each table's topic from the naming pattern), one RegexRouter per destination from those
+// topics to it. Nothing for a spec without routes.
+func routeProps(c connectors.CompileContext, spec domain.PipelineSpec) (map[string]string, []string) {
+	routed := domain.RouteTargets(spec)
+	if len(routed) == 0 {
+		return nil, nil
+	}
+	byTarget := map[string][]string{}
+	for _, table := range spec.Source.Tables.Include {
+		if to, ok := routed[table]; ok {
+			schema, name, _ := strings.Cut(table, ".")
+			byTarget[to] = append(byTarget[to], connectors.JavaRegexLiteral(c.Destination(schema, name)))
+		}
+	}
+	targets := make([]string, 0, len(byTarget))
+	for to := range byTarget {
+		targets = append(targets, to)
+	}
+	slices.Sort(targets)
+	props := map[string]string{}
+	var chain []string
+	for i, to := range targets {
+		name := fmt.Sprintf("bzmerge%d", i+1)
+		key := "debezium.transforms." + name + "."
+		props[key+"type"] = "org.apache.kafka.connect.transforms.RegexRouter"
+		props[key+"regex"] = "(?:" + strings.Join(byTarget[to], "|") + ")"
+		props[key+"replacement"] = strings.ReplaceAll(to, "$", "\\$")
+		chain = append(chain, name)
+	}
+	return props, chain
 }

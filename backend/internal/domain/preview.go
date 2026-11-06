@@ -403,6 +403,9 @@ func Preview(in PreviewInput) PreviewResult {
 	res := PreviewResult{Table: in.Table, Operation: in.Operation, Steps: []PreviewStep{}, Notes: []string{}}
 	schema, table, _ := strings.Cut(in.Table, ".")
 	res.Destination = strings.NewReplacer("{schema}", schema, "{table}", table, "{pipeline}", in.Pipeline).Replace(in.Spec.Sink.Naming)
+	if to, ok := RouteTargets(in.Spec)[in.Table]; ok {
+		res.Destination = to
+	}
 	if len(in.Columns) == 0 {
 		res.Notes = append(res.Notes, "BeziSync has not read this table's columns yet, so the sample has no fields.")
 	}
@@ -440,7 +443,12 @@ func Preview(in PreviewInput) PreviewResult {
 	res.Input = PreviewEvent{Key: jsonForm(key), Value: jsonForm(mongoText(value))}
 	state := "delivered"
 	var current any = value
+	// A soft delete makes every unwrap step mark deletes, as the compiler does.
+	softDelete := slices.ContainsFunc(in.Spec.Transforms, func(t Transform) bool { return t.Type == "soft_delete" })
 	for i, t := range in.Spec.Transforms {
+		if softDelete && t.Type == "unwrap" {
+			t.DeleteHandling = "rewrite"
+		}
 		step := PreviewStep{Index: i, ID: t.ID, Type: t.Type}
 		switch {
 		case state == "dropped":
@@ -557,6 +565,45 @@ func applyStep(in PreviewInput, t Transform, value any) (any, string, string, st
 		return nil, "dropped", "Dropped: the event does not match this filter.", ""
 	case "unwrap":
 		return unwrap(in, t, value.(*om.Map))
+	case "route":
+		if to, ok := RouteTargets(in.Spec)[in.Table]; ok {
+			return value, "applied", "Sent to " + to + ".", ""
+		}
+		return value, "applied", "No route matches this table: it goes where the naming says.", ""
+	case "truncate":
+		var cut []string
+		for _, c := range t.Truncate {
+			if c.Table != in.Table {
+				continue
+			}
+			text := false
+			for _, col := range in.Columns {
+				text = text || (col.Name == c.Column && previewText(col.Type))
+			}
+			if !text {
+				continue
+			}
+			cutField(value, c.Column, c.Length)
+			cut = append(cut, fmt.Sprintf("%s to %d characters", c.Column, c.Length))
+		}
+		if len(cut) == 0 {
+			return value, "applied", "Nothing to cut in this table (text columns only).", ""
+		}
+		return value, "applied", "Cuts " + strings.Join(cut, ", ") + ".", ""
+	case "soft_delete":
+		field := SoftDeleteField["debezium"]
+		for _, c := range in.Columns {
+			if c.Name == field {
+				return value, "error", "", fmt.Sprintf("The table already has a column %s, which the soft delete would overwrite (field name duplication).", field)
+			}
+		}
+		if env, ok := value.(*om.Map); ok && env != nil {
+			if _, isEnvelope := env.Get("op"); isEnvelope {
+				// No unwrap step before it: the compiler adds one that marks deletes.
+				return unwrap(in, Transform{Type: "unwrap", DeleteHandling: "rewrite", AddFields: []string{"op", "source.ts_ms"}}, env)
+			}
+		}
+		return value, "applied", "Deleted rows are kept, marked " + field + ".", ""
 	case "outbox":
 		return value, "unknown", "The outbox router cannot be previewed.", ""
 	case "custom":
@@ -595,6 +642,32 @@ func applyStep(in PreviewInput, t Transform, value any) (any, string, string, st
 			note = "No field " + strings.Join(missing, ", ") + " at this point: nothing to rename."
 		}
 		return out, "applied", note, ""
+	case "computed":
+		if t.Table != in.Table {
+			return value, "applied", "Not this table.", ""
+		}
+		row := m
+		if after, ok := m.Get("after"); ok {
+			// The change envelope (no event shape before it): the column joins the row after.
+			if a, ok := after.(*om.Map); ok && a != nil {
+				row = a
+			} else {
+				return value, "applied", "", ""
+			}
+		}
+		if _, exists := row.Get(t.Name); exists {
+			return value, "error", "", fmt.Sprintf("The table already has a column %s.", t.Name)
+		}
+		out := cloneRow(m)
+		target := out
+		if row != m {
+			after, _ := out.Get("after")
+			a := cloneRow(after.(*om.Map))
+			out.Set("after", a)
+			target = a
+		}
+		target.Set(t.Name, computeSample(t, row))
+		return out, "applied", "", ""
 	case "add_field":
 		if _, exists := m.Get(t.Name); exists {
 			return value, "error", "", fmt.Sprintf("The event already has a field %s; the connector would stop with an error.", t.Name)
@@ -845,4 +918,37 @@ func twosComplement(n *big.Int) []byte {
 		b = append([]byte{0xff}, b...)
 	}
 	return b
+}
+
+// previewText: a column type truncation cuts (text, not JSON).
+func previewText(typ string) bool {
+	t := strings.ToLower(typ)
+	return !strings.Contains(t, "json") && (strings.Contains(t, "char") || strings.Contains(t, "text") || strings.Contains(t, "string") || strings.Contains(t, "clob"))
+}
+
+// cutField cuts a field's string value to n characters, in a row or in an envelope's before and
+// after.
+func cutField(value any, field string, n int) {
+	m, ok := value.(*om.Map)
+	if !ok || m == nil {
+		return
+	}
+	cut := func(r *om.Map) {
+		if v, ok := r.Get(field); ok {
+			if s, ok := v.(string); ok && len([]rune(s)) > n {
+				r.Set(field, string([]rune(s)[:n]))
+			}
+		}
+	}
+	if _, envelope := m.Get("op"); envelope {
+		for _, side := range []string{"before", "after"} {
+			if r, ok := m.Get(side); ok {
+				if rm, ok := r.(*om.Map); ok && rm != nil {
+					cut(rm)
+				}
+			}
+		}
+		return
+	}
+	cut(m)
 }

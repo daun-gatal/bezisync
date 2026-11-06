@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,6 +56,31 @@ type RuntimeRead struct {
 	Capacity        map[string]any `json:"capacity"`
 	Pipelines       int64          `json:"pipelines"`
 	Version         int            `json:"version"`
+	// PlacementProfiles are where this Kubernetes runtime's pipelines may run, by name.
+	PlacementProfiles []runtime.Placement `json:"placement_profiles"`
+}
+
+// placementProfiles reads an optional placement_profiles list (strictly: unknown keys refused).
+func placementProfiles(v *val.V, o *val.Object) ([]runtime.Placement, bool) {
+	f := o.Get("placement_profiles")
+	if !f.Present {
+		return nil, false
+	}
+	raw, err := json.Marshal(f.Raw)
+	if err != nil {
+		v.Fail(f.Loc, "value_error", "Value error, not a list of placement profiles")
+		return nil, true
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	out := []runtime.Placement{}
+	if f.IsNull() {
+		return out, true
+	}
+	if err := dec.Decode(&out); err != nil {
+		v.Fail(f.Loc, "value_error", "Value error, not a list of placement profiles: "+err.Error())
+	}
+	return out, true
 }
 
 func runtimeSecrets(rt *models.Runtime) (map[string]any, error) {
@@ -125,7 +151,7 @@ func runtimeRead(ctx context.Context, q db.Querier, rt *models.Runtime) (Runtime
 	}
 	return RuntimeRead{ID: rt.ID, Name: rt.Name, Kind: rt.Kind, Mode: rt.Mode, AgentVersion: rt.AgentVersion, Config: cfg, SecretFieldsSet: fields,
 		DefaultImage: rt.DefaultImage, EffectiveImage: effective, Enabled: rt.Enabled, LastTest: last, LastSeenAt: pytime.P(rt.LastSeenAt),
-		Capacity: capacity, Pipelines: count, Version: rt.Version}, nil
+		Capacity: capacity, Pipelines: count, Version: rt.Version, PlacementProfiles: nonNil(services.ProfilesOf(rt))}, nil
 }
 
 func projectRuntime(ctx context.Context, q db.Querier, a *auth.ProjectAccess, id uuid.UUID) (*models.Runtime, error) {
@@ -335,6 +361,7 @@ func runtimeRoutes(r chi.Router) {
 			Name, Kind, Mode string
 			Config, Secrets  map[string]any
 			DefaultImage     *string
+			Profiles         []runtime.Placement
 		}
 		b, err := body(r, func(v *val.V, o *val.Object) create {
 			c := create{}
@@ -351,6 +378,7 @@ func runtimeRoutes(r chi.Router) {
 				c.Secrets = map[string]any{}
 			}
 			c.DefaultImage = optStr(v, o, "default_image", val.StrRules{Max: 300})
+			c.Profiles, _ = placementProfiles(v, o)
 			return c
 		})
 		if err != nil {
@@ -364,6 +392,9 @@ func runtimeRoutes(r chi.Router) {
 			return err
 		}
 		ctx := r.Context()
+		if err := services.ValidateProfiles(ctx, nil, nil, b.Kind, b.Profiles); err != nil {
+			return err
+		}
 		var out RuntimeRead
 		var token string
 		err = tx(ctx, func(q db.Querier) error {
@@ -373,7 +404,7 @@ func runtimeRoutes(r chi.Router) {
 			}
 			now := db.Now()
 			rt := &models.Runtime{ID: db.NewID(), ProjectID: a.Project.ID, Name: b.Name, Kind: b.Kind, Mode: b.Mode, Config: db.Map(cfg), SecretsEnc: enc,
-				DefaultImage: b.DefaultImage, Enabled: true, Version: 1, AgentState: db.Map{}, CreatedAt: now, UpdatedAt: now}
+				DefaultImage: b.DefaultImage, Enabled: true, Version: 1, AgentState: db.Map{}, CreatedAt: now, UpdatedAt: now, PlacementProfiles: profileList(b.Profiles)}
 			var result runtime.TestResult
 			if b.Mode == "agent" {
 				token = security.NewToken("bza")
@@ -494,6 +525,8 @@ func runtimeRoutes(r chi.Router) {
 			HasDefaultImage    bool
 			Enabled            *bool
 			OnlyEnabled        bool
+			Profiles           []runtime.Placement
+			HasProfiles        bool
 		}
 		b, err := body(r, func(v *val.V, o *val.Object) update {
 			u := update{Name: slug(v, o, "name", false)}
@@ -502,7 +535,8 @@ func runtimeRoutes(r chi.Router) {
 			u.DefaultImage = optStr(v, o, "default_image", val.StrRules{Max: 300})
 			u.HasDefaultImage = o.Has("default_image")
 			u.Enabled = optBool(v, o, "enabled")
-			u.OnlyEnabled = !o.Has("name") && !o.Has("config") && !o.Has("secrets") && !o.Has("default_image")
+			u.Profiles, u.HasProfiles = placementProfiles(v, o)
+			u.OnlyEnabled = !o.Has("name") && !o.Has("config") && !o.Has("secrets") && !o.Has("default_image") && !o.Has("placement_profiles")
 			return u
 		})
 		if err != nil {
@@ -551,6 +585,13 @@ func runtimeRoutes(r chi.Router) {
 				return err
 			}
 			rt.Config, rt.SecretsEnc = db.Map(cfg), enc
+			// Profiles change without pausing anything: a pipeline takes its new one at its next deploy.
+			if b.HasProfiles {
+				if err := services.ValidateProfiles(ctx, q, rt, rt.Kind, b.Profiles); err != nil {
+					return err
+				}
+				rt.PlacementProfiles = profileList(b.Profiles)
+			}
 			if b.HasDefaultImage {
 				rt.DefaultImage = b.DefaultImage
 			}
@@ -717,4 +758,19 @@ func runtimeRoutes(r chi.Router) {
 		httpapi.JSON(w, http.StatusOK, newRuntimeTest(result))
 		return nil
 	}))
+}
+
+func profileList(profiles []runtime.Placement) db.List {
+	out := db.List{}
+	raw, _ := json.Marshal(profiles)
+	var items []any
+	_ = json.Unmarshal(raw, &items)
+	return append(out, items...)
+}
+
+func nonNil(p []runtime.Placement) []runtime.Placement {
+	if p == nil {
+		return []runtime.Placement{}
+	}
+	return p
 }

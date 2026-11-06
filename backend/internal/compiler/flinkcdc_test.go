@@ -16,6 +16,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
@@ -262,7 +263,7 @@ func TestCompileFlinkRefuses(t *testing.T) {
 		{"table name", "flink_table_name", with("source", map[string]any{"tables": map[string]any{"include": []any{"shop.order-lines"}}}), "", false},
 		{"flink setting", "flink_conf", with("flink_cdc", map[string]any{"flink_conf": map[string]any{"jobmanager.rpc.address": "evil"}}), "", false},
 		{"copy on every start", "engine_settings", with("snapshot", map[string]any{"mode": "always"}), "", false},
-		{"advanced", "engine_settings", with("advanced", map[string]any{"debezium.source.x": "1"}), "", false},
+		{"advanced", "managed_property", with("advanced", map[string]any{"debezium.source.x": "1"}), "", false},
 		{"collision", "destination_collision", with("source", map[string]any{"tables": map[string]any{"include": []any{"shop.orders", "crm.orders"}}}), "", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -370,5 +371,181 @@ func TestCompileFlinkSQLServer(t *testing.T) {
 	}
 	if strings.Contains(got.Pipeline, "heartbeat") {
 		t.Fatal(got.Pipeline)
+	}
+}
+
+// A custom cluster compiles to the shape the services resolved (packed, or stored at deploy), and
+// never without one.
+func TestCompileFlinkCustomCluster(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"policies": map[string]any{"resources": "custom"},
+		"flink_cdc": map[string]any{"cluster": map[string]any{"parallelism": 6, "slot": map[string]any{"cpu": "1", "memory": "2Gi"},
+			"job_manager": map[string]any{"cpu": "0.5", "memory": "1536Mi"}}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "customer_id", "total"}}
+	if _, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); code(err) != "flink_cluster" {
+		t.Fatal(err)
+	}
+	size := engine.Pack(6, 1000, 2048, "0.5", "1536Mi", engine.Node{CPUMilli: 4000, MemoryMiB: 8192}).Size
+	in.Cluster = &size
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"taskmanager.numberOfTaskSlots: 3", "parallelism.default: 6", "taskmanager.memory.process.size: 6656m", "jobmanager.memory.process.size: 1536m"} {
+		if !strings.Contains(got.FlinkConf, line) {
+			t.Errorf("%s not in\n%s", line, got.FlinkConf)
+		}
+	}
+	if got.Size.TaskManagers != 2 || !strings.Contains(got.Pipeline, `parallelism: "6"`) {
+		t.Fatalf("%+v\n%s", got.Size, got.Pipeline)
+	}
+	// Another shape is another config (the controller replaces the cluster only on a redeploy,
+	// which packs again).
+	other := engine.Pack(6, 1000, 2048, "0.5", "1536Mi", engine.Node{CPUMilli: 16000, MemoryMiB: 65536}).Size
+	in.Cluster = &other
+	again, _ := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if again.ConfigHash() == got.ConfigHash() || again.Size.TaskManagers != 1 {
+		t.Fatal("the shape must be part of what runs")
+	}
+}
+
+// F1, F4–F8: raw options of a Flink CDC pipeline pass only through their connector's prefixes,
+// go into the YAML through its encoder, and never replace what BeziSync sets.
+func TestCompileFlinkAdvanced(t *testing.T) {
+	flinkConfig(t)
+	tricky := ` a: b # c 'd' "e"`
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"advanced": map[string]any{"source.jdbc.properties.connectTimeout": "30000", "sink.table.properties.write.parquet.compression-codec": tricky}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "total"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(got.Pipeline), &doc); err != nil {
+		t.Fatal(err)
+	}
+	src, snk := doc["source"].(map[string]any), doc["sink"].(map[string]any)
+	if src["jdbc.properties.connectTimeout"] != "30000" || snk["table.properties.write.parquet.compression-codec"] != tricky {
+		t.Fatalf("%v\n%v", src, snk)
+	}
+	for key, want := range map[string]string{
+		"source.jdbc.properties.allowLoadLocalInfile": "load files or code", // F4
+		"source.jdbc.properties.sslMode":              "BeziSync sets this", // set from the connection
+		"sink.table.properties.format-version":        "move or rewrite",    // F5
+		"sink.table.properties.location":              "move or rewrite",
+		"sink.catalog.properties.uri":                 "Catalog and Hadoop",
+		"sink.hadoop.conf.fs.s3a.secret.key":          "Catalog and Hadoop",
+		"source.debezium.slot.drop.on.stop":           "WAL",             // F6: Debezium's own rules
+		"taskmanager.memory.process.size":             "Engine settings", // F8
+		"source.scan.startup.mode":                    "typed settings",
+		"pipeline.parallelism":                        "Pipeline options are",
+	} {
+		v := compiler.ClassifyFlinkAdvanced(key, "x", map[string]bool{"source.jdbc.properties.sslMode": true})
+		if !v.Refused() || !strings.Contains(v.Message, want) {
+			t.Errorf("%s: %+v", key, v)
+		}
+	}
+	// What BeziSync sets can't be replaced at compile either.
+	owned := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"advanced": map[string]any{"source.jdbc.properties.sslMode": "DISABLED"}})
+	if _, err := compiler.CompileFlink(flinkCtx(owned), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); code(err) != "managed_property" {
+		t.Fatal(err)
+	}
+}
+
+// T3, T4: on Flink CDC a soft delete keeps deleted rows, marked with their change type; a source
+// column of that name is refused.
+func TestSoftDeleteFlink(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{map[string]any{"type": "soft_delete", "id": "sd01"}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "total"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Pipeline, `converter-after-transform: "SOFT_DELETE"`) || !strings.Contains(got.Pipeline, "__data_event_type__ AS `__op`") {
+		t.Fatal(got.Pipeline)
+	}
+	in.Columns = map[string][]string{"shop.orders": {"id", "__op"}}
+	if _, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); code(err) != "transform_field_conflict" {
+		t.Fatal(err)
+	}
+}
+
+// On Flink CDC a Truncate step is SUBSTR in the projection (any source).
+func TestTruncateFlink(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{map[string]any{"type": "truncate", "columns": []any{map[string]any{"table": "shop.orders", "column": "notes", "length": 40}}}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "notes"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Pipeline, "SUBSTR(`notes`, 1, 40) AS `notes`") {
+		t.Fatal(got.Pipeline)
+	}
+}
+
+// Routes on Flink CDC: merged tables share their sink-table, which naming alone refuses.
+func TestRouteFlink(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders", "shop.orders_eu"}}},
+		"sink":       map[string]any{"naming": "{schema}_{table}"},
+		"transforms": []any{map[string]any{"type": "route", "routes": []any{map[string]any{"match": "shop.orders*", "to": "all_orders"}}}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id"}, "shop.orders_eu": {"id"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Destinations["shop.orders"] != got.Destinations["shop.orders_eu"] || strings.Count(got.Pipeline, "sink-table: \""+got.Destinations["shop.orders"]+"\"") != 2 {
+		t.Fatalf("%v\n%s", got.Destinations, got.Pipeline)
+	}
+}
+
+// Computed columns on Flink CDC: the function set as SQL, columns back-quoted and literals quoted,
+// so no input becomes an expression; a name the table has is refused (T13).
+func TestComputedFlink(t *testing.T) {
+	flinkConfig(t)
+	step := func(name, fn string, args ...any) map[string]any {
+		return map[string]any{"type": "computed", "table": "shop.orders", "name": name, "function": fn, "args": args}
+	}
+	col := func(c string) map[string]any { return map[string]any{"column": c} }
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{
+			step("label", "concat", col("status"), map[string]any{"text": "it's"}, col("id")),
+			step("month", "date_format", col("created_at"), map[string]any{"text": "yyyy-MM"}),
+			step("amount", "to_integer", col("total_text")),
+			step("short", "substr", col("status"), map[string]any{"number": 2}, map[string]any{"number": 3}),
+		}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "status", "created_at", "total_text"}}
+	got, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CONCAT(CAST(`status` AS STRING), 'it''s', CAST(`id` AS STRING)) AS `label`", "DATE_FORMAT(`created_at`, 'yyyy-MM') AS `month`",
+		"TRY_CAST(`total_text` AS BIGINT) AS `amount`", "SUBSTR(`status`, 2, 3) AS `short`"} {
+		if !strings.Contains(got.Pipeline, want) {
+			t.Errorf("no %s in\n%s", want, got.Pipeline)
+		}
+	}
+	clash := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{step("status", "upper", col("status"))}})
+	if _, err := compiler.CompileFlink(flinkCtx(clash), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); err == nil || !strings.Contains(err.Error(), "already has a column status") {
+		t.Fatal(err)
+	}
+	twice := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{step("x", "upper", col("status")), step("x", "lower", col("status"))}})
+	if _, err := compiler.CompileFlink(flinkCtx(twice), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); err == nil || !strings.Contains(err.Error(), "two columns called x") {
+		t.Fatal(err)
 	}
 }

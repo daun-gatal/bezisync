@@ -6,12 +6,20 @@ import { Button } from '@/components/ui/button';
 import { Notice, Pill } from '@/components/ui/feedback';
 import { Check, Input } from '@/components/ui/form';
 import { Select } from '@/components/ui/select';
-import type { FilterOp, FilterRule, RuleValue, TransformStep, ValueFormats } from '../spec';
+import type { ComputedArg, ComputedFn, FilterOp, FilterRule, RuleValue, TransformStep, ValueFormats } from '../spec';
 import {
   columnKind,
   fieldsBefore,
+  argSlot,
+  COMPUTED_FUNCTIONS,
+  DATE_PATTERNS,
+  defaultArgs,
+  kindFits,
+  globMatch,
+  routeTargets,
   FLINK_OPERATIONS,
   isNumericKind,
+  isTextType,
   KNOWN_CLASSES,
   METADATA,
   metadataField,
@@ -24,6 +32,7 @@ import {
   SCRIPTED_CLASSES,
   textError,
   toggleFlinkOperation,
+  TRUNCATE_SOURCES,
   type Caps,
   type TableInfo,
 } from './model';
@@ -767,5 +776,188 @@ export function KeysEditor({ keys, ctx, onChange }: { keys: Record<string, strin
         })}
       </tbody>
     </table>
+  );
+}
+
+/** Truncate: text columns of the captured tables, each cut to at most a length. Masked or left-out
+ *  columns aren't offered (a mask replaces the value whole). */
+export function TruncateEditor({ step, ctx, onChange }: { step: TransformStep; ctx: EditorContext; onChange: (s: TransformStep) => void }) {
+  const cols = step.columns ?? [];
+  const put = (next: typeof cols) => onChange({ ...step, columns: next });
+  const choices = ctx.tables.flatMap((t) => {
+    const rules = ctx.spec.source.columns[t.name];
+    return t.columns
+      .filter((c) => isTextType(c.type) && !rules?.mask.includes(c.name) && !rules?.exclude.includes(c.name))
+      .map((c) => ({ value: `${t.name}.${c.name}`, label: `${t.name}.${c.name}`, description: c.type }));
+  });
+  const unavailable = !ctx.flink && !TRUNCATE_SOURCES.includes(ctx.sourceType);
+  return (
+    <div className="flex flex-col gap-3">
+      {unavailable ? <Notice tone="warn">Debezium truncates columns of PostgreSQL and MySQL sources only.</Notice> : null}
+      {cols.map((c, i) => (
+        <div key={i} className="grid min-w-0 grid-cols-[minmax(0,1fr)_8rem_auto] items-end gap-2">
+          <Select
+            label={`Column ${i + 1}`}
+            value={c.column ? `${c.table}.${c.column}` : ''}
+            onChange={(v) => {
+              const at = v.lastIndexOf('.');
+              put(cols.map((x, j) => (j === i ? { ...x, table: v.slice(0, at), column: v.slice(at + 1) } : x)));
+            }}
+            options={choices}
+          />
+          <Input
+            aria-label={`Column ${i + 1} length`}
+            type="number"
+            min={1}
+            max={65535}
+            value={c.length}
+            onChange={(e) => put(cols.map((x, j) => (j === i ? { ...x, length: Math.max(1, Math.min(65535, Number(e.target.value) || 1)) } : x)))}
+          />
+          <Button size="sm" variant="ghost" icon={<X />} aria-label={`Remove column ${i + 1}`} onClick={() => put(cols.filter((_, j) => j !== i))} />
+        </div>
+      ))}
+      <div>
+        <Button size="sm" icon={<Plus />} disabled={!choices.length || unavailable} onClick={() => put([...cols, { table: '', column: '', length: 255 }])}>
+          Add a column
+        </Button>
+      </div>
+      {!choices.length ? <span className="text-xs text-muted">No text columns to cut in the captured tables.</span> : null}
+    </div>
+  );
+}
+
+/** Routes: tables a pattern matches (schema.table, * any run) go to one destination of the name
+ *  given; the first route a table matches wins and a table two routes match is refused (T10). Below,
+ *  where each captured table lands, live. */
+export function RouteEditor({ step, ctx, onChange }: { step: TransformStep; ctx: EditorContext; onChange: (s: TransformStep) => void }) {
+  const routes = step.routes ?? [];
+  const put = (next: typeof routes) => onChange({ ...step, routes: next });
+  const captured = ctx.spec.source.tables.include;
+  const steps = ctx.steps.map((t, j) => (j === ctx.index ? step : t));
+  const targets = routeTargets(steps, captured);
+  const what = ctx.flink ? 'table' : 'topic';
+  return (
+    <div className="flex flex-col gap-3">
+      {routes.map((r, i) => {
+        const n = captured.filter((t) => r.match && globMatch(r.match, t)).length;
+        return (
+          <div key={i} className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
+            <label className="flex min-w-0 flex-col gap-1 text-sm text-muted">
+              Tables {i + 1}
+              <Input aria-label={`Route ${i + 1} tables`} className="font-mono" placeholder="public.orders_*" value={r.match}
+                onChange={(e) => put(routes.map((x, j) => (j === i ? { ...x, match: e.target.value.trim() } : x)))} />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1 text-sm text-muted">
+              Destination {what}
+              <Input aria-label={`Route ${i + 1} destination`} className="font-mono" value={r.to}
+                onChange={(e) => put(routes.map((x, j) => (j === i ? { ...x, to: e.target.value.trim() } : x)))} />
+            </label>
+            <Button size="sm" variant="ghost" icon={<X />} aria-label={`Remove route ${i + 1}`} disabled={routes.length === 1} onClick={() => put(routes.filter((_, j) => j !== i))} />
+            <span className="col-span-3 text-xs text-muted">{r.match ? `Matches ${n} captured table${n === 1 ? '' : 's'}.` : 'A table name, or a pattern with *.'}</span>
+          </div>
+        );
+      })}
+      <div>
+        <Button size="sm" icon={<Plus />} disabled={routes.length >= 20} onClick={() => put([...routes, { match: '', to: '' }])}>
+          Add a route
+        </Button>
+      </div>
+      <table aria-label="Where tables go" className="w-full text-left text-sm">
+        <thead>
+          <tr className="text-xs text-muted">
+            <th className="py-1 font-medium">Table</th>
+            <th className="py-1 font-medium">Goes to</th>
+          </tr>
+        </thead>
+        <tbody>
+          {captured.map((t) => (
+            <tr key={t} className="border-t border-line">
+              <td className="py-1 font-mono">{t}</td>
+              <td className={clsx('py-1', targets.has(t) ? 'font-mono' : 'text-muted')}>{targets.get(t) || (targets.has(t) ? '…' : `its own ${what}`)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {[...new Set(targets.values())].some((to) => [...targets.values()].filter((x) => x === to).length > 1) ? (
+        <Notice tone="info">Tables routed together must have the same key and columns; preflight checks it.</Notice>
+      ) : null}
+    </div>
+  );
+}
+
+/** Computed column (Flink CDC): a new column of one table from a function of the fixed set, its
+ *  arguments picked — columns of the kind the function takes (left-out ones aren't offered), typed
+ *  numbers, a date pattern from a list, or a short text where the function joins texts. */
+export function ComputedEditor({ step, ctx, onChange }: { step: TransformStep; ctx: EditorContext; onChange: (s: TransformStep) => void }) {
+  const fn = step.function ?? 'upper';
+  const f = COMPUTED_FUNCTIONS[fn];
+  const args = step.args ?? [];
+  const table = ctx.tables.find((t) => t.name === step.table);
+  const excluded = ctx.spec.source.columns[step.table ?? '']?.exclude ?? [];
+  const put = (i: number, a: ComputedArg) => onChange({ ...step, args: args.map((x, j) => (j === i ? a : x)) });
+  const columns = (i: number) =>
+    (table?.columns ?? [])
+      .filter((c) => !excluded.includes(c.name) && kindFits(argSlot(fn, i), columnKind(ctx.sourceType, c.type)))
+      .map((c) => ({ value: c.name, label: c.name, description: c.type }));
+  const taken = table ? fieldsBefore(ctx.steps, ctx.index, table, ctx.spec) : [];
+  const nameErr = step.name ? nameError(step.name, taken) : null;
+  return (
+    <div className="flex flex-col gap-3">
+      <Row label="Table">
+        <Select label="Table" value={step.table ?? ''} options={ctx.tables.map((t) => ({ value: t.name, label: t.name }))}
+          onChange={(v) => onChange({ ...step, table: v, args: defaultArgs(fn) })} />
+      </Row>
+      <Row label="New column" htmlFor={`cc-name-${ctx.index}`}>
+        <div className="flex flex-col gap-1">
+          <Input id={`cc-name-${ctx.index}`} aria-label="New column" className="font-mono" value={step.name ?? ''} onChange={(e) => onChange({ ...step, name: e.target.value.trim() })} />
+          {nameErr ? <span className="text-xs text-bad" role="alert">{nameErr}</span> : null}
+        </div>
+      </Row>
+      <Row label="Function">
+        <div className="flex flex-col gap-1">
+          <Select label="Function" value={fn}
+            options={(Object.keys(COMPUTED_FUNCTIONS) as ComputedFn[]).map((k) => ({ value: k, label: COMPUTED_FUNCTIONS[k].title, description: COMPUTED_FUNCTIONS[k].help }))}
+            onChange={(v) => onChange({ ...step, function: v as ComputedFn, args: defaultArgs(v as ComputedFn) })} />
+        </div>
+      </Row>
+      {args.map((a, i) => {
+        const slot = argSlot(fn, i);
+        const label = `Argument ${i + 1}`;
+        return (
+          <Row key={i} label={label}>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+              {slot === 'number' ? (
+                <Input aria-label={label} type="number" min={1} max={65535} value={a.number ?? 1}
+                  onChange={(e) => put(i, { number: Math.max(1, Math.min(65535, Math.trunc(Number(e.target.value)) || 1)) })} />
+              ) : slot === 'pattern' ? (
+                <Select label={label} value={a.text ?? 'yyyy-MM-dd'} options={DATE_PATTERNS.map((p) => ({ value: p, label: p }))} onChange={(v) => put(i, { text: v })} />
+              ) : slot === 'any|lit' ? (
+                <div className="grid min-w-0 grid-cols-[8rem_minmax(0,1fr)] gap-2">
+                  <Select label={`${label} kind`} value={a.text !== undefined ? 'text' : 'column'}
+                    options={[{ value: 'column', label: 'A column' }, { value: 'text', label: 'A text' }]}
+                    onChange={(v) => put(i, v === 'text' ? { text: '' } : { column: '' })} />
+                  {a.text !== undefined ? (
+                    <Input aria-label={label} value={a.text} maxLength={200} onChange={(e) => put(i, { text: e.target.value })} />
+                  ) : (
+                    <Select label={label} value={a.column ?? ''} options={columns(i)} onChange={(v) => put(i, { column: v })} />
+                  )}
+                </div>
+              ) : (
+                <Select label={label} value={a.column ?? ''} options={columns(i)} onChange={(v) => put(i, { column: v })} />
+              )}
+              {f.max && args.length > (f.min ?? 0) ? (
+                <Button size="sm" variant="ghost" icon={<X />} aria-label={`Remove argument ${i + 1}`} onClick={() => onChange({ ...step, args: args.filter((_, j) => j !== i) })} />
+              ) : <span />}
+            </div>
+          </Row>
+        );
+      })}
+      {f.max && args.length < f.max ? (
+        <div>
+          <Button size="sm" icon={<Plus />} onClick={() => onChange({ ...step, args: [...args, { column: '' }] })}>Add an argument</Button>
+        </div>
+      ) : null}
+      {table && !columns(0).length ? <span className="text-xs text-muted">{step.table} has no column {f.title.toLowerCase()} can read.</span> : null}
+    </div>
   );
 }

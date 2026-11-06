@@ -96,7 +96,7 @@ src/
   (and `typeToConfirm` for irreversible ones; the typed text clears on every open); secrets shown
   once use a closable={false} modal with "I've copied it"; forms with unsaved input pass `dirty`
   to `Modal`, and pages with unsaved work use the router's `useBlocker`; status = `Pill` (glyph +
-  text, never colour alone); choose, don't type (Select, Combobox, Stepper, TimeRange, ChipsInput,
+  text, never colour alone); a report with an `unknown` check is a grey pill, never "Ready"; choose, don't type (Select, Combobox, Stepper, TimeRange, ChipsInput,
   SlugInput which shows the saved slug and never rewrites what is typed). Each fact appears once
   per page.
 - Sign-in (`features/settings/SignInSection.tsx`, pure rules in `signin.ts`): providers start
@@ -110,6 +110,43 @@ src/
 - Settings' project picker sets `?scope=<slug>` for per-project sections (rendered in a nested
   `ProjectProvider`); it never navigates to another project.
 - `/__ui` (development builds only) renders every component with stress data.
+- Engine settings (`lib/settings.ts`, `components/SettingsEditor.tsx`, `components/RawProperties.tsx`):
+  `SettingsEditor` edits typed settings from `GET /engines` grouped by stage (a Stepper bounded by the
+  registry and any project cap, a two-way choice for booleans, a Select for choices), each with its
+  `ImpactPill`; `settingError`/`canonicalSetting` mirror `engine.CheckSetting`/`CanonicalSetting`.
+  `RawProperties` edits raw properties as key/value rows and shows the server's verdict per key
+  (`settings:classify`, `useClassify`), never its own rules. Maps the server stores (`advanced`,
+  `tuning`) are compared in JSONB order (`jsonbSorted`), or autosave never settles. Review's Engine
+  settings card (Expert) holds both: `tuningSettings` picks the pipeline's settings (Flink settings
+  stay in `FlinkRunSettings`), and a raw key that is a setting converts with "Use the typed setting".
+  `SettingsChangeList` (`components/SettingsChange.tsx`) shows preflight's or the diff's
+  `settings_change` grouped by impact, heaviest first: in Review's final checks, History's diff and
+  deploy confirmation (`settingsChangeLines`), and the approval banner.
+- Flink CDC custom clusters (`lib/cluster.ts`, `components/ClusterDiagram.tsx`,
+  `wizard/FlinkClusterEditor.tsx`): Review's Size offers Custom to Experts (and keeps one a
+  Guided user already has). It starts from the preset it was (`clusterFromPreset`: the same readers),
+  offers only values the server accepts (`SLOT_CPUS`, `TM_MEMORIES`, …) and shows the server's
+  packing (`cluster:pack`, `usePackCluster`), never its own: the diagram (wraps; `role="img"` with
+  the words), why it splits, the total against the largest node and the fit check. `flinkSpecBlock`
+  writes the cluster in `dumpCluster` order. Readers are locked while a deployed pipeline has a
+  current saved position (`useSavedPositions`), as preflight's `flink_readers_changed` is.
+  "Shrink after the first copy" sets `streaming_slot` (lists stop at the copy size,
+  `streamingError` mirrors decodeCluster) and shows both diagrams with the peak and streaming
+  totals. The Overview's cluster card reads `artifacts.flink_shape` (`shapeView`) and offers Shrink
+  now under the `suggest` policy. Policies' Resources group edits `max_resources`,
+  `resource_limits` (dropped when empty) and `shrink_after_copy` (left out when `auto`), and
+  `blockedBy` counts each pipeline's server `footprint` (and the Flink presets for a custom cluster).
+- `components/Recommendations.tsx` shows preflight's recommendations in Review in both modes
+  (`freshRecommendations`: evidence under ten minutes old, a setting the pipeline can use, not yet
+  chosen); Use sets the tuning value and autosave saves it.
+- The adopt dialog shows the server's `plan` (`ImportBuckets`) and creates the draft from
+  `plan.spec`; Change Debezium version previews `debezium-images:effects` before confirming.
+- Setting limits (`settings/SettingLimits.tsx`) in Policies: add per setting, the impact count from
+  `setting-limits:impact`, obsolete keys flagged. Review hides hidden settings, bounds int maxima
+  (`caps`) and shows pins read-only (`SettingsEditor` `pinned`: "Set by project policy").
+- Placement (`settings/PlacementProfiles.tsx`): the Kubernetes runtime edit modal edits its profiles
+  (`profileError` blocks names and templates the server refuses); Review offers the chosen
+  runtime's profiles as Placement and writes `placement` after `tuning`, only when set.
 - `SchemaForm` renders descriptor JSON Schemas (connections, a sink's pipeline options): `ui.group`,
   `ui.expert`, `ui.labels` / `ui.descriptions` for enum values and `ui.when` (shown only while other
   fields hold listed values; hidden fields are dropped by `cleanValues`; `context` passes the sibling

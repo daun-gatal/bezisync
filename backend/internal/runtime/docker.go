@@ -741,5 +741,8 @@ func (d *DockerDriver) Capacity(ctx context.Context) map[string]any {
 		"memory_requested":   mem,
 		"workloads":          len(list),
 		"architectures":      Architectures(info.Architecture),
+		// One host: the largest "node" is the host itself.
+		"node_cpu_max":    float64(info.NCPU),
+		"node_memory_max": info.MemTotal,
 	}
 }

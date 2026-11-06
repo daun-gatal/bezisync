@@ -48,7 +48,7 @@ type Tool struct {
 // Group names the area a tool belongs to (Settings → MCP groups its list by it).
 func (t *Tool) Group() string {
 	for _, g := range []struct{ prefix, name string }{
-		{"pipeline", "Pipelines"}, {"connection", "Connections"}, {"runtime", "Runtimes"}, {"alert", "Alerts"},
+		{"pipeline", "Pipelines"}, {"engine_settings", "Pipelines"}, {"connection", "Connections"}, {"runtime", "Runtimes"}, {"alert", "Alerts"},
 		{"change_request", "Approvals"}, {"template", "Templates"}, {"saved_position", "Pipelines"},
 		{"debezium", "Engine versions"}, {"engine", "Engine versions"},
 		{"member", "People"}, {"user", "People"}, {"project", "Projects"}, {"secret", "Secret stores"},

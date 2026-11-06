@@ -401,6 +401,11 @@ func buildCatalog() []*Tool {
 			Call: func(cl *call) (any, error) {
 				return cl.do(http.MethodGet, "/api/v1/debezium-catalog"+query("engine", cl.s("engine")), nil)
 			}},
+		{Name: "list_engine_settings", Title: "A pipeline's engine settings", Kind: Read, Project: true, Perm: auth.PipelineView,
+			Description: "The settings this pipeline can tune (for its engine, source and destination), each with its bounds, default, what changing it does, " +
+				"its current value and this project's limit, and whether raw properties are allowed. Change them with update_pipeline (spec.tuning; " +
+				"a Flink setting in spec.flink_cdc.flink_conf): the same checks, limits and approvals apply.",
+			Params: []Param{pipelineArg}, Call: get(onPipeline("/settings"))},
 		{Name: "list_engines", Title: "Engines", Kind: Read,
 			Description: "The engines, whether each can run pipelines now (Flink CDC once an Admin registers an image), what each reads and writes, and Flink CDC's settings and sizes.",
 			Call:        get(fixed("/api/v1/engines"))},

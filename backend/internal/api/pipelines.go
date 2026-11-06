@@ -58,6 +58,17 @@ type PipelineRead struct {
 	// Engine runs the pipeline; Caps is what it can do (actions it can't do carry a reason).
 	Engine string      `json:"engine"`
 	Caps   engine.Caps `json:"caps"`
+	// Footprint is what the current version asks for at its peak (with the spec only).
+	Footprint *FootprintRead `json:"footprint,omitempty"`
+}
+
+// FootprintRead is a pipeline's peak footprint: what project limits are counted against.
+type FootprintRead struct {
+	CPU       float64 `json:"cpu"`
+	MemoryMiB int     `json:"memory_mib"`
+	Readers   int     `json:"readers"`
+	// Custom: the size is custom (a Flink CDC cluster is then held to max_resources by its totals).
+	Custom bool `json:"custom"`
 }
 
 func pipelineRead(ctx context.Context, q db.Querier, p *models.Pipeline, withSpec bool) (*PipelineRead, error) {
@@ -111,10 +122,20 @@ func pipelineRead(ctx context.Context, q db.Querier, p *models.Pipeline, withSpe
 	if current != nil {
 		out.CurrentVersion = &current.Number
 		out.HasUndeployedChanges = deployed == nil || current.ID != deployed.ID
+		spec := domain.MustSpec(map[string]any(current.Spec))
 		if withSpec {
-			spec := domain.MustSpec(map[string]any(current.Spec))
 			out.Spec = &spec
 		}
+		// Lists too: Policies counts each pipeline's peak against proposed limits. A custom Flink CDC
+		// cluster is packed for its runtime's nodes; nothing else needs them.
+		var capacity map[string]any
+		if eng == engine.FlinkCDC && spec.Policies.Resources == "custom" && p.RuntimeID != nil {
+			if full, err := services.GetRuntime(ctx, q, *p.RuntimeID); err == nil && full != nil {
+				capacity = services.RuntimeCapacityFor(p, spec, full)
+			}
+		}
+		f := services.FootprintOf(p, spec, capacity)
+		out.Footprint = &FootprintRead{CPU: f.CPU, MemoryMiB: f.MiB, Readers: f.Readers, Custom: spec.Policies.Resources == "custom"}
 	}
 	if deployed != nil {
 		out.DeployedVersion = &deployed.Number
@@ -618,6 +639,10 @@ func pipelineRoutes(r chi.Router) {
 	}
 	r.Post(base+"/{pipeline_id}/pause", desired("paused"))
 	r.Post(base+"/{pipeline_id}/resume", desired("running"))
+	r.Post(base+"/{pipeline_id}/cluster:shrink", pipelineAction(auth.PipelineOperate, http.StatusOK,
+		func(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, _ *http.Request) (int, error) {
+			return 0, services.ShrinkCluster(ctx, q, a, p)
+		}))
 	r.Post(base+"/{pipeline_id}/restart", pipelineAction(auth.PipelineOperate, http.StatusOK,
 		func(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, _ *http.Request) (int, error) {
 			_, err := services.Restart(ctx, q, a, p)
@@ -663,7 +688,8 @@ func pipelineRoutes(r chi.Router) {
 		if row == nil {
 			return problem.NotFound("Version")
 		}
-		compiled, err := services.CompileFor(ctx, q, p, domain.MustSpec(map[string]any(row.Spec)), "")
+		spec := domain.MustSpec(map[string]any(row.Spec))
+		compiled, err := services.CompileFor(ctx, q, p, spec, "")
 		if err != nil {
 			return err
 		}
@@ -676,7 +702,7 @@ func pipelineRoutes(r chi.Router) {
 		if dest == nil {
 			dest = map[string]string{}
 		}
-		httpapi.JSON(w, http.StatusOK, obj("version", row.Number, "properties", compiled.Render(), "secret_env", env, "destinations", dest, "image", compiled.Image))
+		httpapi.JSON(w, http.StatusOK, obj("version", row.Number, "properties", services.RenderForPeople(compiled, spec), "secret_env", env, "destinations", dest, "image", compiled.Image))
 		return nil
 	}))
 	r.Get(base+"/{pipeline_id}/logs", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
@@ -1093,7 +1119,11 @@ func pipelineRoutes(r chi.Router) {
 		if err != nil {
 			return err
 		}
-		httpapi.JSON(w, http.StatusOK, om.New().Set("from", out["from"]).Set("to", out["to"]).Set("lines", out["lines"]).Set("change", out["change"]))
+		res := om.New().Set("from", out["from"]).Set("to", out["to"]).Set("lines", out["lines"]).Set("change", out["change"])
+		if sc, ok := out["settings_change"]; ok {
+			res.Set("settings_change", sc)
+		}
+		httpapi.JSON(w, http.StatusOK, res)
 		return nil
 	}))
 	r.Get(base+"/{pipeline_id}/schema", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {

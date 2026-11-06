@@ -8,6 +8,7 @@ package compiler
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -18,8 +19,11 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/config"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
+	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
+	"github.com/daun-gatal/bezisync/backend/internal/runtime"
 )
 
 // Resource presets.
@@ -48,6 +52,24 @@ var ManagedPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^debezium\.(transforms|predicates)(\..*)?$`),
 }
 
+// ResourceFor is what a Debezium Server container asks for: a preset, or a custom size with its
+// heap worked out from its memory (domain.HeapMiB) and the batch and queue of the preset its
+// memory reaches.
+func ResourceFor(p domain.Policies) Resource {
+	if p.Resources != "custom" || p.Custom == nil {
+		return Resources[p.Resources]
+	}
+	a := p.Amount()
+	band := Resources["small"]
+	switch {
+	case a.MemoryMiB >= domain.ResourcePresets["large"].MemoryMiB:
+		band = Resources["large"]
+	case a.MemoryMiB >= domain.ResourcePresets["medium"].MemoryMiB:
+		band = Resources["medium"]
+	}
+	return Resource{CPU: p.Custom.CPU, Memory: p.Custom.Memory, Heap: fmt.Sprintf("%dm", domain.HeapMiB(a.MemoryMiB)), Batch: band.Batch, Queue: band.Queue}
+}
+
 // Constants shared with the runtime drivers.
 const (
 	StateSchema = "debezium_state"
@@ -72,6 +94,12 @@ type Compiled struct {
 	HealthPort int
 	// Flink is set for a pipeline that runs on Flink CDC (Properties is then empty).
 	Flink *FlinkCompiled
+	// Managed are the properties BeziSync set before the spec's advanced ones: no advanced
+	// property may change them (ClassifyAdvanced). Not part of the config hash.
+	Managed map[string]bool
+	// Placement is the placement profile the pods run with (nil: none). Part of the config hash
+	// only when set, so pipelines without one keep theirs.
+	Placement *runtime.Placement
 }
 
 // Render is application.properties, or a Flink CDC pipeline's pipeline.yaml.
@@ -91,6 +119,28 @@ func FromFlink(f *FlinkCompiled) *Compiled {
 // ConfigHash identifies what the workload runs. It must stay byte-identical to the Python
 // implementation: json.dumps(…, sort_keys=True) with default separators.
 func (c *Compiled) ConfigHash() string {
+	base := c.baseHash()
+	if c.Placement == nil {
+		return base
+	}
+	// Through encoding/json: the profile's own field names, sorted by Dumps.
+	raw, err := json.Marshal(c.Placement)
+	if err != nil {
+		panic(err)
+	}
+	var placement any
+	if err := json.Unmarshal(raw, &placement); err != nil {
+		panic(err)
+	}
+	s, err := pyjson.Dumps(map[string]any{"h": base, "placement": placement})
+	if err != nil {
+		panic(err)
+	}
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func (c *Compiled) baseHash() string {
 	if c.Flink != nil {
 		return c.Flink.ConfigHash()
 	}
@@ -250,9 +300,9 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 	if err != nil {
 		return nil, err
 	}
-	c.Spec.Transforms = withSinkUnwrap(c.Spec.Transforms, caps.Unwrap, sinkOptions)
+	c.Spec.Transforms = withSoftDelete(withSinkUnwrap(c.Spec.Transforms, caps.Unwrap, sinkOptions))
 	spec := c.Spec
-	res := Resources[spec.Policies.Resources]
+	res := ResourceFor(spec.Policies)
 	props := map[string]string{
 		"quarkus.http.port":                                      strconv.Itoa(HTTPPort),
 		"quarkus.log.console.json":                               "false",
@@ -376,18 +426,52 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 	props["debezium.transforms.bzroute.regex"] = regex
 	props["debezium.transforms.bzroute.replacement"] = replacement
 	chain = append(chain, "bzroute")
+	merged, mergeChain := routeProps(c, spec)
+	merge(props, merged)
+	chain = append(chain, mergeChain...)
 	props["debezium.transforms"] = strings.Join(chain, ",")
+	tuned, err := tuningSettings(engine.Debezium, source.Type, sink.Type, spec.Tuning)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range tuned {
+		_, set := props[s.Key]
+		if err := ownedByBeziSync(s, set); err != nil {
+			return nil, err
+		}
+		props[s.Key] = spec.Tuning[s.Key]
+	}
+	managed := make(map[string]bool, len(props)+1)
+	for k := range props {
+		managed[k] = true
+	}
 	merge(props, spec.Advanced)
 
 	if caps.NoTombstones {
+		managed["debezium.source.tombstones.on.delete"] = true
 		// The sink fails on empty events; an advanced override must not bring them back.
 		props["debezium.source.tombstones.on.delete"] = "false"
 	}
 
 	destinations := map[string]string{}
+	routed := domain.RouteTargets(spec)
+	natural := map[string]string{}
 	for _, t := range spec.Source.Tables.Include {
 		schema, table, _ := strings.Cut(t, ".")
 		destinations[t] = c.Destination(schema, table)
+		if to, ok := routed[t]; ok {
+			destinations[t] = to
+		} else {
+			natural[destinations[t]] = t
+		}
+	}
+	// A route meets an unrouted table's own destination: its events would mix in unasked.
+	for _, t := range spec.Source.Tables.Include {
+		if to, ok := routed[t]; ok {
+			if other, taken := natural[to]; taken {
+				return nil, problem.New(422, "destination_collision", fmt.Sprintf("%s and %s would both be written to %s. Route %s too, or send the route elsewhere.", t, other, to, other))
+			}
+		}
 	}
 	if spec.Policies.DeliveryCanary && srcDesc.SupportsCanary {
 		canary, err := src.CanaryTable(source, c)
@@ -437,5 +521,6 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 		Files:        files,
 		Tunnel:       tunnel,
 		HealthPort:   connectors.HealthPort(sink.Type, image),
+		Managed:      managed,
 	}, nil
 }

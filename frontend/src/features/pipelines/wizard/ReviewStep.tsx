@@ -1,5 +1,5 @@
 import { captureOf, sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/connections';
-import { cleanValues, type FormValues, type JsonSchema } from '@/components/SchemaForm';
+import type { JsonSchema } from '@/components/SchemaForm';
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Check as CheckIcon, Loader2 } from 'lucide-react';
@@ -7,20 +7,28 @@ import { toast } from 'sonner';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { InlineError, Notice, Pill, Skeleton } from '@/components/ui/feedback';
 import { Field, RadioCards, SlugInput, slugError, Stepper, Switch, Textarea } from '@/components/ui/form';
+import { RawProperties, type RawRow } from '@/components/RawProperties';
+import { SettingsChangeList } from '@/components/SettingsChange';
+import { freshRecommendations, Recommendations } from '@/components/Recommendations';
+import { SettingsEditor } from '@/components/SettingsEditor';
 import { Card, KeyValue } from '@/components/ui/layout';
 import { CodeBlock, Modal } from '@/components/ui/overlays';
 import { Select, TimeRange } from '@/components/ui/select';
 import { Meta, plural } from '@/components/ui/text';
 import { CheckList } from '@/components/CheckList';
 import { useRuntimes } from '@/features/settings/RuntimesSection';
+import { ApiError } from '@/lib/api';
 import { allows, sizeAllowed, usePolicies } from '@/lib/policies';
+import { canonicalSetting, jsonbSorted, settingError, tuningSettings, useClassify } from '@/lib/settings';
 import { slugify } from '@/lib/format';
-import { useDeploy, usePipelines, usePreflight, type Pipeline, type Preflight } from '@/lib/pipelines';
+import { useDeploy, usePipelines, usePreflight, useSavedPositions, type Pipeline, type Preflight } from '@/lib/pipelines';
+import { clusterFromPreset, manualError, streamingError, usePackCluster } from '@/lib/cluster';
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary } from '../transforms/Impact';
-import { deriveSinkOptions, fullSpec, optionsSchemaFor, parseAdvanced, RESOURCES, SNAPSHOT_MODES, type FullSpec } from '../spec';
+import { CUSTOM_CPUS, CUSTOM_MEMORIES, deriveSinkOptions, fullSpec, heapMiB, memoryMiB, optionsSchemaFor, PRESET_AMOUNTS, RESOURCES, SNAPSHOT_MODES, type FullSpec, flinkSinkOptions } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
+import { FlinkClusterEditor } from './FlinkClusterEditor';
 import { FlinkRunSettings } from './FlinkSettings';
 import { OwnerPicker } from './OwnerPicker';
 import { personalSummary } from './personal';
@@ -70,27 +78,77 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const [runtimeId, setRuntimeId] = useState<string | undefined>(pipeline.runtime?.id);
   const [mode, setMode] = useState(spec.snapshot.mode);
   const [resources, setResources] = useState(spec.policies.resources);
+  const [custom, setCustom] = useState(spec.policies.custom_resources ?? { cpu: '1', memory: '1536Mi' });
+  const customAmount = { cpu: Number(custom.cpu), mem: memoryMiB(custom.memory) };
+  const max = policies?.max_resources ? PRESET_AMOUNTS[policies.max_resources] : null;
+  const minSize = sinkCaps.min_resources ? PRESET_AMOUNTS[sinkCaps.min_resources as keyof typeof PRESET_AMOUNTS] : null;
+  const customError =
+    resources !== 'custom'
+      ? null
+      : max && (customAmount.cpu > max.cpu || customAmount.mem > max.mem)
+        ? `This project allows at most ${max.cpu} CPU and ${max.mem} MiB.`
+        : minSize && (customAmount.cpu < minSize.cpu || customAmount.mem < minSize.mem)
+          ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${minSize.cpu} CPU and ${minSize.mem} MiB.`
+          : null;
   const [latency, setLatency] = useState(spec.policies.latency_target_seconds);
   const [snapshotWindow, setSnapshotWindow] = useState<string | null>(spec.snapshot.window ?? null);
   const [canary, setCanary] = useState(spec.policies.delivery_canary);
-  const [advanced, setAdvanced] = useState(
-    Object.entries(spec.advanced)
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n'),
-  );
+  const [rawRows, setRawRows] = useState<RawRow[]>(Object.entries(spec.advanced).map(([key, value]) => ({ key, value })));
+  const [tuning, setTuning] = useState<Record<string, string>>(spec.tuning ?? {});
+  const [placement, setPlacement] = useState(spec.placement ?? '');
   const [force, setForce] = useState(false);
   const [reason, setReason] = useState('');
   const { save, pending: saving, error: saveError } = useSaveSpec(pipeline);
-  const adv = parseAdvanced(advanced);
+  // The project's setting limits: hidden ones aren't offered, pinned ones are shown as set by
+  // the project, and a maximum bounds the control.
+  const limits = policies?.setting_limits ?? {};
+  const tunable = tuningSettings(
+    (useEngines().data ?? []).flatMap((e) => e.settings ?? []),
+    pipeline.engine,
+    pipeline.source.type,
+    pipeline.sink?.type,
+  ).filter((s) => !limits[s.key]?.hide);
+  const pinned = Object.fromEntries(tunable.filter((s) => limits[s.key]?.pin).map((s) => [s.key, limits[s.key]!.pin!]));
+  const caps = Object.fromEntries(
+    tunable.filter((s) => s.type === 'int' && limits[s.key]?.max).map((s) => [s.key, Number(limits[s.key]!.max)]),
+  );
+  const verdicts = useClassify(project.id, pipeline.id, rawRows, expert);
+  const rawKeys = rawRows.map((r) => r.key.trim()).filter(Boolean);
+  const rawError = rawKeys.length !== new Set(rawKeys).size ? 'A property is set twice: remove one.' : null;
+  // Stored maps come back in JSONB order: build them the same way, or the draft never matches.
+  const advancedValues = jsonbSorted(Object.fromEntries(rawRows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value])));
+  const tuningError = Object.entries(tuning).some(([k, v]) => {
+    const s = tunable.find((t) => t.key === k);
+    return !s || settingError(s, v) !== null;
+  })
+    ? 'Fix or remove the highlighted engine settings.'
+    : null;
+  const useTypedSetting = (row: RawRow) => {
+    const s = tunable.find((t) => t.key === row.key.trim());
+    if (!s) return;
+    setTuning({ ...tuning, [s.key]: canonicalSetting(s, row.value) ?? s.default });
+    setRawRows(rawRows.filter((r) => r !== row));
+  };
   const nameErr = deployed ? null : !name.trim() ? 'Give the pipeline a name.' : slugError(name, others);
 
   const discovery = useDiscovery(project.id, pipeline.source.id);
+  // A running Flink CDC pipeline keeps its readers while it has a saved position to restore
+  // (flink_readers_changed); after Start over they can change.
+  const positions = useSavedPositions(project.id, pipeline.id, flink && deployed);
+  const readersLocked = flink && deployed && (positions.data === undefined || positions.data.positions.some((s) => s.current));
+  const clusterOn = flink && resources === 'custom' && fc.cluster !== undefined;
+  const pack = usePackCluster(project.id, pipeline.id, fc.cluster, clusterOn && !(fc.cluster && (manualError(fc.cluster) ?? streamingError(fc.cluster))));
+  const tableRows = useMemo(() => {
+    const byName = new Map((discovery.data?.tables ?? []).map((t) => [`${t.schema}.${t.name}`, t.rows_estimate ?? null]));
+    const rows = spec.source.tables.include.map((t) => byName.get(t) ?? null);
+    return rows.length && rows.every((r) => r !== null) ? rows.reduce<number>((n, r) => n + (r ?? 0), 0) : null;
+  }, [discovery.data, spec.source.tables.include]);
   // Options the destination derives from the tables (Iceberg's partition keys) follow the
   // tables and keys chosen in earlier steps.
   const sinkSchema = optionsSchemaFor(sinkCaps.options_schema as JsonSchema | null, pipeline.engine);
   const sinkOptions = deriveSinkOptions(
     // A Flink CDC pipeline keeps only its engine's options (no recorded partitions).
-    pipeline.engine === 'flink-cdc' && sinkSchema ? cleanValues(sinkSchema, spec.sink.options as FormValues) : spec.sink.options,
+    pipeline.engine === 'flink-cdc' && sinkSchema ? flinkSinkOptions(sinkSchema, spec.sink.options) : spec.sink.options,
     sinkSchema,
     spec.source.tables.include,
     spec.keys ?? {},
@@ -100,10 +158,23 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     ...spec,
     sink: { ...spec.sink, options: sinkOptions },
     snapshot: { ...spec.snapshot, mode, window: flink ? null : snapshotWindow || null },
-    policies: { ...spec.policies, resources, latency_target_seconds: latency, delivery_canary: flink ? false : canary },
-    advanced: flink ? {} : adv.values,
-    ...(flink ? { flink_cdc: flinkSpecBlock(fc) } : {}),
+    policies: {
+      ...withoutCustom(spec.policies),
+      resources,
+      latency_target_seconds: latency,
+      delivery_canary: flink ? false : canary,
+      ...(resources === 'custom' && !flink ? { custom_resources: custom } : {}),
+    },
+    advanced: advancedValues,
+    // A custom cluster is kept only while the size is custom (the server refuses it otherwise).
+    ...(flink ? { flink_cdc: flinkSpecBlock(resources === 'custom' ? fc : { ...fc, cluster: undefined }) } : {}),
   };
+  // tuning is dumped last, and only when set: the same here, or the draft never matches.
+  delete nextSpec.tuning;
+  if (Object.keys(tuning).length) nextSpec.tuning = jsonbSorted(tuning);
+  // placement is dumped after tuning, and only when set.
+  delete nextSpec.placement;
+  if (placement) nextSpec.placement = placement;
   const body: SaveBody = {
     ...(slugify(name) !== pipeline.name && !deployed ? { name: slugify(name) } : {}),
     owner,
@@ -115,7 +186,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     owner !== pipeline.owner ||
     runtimeId !== pipeline.runtime?.id ||
     JSON.stringify(nextSpec) !== JSON.stringify(spec);
-  const invalid = nameErr ?? adv.error;
+  const clusterError = clusterOn && fc.cluster ? (manualError(fc.cluster) ?? streamingError(fc.cluster)) : null;
+  const invalid = nameErr ?? rawError ?? tuningError ?? customError ?? clusterError;
 
   // Save shortly after the last change; one save at a time, so versions never conflict.
   const latest = useRef({ body, dirty, invalid, saving });
@@ -177,6 +249,8 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             : !report?.ok
               ? 'The final checks must pass.'
               : null;
+  // The chosen runtime's placement profiles (Kubernetes runtimes only have them).
+  const profiles = (runtimes.data ?? []).find((r) => r.id === runtimeId)?.placement_profiles ?? [];
   const runtimeOptions = (runtimes.data ?? []).map((r) => {
     const allowed = allows(policies?.allowed_runtime_ids, r.id);
     const why = !allowed ? 'Not allowed by this project’s policy.' : !r.enabled ? 'Turned off by an Admin.' : null;
@@ -219,7 +293,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
           </span>
         }
       >
-        <InlineError error={saveError} doing="Couldn’t save your changes" />
+        <InlineError
+          error={saveError}
+          doing="Couldn’t save your changes"
+          fix={saveError instanceof ApiError && saveError.code === 'managed_property' ? 'Remove those lines from Advanced Debezium properties, or set each one where its message says.' : undefined}
+        />
         <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
           <Field label="Name" error={nameErr} hint={deployed ? 'Deployed pipelines keep their name.' : 'Used in URLs, YAML and the {pipeline} placeholder.'}>
             {(id) => <SlugInput id={id} value={name} onChange={setName} disabled={deployed} taken={others} />}
@@ -248,6 +326,29 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
               )
             }
           </Field>
+          {profiles.length || placement ? (
+            <Field
+              label="Placement"
+              hint="Where on the runtime its pods run: a profile its Admins set (nodes, tolerations, priority)."
+              error={placement && !profiles.some((x) => x.name === placement) ? `This runtime has no profile ${placement}.` : null}
+            >
+              {(id) => (
+                <Select
+                  id={id}
+                  value={placement}
+                  onChange={setPlacement}
+                  options={[
+                    { value: '', label: 'Anywhere', description: 'No placement profile' },
+                    ...profiles.map((x) => ({
+                      value: x.name,
+                      label: x.name,
+                      description: Object.entries(x.node_selector ?? {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'Any node',
+                    })),
+                  ]}
+                />
+              )}
+            </Field>
+          ) : null}
           {expert ? (
             <Field label="Latency target" hint="Above this, the pipeline is shown as Lagging.">
               {(id) => <Stepper id={id} value={latency} onChange={setLatency} min={1} max={3600} unit="seconds" />}
@@ -259,21 +360,65 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             <RadioCards
               label="Size"
               value={resources}
-              onChange={(v) => setResources(v as FullSpec['policies']['resources'])}
-              options={RESOURCES.map((r) => ({
-                value: r.value,
-                label: r.title,
-                description: flink ? flinkSizeHelp(flinkEngine?.sizes?.[r.value]) : r.help,
-                disabled: (!sizeAllowed(policies, r.value) || (!flink && tooSmall(r.value)) || (flink && deployed)) && r.value !== resources,
-                why: flink && deployed
-                  ? 'A Flink CDC pipeline keeps the readers it was deployed with: Start over to change its size.'
-                  : tooSmall(r.value)
-                  ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${sinkCaps.min_resources}.`
-                  : `This project allows up to ${policies?.max_resources ?? 'a smaller size'}.`,
-              }))}
+              onChange={(v) => {
+                const next = v as FullSpec['policies']['resources'];
+                // A Flink CDC custom cluster starts from the size it was, with the same readers.
+                if (flink && next === 'custom' && !fc.cluster) setFc({ ...fc, cluster: clusterFromPreset(flinkEngine?.sizes?.[resources]) });
+                setResources(next);
+              }}
+              options={[
+                ...RESOURCES.map((r) => ({
+                  value: r.value as FullSpec['policies']['resources'],
+                  label: r.title,
+                  description: flink ? flinkSizeHelp(flinkEngine?.sizes?.[r.value]) : r.help,
+                  disabled: (!sizeAllowed(policies, r.value) || (!flink && tooSmall(r.value)) || readersLocked) && r.value !== resources,
+                  why: readersLocked
+                    ? 'A Flink CDC pipeline keeps the readers it was deployed with: Start over to change its size.'
+                    : tooSmall(r.value)
+                    ? `${TYPE_LABEL[pipeline.sink?.type ?? ''] ?? 'This destination'} needs at least ${sinkCaps.min_resources}.`
+                    : `This project allows up to ${policies?.max_resources ?? 'a smaller size'}.`,
+                })),
+                ...(expert && !flink
+                  ? [{ value: 'custom' as const, label: 'Custom', description: 'Your own CPU and memory; BeziSync works out the Java heap.' }]
+                  : flink && (expert || fc.cluster)
+                    ? [{ value: 'custom' as const, label: 'Custom', description: 'Your own readers, what each needs, and the TaskManagers BeziSync packs them into.' }]
+                    : []),
+              ]}
             />
           )}
         </Field>
+        {resources === 'custom' && !flink ? (
+          <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-4">
+            <Field label="CPU" error={customError}>
+              {(id) => (
+                <Select id={id} value={custom.cpu} onChange={(cpu) => setCustom({ ...custom, cpu })} options={CUSTOM_CPUS.map((c) => ({ value: c, label: `${c} CPU` }))} />
+              )}
+            </Field>
+            <Field label="Memory" hint="Requested and the limit, so the connector is never squeezed.">
+              {(id) => (
+                <Select
+                  id={id}
+                  value={custom.memory}
+                  onChange={(memory) => setCustom({ ...custom, memory })}
+                  options={CUSTOM_MEMORIES.map((m) => ({ value: m, label: m.endsWith('Gi') ? `${m.slice(0, -2)} GiB` : `${m.slice(0, -2)} MiB` }))}
+                />
+              )}
+            </Field>
+            <Field label="Java heap" hint="Worked out from memory, so the JVM always keeps room.">
+              {() => <Meta className="pt-2 text-sm text-ink">{heapMiB(memoryMiB(custom.memory))} MiB</Meta>}
+            </Field>
+          </div>
+        ) : null}
+        {clusterOn && fc.cluster ? (
+          <FlinkClusterEditor
+            value={fc.cluster}
+            onChange={(cluster) => setFc({ ...fc, cluster })}
+            packed={pack.data}
+            packing={pack.isFetching}
+            readersLocked={readersLocked}
+            rows={tableRows}
+          />
+        ) : null}
         {capture.snapshot_modes.length === 0 ? (
           <Notice tone="info" title="Existing rows">
             {sourceLabel} can’t copy the rows a table already has: the pipeline streams the changes made from the moment it first starts.
@@ -316,7 +461,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                 onChange={setFc}
                 sinkType={pipeline.sink?.type}
                 expert={expert}
-                catalogue={flinkEngine?.settings ?? []}
+                catalogue={(flinkEngine?.settings ?? []).filter((s) => s.scope === 'engine')}
                 deployed={deployed}
               />
             )}
@@ -340,21 +485,53 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             description="Backfills and re-syncs wait for this daily window (UTC) to spare the source. The first copy is not delayed."
           />
         )}
-        {expert && !flink ? (
-          <Field label="Advanced Debezium properties" optional error={adv.error} hint="One key=value per line. BeziSync-managed keys are rejected.">
-            {(id) => (
-              <Textarea
-                id={id}
-                mono
-                spellCheck={false}
-                value={advanced}
-                onChange={(e) => setAdvanced(e.target.value)}
-                placeholder="debezium.source.poll.interval.ms=200"
-              />
-            )}
-          </Field>
-        ) : null}
       </Card>
+
+      {/* Suggestions from this preflight's evidence, in both modes: one click sets them. */}
+      <Recommendations
+        recs={freshRecommendations(report?.recommendations, tunable, tuning)}
+        settings={tunable}
+        onUse={(key, value) => setTuning({ ...tuning, [key]: value })}
+      />
+      {expert ? (
+        <Card title="Engine settings">
+          <div className="flex min-w-0 flex-col gap-6">
+            <Field label={flink ? 'Flink CDC source, destination and pipeline options' : 'Debezium options'} optional group error={tuningError}>
+              {() =>
+                tunable.length ? (
+                  <SettingsEditor idBase="tuning" value={tuning} onChange={setTuning} settings={tunable} caps={caps} pinned={pinned} />
+                ) : (
+                  <Meta>BeziSync offers no typed settings for this source and destination yet.</Meta>
+                )
+              }
+            </Field>
+            <Field
+              label={flink ? 'Advanced Flink CDC options' : 'Advanced Debezium properties'}
+              optional
+              group
+              error={rawError}
+              hint={
+                !policies?.allow_advanced_properties
+                  ? 'This project doesn’t allow advanced properties: a pipeline with any can’t deploy. An Admin can allow them in Settings → Policies.'
+                  : flink
+                    ? 'Pass-through options BeziSync doesn’t offer: source.jdbc.properties.*, source.debezium.*, and the destination’s sink.properties.*, table.create.properties.* or table.properties.*. The rest show in preflight as not verified.'
+                    : 'For options BeziSync doesn’t offer, passed to Debezium as typed. Keys BeziSync sets, credentials and unsafe options are refused; the rest show in preflight as not verified.'
+              }
+            >
+              {() => (
+                <RawProperties
+                  idBase="raw"
+                  rows={rawRows}
+                  onChange={setRawRows}
+                  verdicts={verdicts}
+                  onUseSetting={useTypedSetting}
+                  keyPlaceholder={flink ? 'source.jdbc.properties.…' : 'debezium.source.…'}
+                />
+              )}
+            </Field>
+          </div>
+        </Card>
+      ) : null}
 
       <Card
         title={flink ? "What reaches the destination" : "Events"}
@@ -406,6 +583,14 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                     <li key={n}>{n}</li>
                   ))}
                 </ul>
+              </Notice>
+            ) : null}
+            {report.settings_change ? (
+              <Notice
+                tone={report.settings_change.impact === 'breaks_positions' ? 'bad' : report.settings_change.impact === 'next_copy' ? 'warn' : 'info'}
+                title="What changes in the settings"
+              >
+                <SettingsChangeList change={report.settings_change} />
               </Notice>
             ) : null}
             {report.sections.map((s) => (
@@ -473,4 +658,11 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       </Modal>
     </div>
   );
+}
+
+/** Policies without a custom size (it is sent only with resources: custom, as the server dumps it). */
+function withoutCustom(p: FullSpec['policies']): FullSpec['policies'] {
+  const { custom_resources: _c, ...rest } = p;
+  void _c;
+  return rest;
 }

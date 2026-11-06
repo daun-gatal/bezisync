@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
@@ -90,6 +92,25 @@ type Transform struct {
 	Delimiter  string            `json:"delimiter"`  // flatten
 	Class      string            `json:"class"`      // custom
 	Properties map[string]string `json:"properties"` // custom
+	Truncate   []Truncation      `json:"columns"`    // truncate
+	Routes     []Route           `json:"routes"`     // route
+	Table      string            `json:"table"`      // computed
+	Function   string            `json:"function"`   // computed
+	Args       []ComputedArg     `json:"args"`       // computed
+}
+
+// Route sends the captured tables a pattern matches to one destination name (merging shards):
+// * matches any run of characters, so shop.orders_* takes shop.orders_eu and shop.orders_us.
+type Route struct {
+	Match string `json:"match"`
+	To    string `json:"to"`
+}
+
+// Truncation cuts one text column of a table to at most Length characters.
+type Truncation struct {
+	Table  string `json:"table"`
+	Column string `json:"column"`
+	Length int    `json:"length"`
 }
 
 type ErrorPolicy struct {
@@ -104,7 +125,13 @@ type Policies struct {
 	LatencyTargetSeconds  int          `json:"latency_target_seconds"`
 	SourceRetainedLimitGB pyjson.Float `json:"source_retained_limit_gb"`
 	DeliveryCanary        bool         `json:"delivery_canary"`
+	// Custom is the size when Resources is "custom" (Debezium only). Dumped only when set.
+	Custom *CustomResources `json:"custom_resources"`
 }
+
+// tuningKeyRe is a setting name: lower-case ASCII parts separated by dots (registry keys only;
+// which ones a pipeline may use is checked against engine.SettingsFor).
+var tuningKeyRe = regexp.MustCompile(`^[a-z][a-zA-Z0-9_-]*(\.[a-zA-Z0-9_-]+)+$`)
 
 // PipelineSpec is the full spec with every default filled in.
 type PipelineSpec struct {
@@ -122,6 +149,12 @@ type PipelineSpec struct {
 	// like DebeziumImage does for Debezium. Both are dumped only when set.
 	FlinkCDC      FlinkCDCSpec `json:"flink_cdc"`
 	FlinkCDCImage *string      `json:"flink_cdc_image"`
+	// Tuning are typed settings from the registry (engine.SettingsFor), key → canonical value.
+	// Dumped only when set.
+	Tuning map[string]string `json:"tuning"`
+	// Placement names the runtime's placement profile the pipeline's pods run with (Kubernetes;
+	// "": none). Dumped only when set.
+	Placement string `json:"placement"`
 }
 
 // DefaultTransform is Transform(type=...) with defaults.
@@ -164,6 +197,10 @@ func (s PipelineSpec) Clone() PipelineSpec {
 		out.Source.Columns[k] = ColumnRules{Mask: append([]string{}, v.Mask...), Exclude: append([]string{}, v.Exclude...), Keep: cloneKeep(v.Keep)}
 	}
 	out.Sink.Options = cloneAny(s.Sink.Options).(map[string]any)
+	if s.Policies.Custom != nil {
+		c := *s.Policies.Custom
+		out.Policies.Custom = &c
+	}
 	out.Transforms = make([]Transform, len(s.Transforms))
 	for i, t := range s.Transforms {
 		out.Transforms[i] = cloneTransform(t)
@@ -177,6 +214,12 @@ func (s PipelineSpec) Clone() PipelineSpec {
 	out.Advanced = make(map[string]string, len(s.Advanced))
 	for k, v := range s.Advanced {
 		out.Advanced[k] = v
+	}
+	if s.Tuning != nil {
+		out.Tuning = make(map[string]string, len(s.Tuning))
+		for k, v := range s.Tuning {
+			out.Tuning[k] = v
+		}
 	}
 	out.FlinkCDC = s.FlinkCDC.clone()
 	if s.FlinkCDCImage != nil {
@@ -257,6 +300,11 @@ func (s PipelineSpec) Dump() *om.Map {
 			Set("delivery_canary", s.Policies.DeliveryCanary)).
 		Set("debezium_image", strPtr(s.DebeziumImage)).
 		Set("advanced", advanced)
+	if s.Policies.Custom != nil {
+		if p, ok := out.Get("policies"); ok {
+			p.(*om.Map).Set("custom_resources", om.New().Set("cpu", s.Policies.Custom.CPU).Set("memory", s.Policies.Custom.Memory))
+		}
+	}
 	if !s.Values.Empty() {
 		out.Set("values", dumpValues(s.Values))
 	}
@@ -268,6 +316,16 @@ func (s PipelineSpec) Dump() *om.Map {
 	}
 	if s.FlinkCDCImage != nil {
 		out.Set("flink_cdc_image", *s.FlinkCDCImage)
+	}
+	if len(s.Tuning) > 0 {
+		tuning := om.New()
+		for _, k := range sortedStrKeys(s.Tuning) {
+			tuning.Set(k, s.Tuning[k])
+		}
+		out.Set("tuning", tuning)
+	}
+	if s.Placement != "" {
+		out.Set("placement", s.Placement)
 	}
 	return out
 }
@@ -377,6 +435,28 @@ func decodeSpec(v *val.V, loc val.Loc, raw any) PipelineSpec {
 			spec.Advanced = m
 		}
 	}
+	if f := o.Get("tuning"); f.Present && !f.IsNull() {
+		if m, ok := v.StrDict(f.Loc, f.Raw); ok {
+			for _, k := range sortedStrKeys(m) {
+				if len(k) > 255 || !tuningKeyRe.MatchString(k) {
+					v.Fail(f.Loc.Add(k), "value_error", "Value error, not a setting name")
+				} else if len(m[k]) > 256 || strings.ContainsAny(m[k], "\r\n\t\x00") || strings.Contains(m[k], "${") {
+					v.Fail(f.Loc.Add(k), "value_error", "Value error, a setting's value is at most 256 characters, on one line, without ${…}")
+				}
+			}
+			if len(m) > 0 {
+				spec.Tuning = m
+			}
+		}
+	}
+	if f := o.Get("placement"); f.Present && !f.IsNull() {
+		if s, ok := v.Str(f.Loc, f.Raw); ok {
+			if s != "" && !placementRe.MatchString(s) {
+				v.ValueError(f.Loc, "a placement profile's name: lowercase letters, digits and dashes, at most 63")
+			}
+			spec.Placement = s
+		}
+	}
 	if f := o.Get("values"); f.Present && !f.IsNull() {
 		spec.Values = decodeValues(v, f.Loc, f.Raw)
 	}
@@ -410,8 +490,21 @@ func decodeSpec(v *val.V, loc val.Loc, raw any) PipelineSpec {
 			v.ValueError(loc, "column rules for tables that are not captured: "+strings.Join(unknown, ", "))
 		}
 	}
+	// A custom size is custom_resources (Debezium) or flink_cdc.cluster (Flink CDC), never both,
+	// and only with resources: custom.
+	custom, cluster := spec.Policies.Custom != nil, spec.FlinkCDC.Cluster != nil
+	switch {
+	case spec.Policies.Resources == "custom" && !custom && !cluster:
+		v.ValueError(loc.Add("policies", "custom_resources"), "a custom size needs custom_resources (Debezium) or flink_cdc.cluster (Flink CDC)")
+	case custom && cluster:
+		v.ValueError(loc.Add("policies", "custom_resources"), "custom_resources is for Debezium and flink_cdc.cluster for Flink CDC: use one")
+	case spec.Policies.Resources != "custom" && (custom || cluster):
+		v.ValueError(loc.Add("policies", "resources"), "a custom size needs resources: custom")
+	}
 	return spec
 }
+
+var placementRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
 func contains(list []string, s string) bool {
 	for _, x := range list {
@@ -663,10 +756,35 @@ func decodePolicies(v *val.V, loc val.Loc, raw any) Policies {
 		}
 	}
 	if f := o.Get("resources"); f.Present {
-		if s, ok := v.Literal(f.Loc, f.Raw, "small", "medium", "large"); ok {
+		if s, ok := v.Literal(f.Loc, f.Raw, "small", "medium", "large", "custom"); ok {
 			out.Resources = s
 		}
 	}
+	if f := o.Get("custom_resources"); f.Present && !f.IsNull() {
+		c := v.Model(f.Loc, f.Raw, "CustomResources")
+		if !c.Failed {
+			custom := CustomResources{}
+			if g := c.Get("cpu"); !g.Present {
+				v.Fail(g.Loc, "missing", "Field required")
+			} else if s, ok := v.Str(g.Loc, g.Raw); ok {
+				if _, good := ParseCPU(s); !good {
+					v.Fail(g.Loc, "value_error", "Value error, CPU is 0.25 to 8 in quarters, like 1.5")
+				}
+				custom.CPU = s
+			}
+			if g := c.Get("memory"); !g.Present {
+				v.Fail(g.Loc, "missing", "Field required")
+			} else if s, ok := v.Str(g.Loc, g.Raw); ok {
+				if _, good := ParseMemory(s); !good {
+					v.Fail(g.Loc, "value_error", "Value error, memory is 512Mi to 16Gi in steps of 256Mi, whole GiB written as Gi (2Gi)")
+				}
+				custom.Memory = s
+			}
+			c.Forbid()
+			out.Custom = &custom
+		}
+	}
+
 	if f := o.Get("errors"); f.Present {
 		e := v.Model(f.Loc, f.Raw, "ErrorPolicy")
 		if !e.Failed {
@@ -711,6 +829,99 @@ type ChangeSummary struct {
 	FormatChanged       bool     `json:"format_changed"`
 	RestartsConnector   bool     `json:"restarts_connector"`
 	Notes               []string `json:"notes"`
+}
+
+// SettingsChange is what a deploy changes in a pipeline's settings: the typed settings, Flink
+// settings and advanced properties that differ, each with what it does to a running pipeline, and
+// the heaviest of those. Reported next to ChangeSummary (whose shape is the recorded contract).
+type SettingsChange struct {
+	Settings []SettingChange `json:"settings"`
+	Impact   engine.Impact   `json:"impact"`
+}
+
+// SummarizeSettings is SettingsChange between two specs (nil when nothing differs).
+func SummarizeSettings(old *PipelineSpec, new PipelineSpec) *SettingsChange {
+	before := PipelineSpec{}
+	if old != nil {
+		before = *old
+	}
+	changes := SettingChanges(before, new)
+	if len(changes) == 0 {
+		return nil
+	}
+	return &SettingsChange{Settings: changes, Impact: HeaviestImpact(changes)}
+}
+
+// SettingChange is one setting a deploy changes. From or To is nil when the setting is unset
+// (its default applies).
+type SettingChange struct {
+	Key    string        `json:"key"`
+	Title  string        `json:"title"`
+	From   *string       `json:"from"`
+	To     *string       `json:"to"`
+	Impact engine.Impact `json:"impact"`
+	// Unverified: an advanced property, passed as typed; BeziSync can't say what it does beyond
+	// the restart.
+	Unverified bool `json:"unverified,omitempty"`
+}
+
+// SettingChanges lists what changes between two specs' settings, sorted by key within each kind:
+// typed settings, then Flink settings, then advanced properties.
+func SettingChanges(old, new PipelineSpec) []SettingChange {
+	var out []SettingChange
+	diff := func(a, b map[string]string, describe func(key string) (string, engine.Impact, bool)) {
+		keys := map[string]bool{}
+		for k := range a {
+			keys[k] = true
+		}
+		for k := range b {
+			keys[k] = true
+		}
+		sorted := make([]string, 0, len(keys))
+		for k := range keys {
+			sorted = append(sorted, k)
+		}
+		slices.Sort(sorted)
+		for _, k := range sorted {
+			from, hadFrom := a[k]
+			to, hasTo := b[k]
+			if hadFrom == hasTo && from == to {
+				continue
+			}
+			title, impact, unverified := describe(k)
+			c := SettingChange{Key: k, Title: title, Impact: impact, Unverified: unverified}
+			if hadFrom {
+				c.From = &from
+			}
+			if hasTo {
+				c.To = &to
+			}
+			out = append(out, c)
+		}
+	}
+	registry := func(key string) (string, engine.Impact, bool) {
+		for _, id := range engine.All {
+			if s := engine.SettingOf(id, key); s != nil {
+				return s.Title, s.Impact, false
+			}
+		}
+		return key, engine.ImpactRestart, false // a setting no longer in the registry: a restart
+	}
+	diff(old.Tuning, new.Tuning, registry)
+	diff(old.FlinkCDC.FlinkConf, new.FlinkCDC.FlinkConf, registry)
+	diff(old.Advanced, new.Advanced, func(key string) (string, engine.Impact, bool) { return key, engine.ImpactRestart, true })
+	return out
+}
+
+// HeaviestImpact is the heaviest impact of changes ("" when there are none).
+func HeaviestImpact(changes []SettingChange) engine.Impact {
+	var out engine.Impact
+	for _, c := range changes {
+		if out == "" || c.Impact.Rank() > out.Rank() {
+			out = c.Impact
+		}
+	}
+	return out
 }
 
 // SummarizeChange explains, in plain words, what deploying new over old does.

@@ -171,8 +171,13 @@ func catalogRoutes(r chi.Router) {
 			}
 			e := engineRead{ID: string(id), Title: id.Title(), Available: a.Available}
 			e.Sources, e.Sinks, e.ExceptSinks = engine.Runs(id)
+			for _, s := range engine.Settings() {
+				if s.Engine == id {
+					e.Settings = append(e.Settings, s)
+				}
+			}
 			if id == engine.FlinkCDC {
-				e.Settings, e.Sizes = engine.FlinkSettings, map[string]flinkSize{}
+				e.Sizes = map[string]flinkSize{}
 				for name, s := range engine.FlinkSizes {
 					e.Sizes[name] = flinkSize{JobManagerCPU: s.JobManagerCPU, JobManagerMemory: s.JobManagerMemory, TaskManagers: s.TaskManagers,
 						TaskManagerCPU: s.TaskManagerCPU, TaskManagerMemory: s.TaskManagerMemory, Parallelism: s.Parallelism(), TotalMemoryMiB: s.TotalMemoryMiB()}

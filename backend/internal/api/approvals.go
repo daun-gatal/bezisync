@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -164,6 +165,35 @@ func approvalRoutes(r chi.Router) {
 		httpapi.JSON(w, http.StatusOK, p)
 		return nil
 	}))
+	// How many pipelines proposed setting limits would refuse (counted before an Admin saves).
+	r.Post("/projects/{project_id}/policies/setting-limits:impact", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		a, err := project(r)
+		if err != nil {
+			return err
+		}
+		raw, p := httpapi.Body(r, true)
+		if p != nil {
+			return p
+		}
+		v := &val.V{}
+		policies, ok := domain.ParsePolicies(v, val.Loc{"body"}, raw)
+		if !ok {
+			return v.Problem()
+		}
+		if err := a.Require(auth.ProjectManage); err != nil {
+			return err
+		}
+		if err := services.ValidateSettingLimits(policies.SettingLimits); err != nil {
+			return err
+		}
+		ctx := r.Context()
+		out, err := services.SettingLimitImpact(ctx, pool(ctx), a.Project.ID, policies.SettingLimits)
+		if err != nil {
+			return err
+		}
+		httpapi.JSON(w, http.StatusOK, map[string]any{"items": out})
+		return nil
+	}))
 	r.Put("/projects/{project_id}/policies", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
 		a, err := project(r)
 		if err != nil {
@@ -184,6 +214,20 @@ func approvalRoutes(r chi.Router) {
 		ctx := r.Context()
 		err = tx(ctx, func(q db.Querier) error {
 			current, err := services.PoliciesOf(ctx, q, a.Project.ID)
+			if err != nil {
+				return err
+			}
+			// New or changed limits must fit their settings; stored ones a later registry dropped
+			// are kept as they are (shown obsolete, ignored).
+			fresh := map[string]domain.SettingLimit{}
+			for k, l := range policies.SettingLimits {
+				if old, kept := current.SettingLimits[k]; !kept || !reflect.DeepEqual(old, l) {
+					fresh[k] = l
+				}
+			}
+			if err := services.ValidateSettingLimits(fresh); err != nil {
+				return err
+			}
 			if err != nil {
 				return err
 			}

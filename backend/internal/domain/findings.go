@@ -106,6 +106,7 @@ func TransformFindings(sourceType, pipeline string, spec PipelineSpec, tables ma
 					Message: fmt.Sprintf("%s, %s: %s", table, StepLabel(s.Index, t), s.Note)})
 			}
 		}
+		out = append(out, computedFindings(sourceType, table, info, spec)...)
 		rules := spec.Source.Columns[table]
 		for i, t := range spec.Transforms {
 			if !t.Typed() || (t.Tables != nil && !slices.Contains(t.Tables, table)) {
@@ -223,12 +224,18 @@ func TransformChecks(spec PipelineSpec, findings []TransformFinding) []checks.Ch
 		"transform_column_missing":     "Transforms: columns",
 		"transform_rule_type":          "Transforms: filter rules",
 		"transform_key_column_missing": "Transforms: message keys",
+		"transform_computed_input":     "Transforms: computed columns",
 	}
 	for _, code := range order {
 		msgs := group[code]
 		c := checks.Check{Code: code, Title: titles[code], Category: checks.CatDestination, Status: checks.Warn, Message: strings.Join(first(msgs, 5), " ")}
 		if len(msgs) > 5 {
 			c.Message += fmt.Sprintf(" (and %d more)", len(msgs)-5)
+		}
+		if code == "transform_computed_input" {
+			c.Status, c.Blocking = checks.Fail, true
+			c.Why = "Flink CDC stops the job when a projection reads a column the table lacks, or calls a function on a value of another type."
+			c.Fix = &checks.Fix{Kind: "text", Who: "You", Code: "Pick another column for the computed column, under Transform."}
 		}
 		if code == "transform_field_conflict" {
 			c.Status, c.Blocking = checks.Fail, true

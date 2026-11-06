@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, fieldsBefore, flinkColumns, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, computedError, defaultArgs, formulaText, kindFits, FLINK_ONLY_STEPS, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -165,5 +165,116 @@ describe('Flink CDC steps', () => {
     // Key columns chosen for a table replace its primary key.
     const keyed = fullSpec({ source: { tables: { include: ['public.orders'] } }, keys: { 'public.orders': ['cust_id'] } } as never);
     expect(flinkColumns(orders, keyed, [], 'p').filter((c) => c.key).map((c) => c.name)).toEqual(['cust_id']);
+  });
+});
+
+describe('soft delete', () => {
+  const table: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'integer' }], primaryKey: ['id'] };
+  it('adds the marker field once, says what it does, and counts as breaking', () => {
+    const steps = [defaultStep('soft_delete', [])];
+    expect(fieldsBefore(steps, 1, table, { source: { tables: { include: ['public.orders'] }, columns: {} } })).toEqual(['id', '__deleted']);
+    expect(summarize(steps[0]!)).toContain('stays, marked deleted');
+    const base = fullSpec({ source: { tables: { include: ['public.orders'] } } });
+    const impact = outputImpact(base, { ...base, transforms: [...base.transforms, steps[0]!] });
+    expect(impact.some((i) => i.kind === 'breaking' && i.text.includes('Deleted rows now stay'))).toBe(true);
+  });
+  it('runs on both engines', () => {
+    expect(DEBEZIUM_ONLY_STEPS).not.toContain('soft_delete');
+  });
+});
+
+describe('truncate', () => {
+  it('cuts text only and says what it cuts', () => {
+    expect(isTextType('character varying(200)')).toBe(true);
+    expect(isTextType('text')).toBe(true);
+    expect(isTextType('jsonb')).toBe(false);
+    expect(isTextType('integer')).toBe(false);
+    const step = { ...defaultStep('truncate', []), columns: [{ table: 'public.orders', column: 'notes', length: 100 }] };
+    expect(summarize(step)).toBe('public.orders.notes to 100');
+    expect(summarize(defaultStep('truncate', []))).toBe('No columns yet');
+    expect(DEBEZIUM_ONLY_STEPS).not.toContain('truncate');
+  });
+  it('a row without a column is never saved nor previewed', () => {
+    expect(stepErrors([defaultStep('truncate', [])]).get(0)).toBe('Add a column to cut.');
+    expect(stepErrors([{ ...defaultStep('truncate', []), columns: [{ table: '', column: '', length: 255 }] }]).get(0)).toBe('Pick a column for every row.');
+    expect(stepErrors([{ ...defaultStep('truncate', []), columns: [{ table: 'public.orders', column: 'notes', length: 9 }] }]).size).toBe(0);
+  });
+});
+
+describe('route', () => {
+  const tables = ['public.orders_2024', 'public.orders_2025', 'public.customers'];
+  it('matches like the server (domain.GlobMatch)', () => {
+    expect(globMatch('public.orders_*', 'public.orders_2024')).toBe(true);
+    expect(globMatch('public.orders_*', 'public.customers')).toBe(false);
+    expect(globMatch('*.customers', 'public.customers')).toBe(true);
+    expect(globMatch('public.*_2025', 'public.orders_2025')).toBe(true);
+    expect(globMatch('public.orders', 'public.orders_2024')).toBe(false);
+    expect(globMatch('p*s*s', 'public.sales')).toBe(true);
+    expect(globMatch('p*s*s', 'public.orders')).toBe(false);
+    expect(globMatch('a*a', 'a')).toBe(false);
+    expect(globMatch('a*a', 'aa')).toBe(true);
+    expect(globMatch('*', 'public.x')).toBe(true);
+    expect(globMatch('public.*o*o*', 'public.foo')).toBe(true);
+  });
+  it('sends each table to the first route it matches; the rest keep their own destination', () => {
+    const step: TransformStep = { type: 'route', id: 's1', routes: [{ match: 'public.orders_*', to: 'orders' }] };
+    const t = routeTargets([step], tables);
+    expect([...t.entries()]).toEqual([['public.orders_2024', 'orders'], ['public.orders_2025', 'orders']]);
+    expect(summarize(step)).toBe('public.orders_* → orders');
+    expect(summarize({ type: 'route', routes: [] })).toBe('No routes yet');
+    expect(DEBEZIUM_ONLY_STEPS).not.toContain('route');
+  });
+  it('refuses what the server refuses: bad patterns, bad names, and a table two routes match (T10)', () => {
+    const err = (routes: { match: string; to: string }[], more: TransformStep[] = []) =>
+      stepErrors([{ type: 'route', id: 's1', routes }, ...more], tables).get(0);
+    expect(err([{ match: 'orders', to: 'x' }])).toMatch(/schema.table/);
+    expect(err([{ match: 'public.orders_*', to: 'a b' }])).toMatch(/destination name/);
+    expect(err([])).toBe('Add a route.');
+    expect(err([{ match: 'public.orders_*', to: 'orders' }, { match: '*.orders_2025', to: 'other' }])).toMatch(/public.orders_2025 matches more than one route/);
+    // Across two route steps too.
+    expect(err([{ match: 'public.orders_*', to: 'orders' }], [{ type: 'route', id: 's2', routes: [{ match: 'public.*', to: 'all' }] }])).toMatch(/more than one route/);
+    expect(err([{ match: 'public.orders_*', to: 'orders' }])).toBeUndefined();
+  });
+  it('a new or changed route breaks consumers', () => {
+    const before = fullSpec({ source: { tables: { include: tables } } });
+    const after = { ...before, transforms: [...before.transforms, { type: 'route' as const, id: 's1', routes: [{ match: 'public.orders_*', to: 'orders' }] }] };
+    expect(outputImpact(before, after)).toEqual([{ kind: 'breaking', text: 'New routes — public.orders_* → orders. Matched tables arrive in another destination.' }]);
+  });
+});
+
+describe('computed', () => {
+  const step = (over: Partial<TransformStep>): TransformStep => ({ ...defaultStep('computed', []), table: 'public.orders', name: 'label', ...over });
+  it('runs on Flink CDC only and starts with what its function takes', () => {
+    expect(FLINK_ONLY_STEPS).toContain('computed');
+    expect(defaultArgs('concat')).toEqual([{ column: '' }, { column: '' }]);
+    expect(defaultArgs('substr')).toEqual([{ column: '' }, { number: 1 }, { number: 1 }]);
+    expect(defaultArgs('date_format')).toEqual([{ column: '' }, { text: 'yyyy-MM-dd' }]);
+  });
+  it('offers only columns of the kind a function takes (T15)', () => {
+    expect(kindFits('text', 'text')).toBe(true);
+    expect(kindFits('text', 'int')).toBe(false);
+    expect(kindFits('time', 'timestamp')).toBe(true);
+    expect(kindFits('time', 'timestamptz')).toBe(false);
+    expect(kindFits('any', 'json')).toBe(false);
+    expect(kindFits('any|lit', 'decimal')).toBe(true);
+  });
+  it('says what is missing, as the server would', () => {
+    expect(computedError(step({ table: '' }))).toBe('Choose the table.');
+    expect(computedError(step({ name: '1x' }))).toMatch(/letters, digits/);
+    expect(computedError(step({ args: [{ column: '' }] }))).toBe('Pick a column for every argument.');
+    expect(computedError(step({ function: 'substr', args: [{ column: 'notes' }, { number: 0 }, { number: 2 }] }))).toMatch(/from 1 to 65535/);
+    expect(computedError(step({ function: 'concat', args: [{ column: 'a' }, { text: '${BZ_SRC_PASSWORD}' }] }))).toMatch(/\$\{/);
+    expect(computedError(step({ args: [{ column: 'status' }] }))).toBeNull();
+  });
+  it('reads as a formula, adds its column and is additive', () => {
+    const s = step({ function: 'concat', args: [{ column: 'status' }, { text: '-' }, { column: 'id' }] });
+    expect(formulaText(s)).toBe('Join(status, "-", id)');
+    expect(summarize(s)).toBe('public.orders: label = Join(status, "-", id)');
+    const table: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'integer' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
+    const spec = fullSpec({ source: { tables: { include: ['public.orders'] } } });
+    expect(fieldsBefore([s, defaultStep('rename', [])], 1, table, spec)).toContain('label');
+    expect(flinkColumns(table, spec, [s], 'p').at(-1)).toEqual({ name: 'label', from: { kind: 'computed', formula: 'Join(status, "-", id)' }, key: false });
+    const after = { ...spec, transforms: [...spec.transforms, s] };
+    expect(outputImpact(spec, after)).toEqual([{ kind: 'additive', text: 'New column label (public.orders).' }]);
   });
 });

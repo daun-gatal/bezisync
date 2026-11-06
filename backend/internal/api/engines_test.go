@@ -30,7 +30,7 @@ func TestFlinkCDCOffUntilAnImageIsRegistered(t *testing.T) {
 	// What each engine runs, and Flink CDC's settings and sizes, for the wizard.
 	if at(t, l[0], "sources") != nil || at(t, l[0], "except_sinks").([]any)[0] != "starrocks" || len(at(t, l[1], "sources").([]any)) != 3 ||
 		len(at(t, l[1], "sinks").([]any)) != 4 || len(at(t, l[1], "settings").([]any)) == 0 || at(t, l[1], "sizes", "medium", "parallelism") != float64(4) ||
-		at(t, l[0], "settings") != nil {
+		len(at(t, l[0], "settings").([]any)) == 0 || at(t, l[0], "settings").([]any)[0].(map[string]any)["engine"] != "debezium" {
 		t.Fatal(string(engines.Raw))
 	}
 	if c := e.admin.get("/api/v1/debezium-catalog?engine=flink-cdc").expect(200); c.At("default_image") != nil || len(c.List("entries")) != 0 {
@@ -237,5 +237,49 @@ func TestStarRocksNeedsFlinkCDC(t *testing.T) {
 	}
 	if strings.Contains(string(cfg.Raw), "sr-s3cret") || cfg.At("destinations", "shop.orders") != "lake.cdc_shop_orders" {
 		t.Fatal(string(cfg.Raw))
+	}
+}
+
+// F4–F8: a Flink CDC pipeline's raw options pass only through their prefixes, need the project's
+// policy, show as not verified; an experimental setting warns.
+func TestFlinkRawOptionsAndExperimental(t *testing.T) {
+	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
+	lake := icebergSink(t, e)
+	base := "/api/v1/projects/" + e.pid + "/pipelines"
+	spec := func(advanced, tuning map[string]any) map[string]any {
+		return map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}, "advanced": advanced, "tuning": tuning}
+	}
+	body := map[string]any{"name": "lake-raw", "source_id": e.ids.Source, "sink_id": lake, "runtime_id": e.ids.Runtime, "engine": "flink-cdc",
+		"spec": spec(map[string]any{"sink.catalog.properties.uri": "http://elsewhere", "taskmanager.numberOfTaskSlots": "9"}, map[string]any{})}
+	r := e.admin.post(base, body).expect(422)
+	if r.Code() != "managed_property" || !strings.Contains(string(r.Raw), "Catalog and Hadoop") || !strings.Contains(string(r.Raw), "Engine settings") {
+		t.Fatal(string(r.Raw))
+	}
+	body["spec"] = spec(map[string]any{"source.jdbc.properties.connectTimeout": "30000"},
+		map[string]any{"source.scan.incremental.snapshot.unbounded-chunk-first.enabled": "true"})
+	p := e.admin.post(base, body).expect(201)
+	u := base + "/" + p.Str("id")
+	codes := func() map[string]map[string]any {
+		out := map[string]map[string]any{}
+		for _, s := range e.admin.post(u+"/preflight", nil).expect(200).List("sections") {
+			for _, c := range at(t, s, "report", "checks").([]any) {
+				out[at(t, c, "code").(string)] = c.(map[string]any)
+			}
+		}
+		return out
+	}
+	c := codes()
+	if c["policy_advanced_properties"]["status"] != "fail" || c["setting_experimental"]["status"] != "warn" {
+		t.Fatal(c["policy_advanced_properties"], c["setting_experimental"])
+	}
+	e.admin.put("/api/v1/projects/"+e.pid+"/policies", map[string]any{"allow_advanced_properties": true}).expect(200)
+	if c := codes(); c["advanced_unverified"]["status"] != "unknown" || c["policy_advanced_properties"] != nil {
+		t.Fatal(c["advanced_unverified"])
+	}
+	cls := e.admin.post(u+"/settings:classify", map[string]any{"items": []any{map[string]any{"key": "sink.table.properties.location", "value": "s3://x"},
+		map[string]any{"key": "sink.table.properties.write.parquet.compression-codec", "value": "zstd"}}}).expect(200).List("items")
+	if at(t, cls[0], "class") != "forbidden" || at(t, cls[1], "class") != "allowed" {
+		t.Fatal(cls)
 	}
 }

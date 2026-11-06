@@ -1,6 +1,7 @@
 import type { PipelineSpec } from '@/lib/pipelines';
 import type { SinkCaps } from '@/lib/connections';
-import type { JsonSchema } from '@/components/SchemaForm';
+import { cleanValues, type FormValues, type JsonSchema } from '@/components/SchemaForm';
+import { jsonbSorted } from '@/lib/settings';
 import type { EngineId, FlinkChoices } from '@/lib/engines';
 
 /** The spec with every default filled in (mirrors backend defaults in domain/spec.py).
@@ -18,7 +19,9 @@ export interface FullSpec {
   transforms: TransformStep[];
   policies: {
     heartbeat_seconds: number;
-    resources: 'small' | 'medium' | 'large';
+    resources: 'small' | 'medium' | 'large' | 'custom';
+    /** The size when resources is 'custom' (Debezium only). */
+    custom_resources?: { cpu: string; memory: string };
     errors: { retries: number; on_poison_event: 'fail' | 'warn' | 'skip' };
     latency_target_seconds: number;
     source_retained_limit_gb: number;
@@ -26,6 +29,10 @@ export interface FullSpec {
   };
   debezium_image: string | null;
   advanced: Record<string, string>;
+  /** Typed settings from the registry (GET /engines), key → canonical value; absent = none. */
+  tuning?: Record<string, string>;
+  /** The runtime's placement profile the pods run with (Kubernetes); dumped only when set. */
+  placement?: string;
   /** Connector value encodings; absent = connector defaults. */
   values?: ValueFormats;
   /** Message key columns per captured table; absent = primary keys. On Flink CDC: the
@@ -38,18 +45,28 @@ export interface FullSpec {
 
 /** The spec with only the settings of its engine: Flink CDC and Debezium refuse each other's. */
 export function specForEngine(spec: FullSpec, engine: EngineId): FullSpec {
+  const tuning = tuningFor(spec.tuning, engine);
   if (engine === 'flink-cdc') {
-    const { values: _values, ...rest } = spec;
+    const { values: _values, tuning: _t, ...rest } = spec;
     void _values;
-    return { ...rest, debezium_image: null, advanced: {}, snapshot: { ...spec.snapshot, delay_seconds: 0, window: null } };
+    void _t;
+    return { ...rest, debezium_image: null, advanced: {}, snapshot: { ...spec.snapshot, delay_seconds: 0, window: null }, ...(tuning ? { tuning } : {}) };
   }
-  const { flink_cdc: _fc, flink_cdc_image: _img, ...rest } = spec;
+  const { flink_cdc: _fc, flink_cdc_image: _img, tuning: _t, ...rest } = spec;
   void _fc;
   void _img;
-  return rest;
+  void _t;
+  return { ...rest, ...(tuning ? { tuning } : {}) };
 }
 
-export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom';
+/** The settings of one engine: Debezium keys start with "debezium.", Flink CDC keys with the YAML
+ *  block they go in ("source.", "sink.", "pipeline."). Undefined when none are left. */
+export function tuningFor(tuning: Record<string, string> | null | undefined, engine: EngineId): Record<string, string> | undefined {
+  const kept = Object.entries(tuning ?? {}).filter(([k]) => (engine === 'debezium') === k.startsWith('debezium.'));
+  return kept.length ? Object.fromEntries(kept) : undefined;
+}
+
+export type TransformType = 'unwrap' | 'filter' | 'outbox' | 'rename' | 'add_field' | 'flatten' | 'custom' | 'soft_delete' | 'truncate' | 'route' | 'computed';
 export type FilterOperation = 'insert' | 'update' | 'delete' | 'snapshot';
 export type FilterOp = 'eq' | 'ne' | 'in' | 'not_in' | 'gt' | 'gte' | 'lt' | 'lte' | 'is_null' | 'is_not_null' | 'is_true' | 'is_false';
 export type RuleValue = string | number | boolean;
@@ -75,12 +92,23 @@ export interface TransformStep {
   delimiter?: '_' | '.';
   class?: string;
   properties?: Record<string, string>;
+  /** truncate: text columns cut to at most length characters. */
+  columns?: { table: string; column: string; length: number }[];
+  routes?: { match: string; to: string }[];
+  /** computed: the table, the function and its arguments (name is the new column). */
+  table?: string;
+  function?: ComputedFn;
+  args?: ComputedArg[];
 }
+
+export type ComputedFn = 'upper' | 'lower' | 'trim' | 'length' | 'concat' | 'substr' | 'date_format' | 'to_text' | 'to_integer';
+/** One argument: a column, a text or a number (exactly one). */
+export interface ComputedArg { column?: string; text?: string; number?: number }
 
 /** Stage of a step: 0 keep events, 1 event shape, 2 field changes, -1 order as written. */
 export function stageOf(t: TransformStep): number {
   if (t.type === 'filter' && ((t.operations?.length ?? 0) > 0 || (t.rules?.length ?? 0) > 0)) return 0;
-  if (t.type === 'unwrap') return 1;
+  if (t.type === 'unwrap' || t.type === 'soft_delete') return 1;
   if (t.type === 'rename' || t.type === 'add_field' || t.type === 'flatten' || t.type === 'custom') return 2;
   return -1;
 }
@@ -117,6 +145,19 @@ export const SNAPSHOT_MODES: { value: SnapshotMode; title: string; help: string 
   { value: 'initial_only', title: 'Copy existing rows once, no streaming', help: 'A one-off export. Debezium: initial_only' },
   { value: 'always', title: 'Copy existing rows on every start', help: 'Rarely useful; expensive. Debezium: always' },
 ];
+
+/** Custom size choices, as the spec stores them (domain.ParseCPU, ParseMemory). */
+export const CUSTOM_CPUS = Array.from({ length: 32 }, (_, i) => String(((i + 1) * 250) / 1000));
+export const CUSTOM_MEMORIES = Array.from({ length: 63 }, (_, i) => {
+  const mib = 512 + i * 256;
+  return mib % 1024 === 0 ? `${mib / 1024}Gi` : `${mib}Mi`;
+});
+/** MiB of a memory choice. */
+export const memoryMiB = (m: string) => (m.endsWith('Gi') ? Number(m.slice(0, -2)) * 1024 : Number(m.slice(0, -2)));
+/** The Java heap BeziSync works out from memory (domain.HeapMiB): 70%, at least 256 MiB left to the JVM. */
+export const heapMiB = (mem: number) => Math.min(Math.floor((mem * 7) / 10), mem - 256);
+/** Preset sizes in numbers, for comparing a custom size with a limit. */
+export const PRESET_AMOUNTS = { small: { cpu: 0.5, mem: 768 }, medium: { cpu: 1, mem: 1536 }, large: { cpu: 2, mem: 3072 } } as const;
 
 export const RESOURCES = [
   { value: 'small', title: 'Small', help: '0.5 CPU · 768 MiB · up to ~2k changes/s' },
@@ -244,6 +285,14 @@ export function deriveSinkOptions(
 /** Destination options a Flink CDC pipeline has: Iceberg keeps how rows are written (upserts by
  *  key: no append) and the table format; commit timing and bucket partitioning are Debezium's. */
 const FLINK_OPTIONS = ['write_mode', 'format_version'];
+
+/** A Flink CDC pipeline's destination options: its engine's form fields, plus Partition by (which
+ *  its own card edits, outside the form), in the server's JSONB key order. */
+export function flinkSinkOptions(schema: JsonSchema, options: Record<string, unknown>): Record<string, unknown> {
+  const out = cleanValues(schema, options as FormValues);
+  const by = options.partition_by;
+  return by && typeof by === 'object' && Object.keys(by).length ? jsonbSorted({ ...out, partition_by: by }) : out;
+}
 
 export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: EngineId): JsonSchema | null {
   if (!schema) return null;

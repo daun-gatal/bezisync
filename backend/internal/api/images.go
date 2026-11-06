@@ -66,6 +66,50 @@ func imageRoutes(r chi.Router) {
 		httpapi.JSON(w, http.StatusOK, obj("default_image", def, "default_release_notes_url", services.ReleaseNotesURL(def), "images", usage))
 		return nil
 	}))
+	// Pure: what moving pipelines to an image would do to their settings, before anything changes.
+	r.Post("/projects/{project_id}/debezium-images:effects", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
+		a, err := project(r)
+		if err != nil {
+			return err
+		}
+		type ask struct {
+			IDs   []uuid.UUID
+			Image *string
+		}
+		b, err := body(r, func(v *val.V, o *val.Object) ask {
+			out := ask{Image: optStr(v, o, "image", val.StrRules{Max: 300})}
+			f := o.Get("pipeline_ids")
+			if !f.Present {
+				v.Fail(f.Loc, "missing", "Field required")
+				return out
+			}
+			if list, ok := v.List(f.Loc, f.Raw); ok {
+				if len(list) > 200 {
+					v.Fail(f.Loc, "too_long", "List should have at most 200 items after validation, not more")
+				}
+				for i, x := range list {
+					if id, ok := v.UUID(f.Loc.Add(i), x); ok {
+						out.IDs = append(out.IDs, id)
+					}
+				}
+			}
+			o.Forbid()
+			return out
+		})
+		if err != nil {
+			return err
+		}
+		if err := a.Require(auth.PipelineView); err != nil {
+			return err
+		}
+		ctx := r.Context()
+		out, err := services.ImageEffects(ctx, pool(ctx), a, b.IDs, b.Image)
+		if err != nil {
+			return err
+		}
+		httpapi.JSON(w, http.StatusOK, out)
+		return nil
+	}))
 	r.Post("/projects/{project_id}/debezium-images:apply", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
 		a, err := project(r)
 		if err != nil {

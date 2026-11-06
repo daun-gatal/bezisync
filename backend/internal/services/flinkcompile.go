@@ -31,7 +31,9 @@ func NeedsFlinkColumns(spec domain.PipelineSpec) bool {
 			return true
 		}
 	}
-	return slices.ContainsFunc(spec.Transforms, func(t domain.Transform) bool { return t.Type == "rename" })
+	return slices.ContainsFunc(spec.Transforms, func(t domain.Transform) bool {
+		return t.Type == "rename" || t.Type == "soft_delete" || t.Type == "truncate"
+	})
 }
 
 // ResolveFlinkImage is the Flink CDC image a pipeline runs: its pin, or the catalog default.
@@ -134,6 +136,10 @@ func flinkInput(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 		KeystorePassword: secrets.KeystorePassword}
 	if rt != nil {
 		in.RuntimeKind = rt.Kind
+	}
+	if spec.Policies.Resources == "custom" {
+		size := FlinkSizeOf(p, spec, RuntimeCapacityFor(p, spec, rt)).Size
+		in.Cluster = &size
 	}
 	if startup, ok := p.Artifacts[ArtifactStartup].(map[string]any); ok {
 		in.Startup = startup

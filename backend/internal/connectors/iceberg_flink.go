@@ -84,6 +84,17 @@ func (s *icebergSink) FlinkSink(conn Resolved, c CompileContext) (*FlinkBlock, e
 	}
 	o.Set("table.properties.format-version", Str(opts, "format_version"))
 	o.Set("table.properties.write.format.default", "parquet")
+	partitions, err := IcebergPartitionBy(c.Spec, opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(partitions) > 0 {
+		key, err := icebergPartitionKey(partitions, s.flinkDestinations(conn, c))
+		if err != nil {
+			return nil, err
+		}
+		o.Set("partition.key", key)
+	}
 	b := &FlinkBlock{Options: o, Env: env, Connector: "iceberg", Extra: []string{"iceberg-aws"}}
 	if Str(opts, "write_mode") == "upsert_keep_deletes" {
 		// A deleted row stays, marked: __op is Flink CDC's change type (-D for a delete).

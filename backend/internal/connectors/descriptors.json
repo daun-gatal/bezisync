@@ -2946,6 +2946,57 @@
          "help": "Table (schema.table) → the key column to bucket by; \"\" partitions by the day of the change. The wizard keeps it from discovery.",
          "from": "table_keys"
         }
+       },
+       "partition_by": {
+        "additionalProperties": {
+         "items": {
+          "additionalProperties": false,
+          "properties": {
+           "column": {
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_]+$",
+            "title": "Column",
+            "type": "string"
+           },
+           "transform": {
+            "enum": [
+             "identity",
+             "year",
+             "month",
+             "day",
+             "hour",
+             "bucket",
+             "truncate"
+            ],
+            "title": "Transform",
+            "type": "string"
+           },
+           "n": {
+            "default": 0,
+            "maximum": 65535,
+            "minimum": 0,
+            "title": "N",
+            "type": "integer"
+           }
+          },
+          "required": [
+           "column",
+           "transform"
+          ],
+          "title": "PartitionField",
+          "type": "object"
+         },
+         "maxItems": 4,
+         "minItems": 1,
+         "type": "array"
+        },
+        "default": {},
+        "title": "Partition by",
+        "type": "object",
+        "ui": {
+         "hidden": true,
+         "help": "Flink CDC only: table (schema.table) → its partition fields, applied when Flink CDC creates the table."
+        }
        }
       },
       "title": "IcebergOptions",

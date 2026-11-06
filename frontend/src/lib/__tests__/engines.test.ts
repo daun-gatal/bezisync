@@ -64,4 +64,29 @@ describe('flinkSpecBlock', () => {
     const sameLength = { ...stored, flink_conf: { 'b.x': '1', 'a.y': '2', 'aa': '3' } };
     expect(Object.keys(flinkSpecBlock(flinkChoices(sameLength)).flink_conf!)).toEqual(['aa', 'a.y', 'b.x']);
   });
+
+  it('keeps a custom cluster, last and in the order the server dumps it', () => {
+    const stored = { schema_changes: 'apply', new_columns: 'hold', freshness_seconds: 5, commit_seconds: 60 } as const;
+    const cluster = {
+      parallelism: 4,
+      slot: { cpu: '1', memory: '2Gi' },
+      job_manager: { cpu: '1', memory: '1Gi' },
+      shape: 'manual' as const,
+      task_managers: { count: 2, slots: 2, cpu: '2', memory: '4Gi' },
+    };
+    const shuffled = {
+      task_managers: { memory: '4Gi', cpu: '2', slots: 2, count: 2 },
+      shape: 'manual' as const,
+      job_manager: { memory: '1Gi', cpu: '1' },
+      slot: { memory: '2Gi', cpu: '1' },
+      parallelism: 4,
+    };
+    expect(JSON.stringify(flinkSpecBlock(flinkChoices({ ...stored, cluster: shuffled })))).toBe(JSON.stringify({ ...stored, cluster }));
+    // A streaming slot size goes right after slot.
+    const shrinking = { parallelism: 4, job_manager: { cpu: '1', memory: '1Gi' }, shape: 'auto' as const, streaming_slot: { memory: '512Mi', cpu: '0.5' }, slot: { cpu: '1', memory: '2Gi' } };
+    expect(Object.keys(flinkSpecBlock(flinkChoices({ ...stored, cluster: shrinking })).cluster!)).toEqual(['parallelism', 'slot', 'streaming_slot', 'job_manager', 'shape']);
+    // An automatic shape has no task_managers.
+    const auto = { parallelism: 2, slot: { cpu: '1', memory: '1Gi' }, job_manager: { cpu: '1', memory: '1Gi' }, shape: 'auto' as const };
+    expect(JSON.stringify(flinkSpecBlock(flinkChoices({ ...stored, cluster: { ...auto, task_managers: null } })).cluster)).toBe(JSON.stringify(auto));
+  });
 });

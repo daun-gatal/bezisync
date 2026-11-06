@@ -241,3 +241,116 @@ func TestTransformPolicies(t *testing.T) {
 		t.Errorf("%s", b)
 	}
 }
+
+func TestTruncateStep(t *testing.T) {
+	parse := func(columns map[string]any, steps ...any) (domain.PipelineSpec, string) {
+		v := &val.V{}
+		s, _ := domain.ParseSpec(v, nil, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders"}}, "columns": columns},
+			"transforms": steps})
+		var msgs []string
+		for _, e := range v.Errors {
+			msgs = append(msgs, e.Message)
+		}
+		return s, strings.Join(msgs, "|")
+	}
+	col := func(table, column string, n int) map[string]any {
+		return map[string]any{"table": table, "column": column, "length": n}
+	}
+	step := func(cols ...any) map[string]any {
+		return map[string]any{"type": "truncate", "id": "tr01", "columns": cols}
+	}
+	s, errs := parse(map[string]any{}, step(col("public.orders", "notes", 100)))
+	if errs != "" || len(s.Transforms) != 1 || s.Transforms[0].Truncate[0] != (domain.Truncation{Table: "public.orders", Column: "notes", Length: 100}) {
+		t.Fatal(errs)
+	}
+	b, _ := json.Marshal(s)
+	if !strings.Contains(string(b), `{"type":"truncate","id":"tr01","columns":[{"table":"public.orders","column":"notes","length":100}]}`) {
+		t.Fatal(string(b))
+	}
+	if c := s.Clone(); &c.Transforms[0].Truncate[0] == &s.Transforms[0].Truncate[0] {
+		t.Fatal("clone shares truncations")
+	}
+	for name, c := range map[string]struct {
+		columns map[string]any
+		step    any
+		want    string
+	}{
+		"T6: masked":         {map[string]any{"public.orders": map[string]any{"mask": []any{"notes"}, "exclude": []any{}}}, step(col("public.orders", "notes", 5)), "is masked"},
+		"left out":           {map[string]any{"public.orders": map[string]any{"mask": []any{}, "exclude": []any{"notes"}}}, step(col("public.orders", "notes", 5)), "left out"},
+		"not captured":       {map[string]any{}, step(col("public.refunds", "notes", 5)), "not captured"},
+		"twice":              {map[string]any{}, step(col("public.orders", "notes", 5), col("public.orders", "notes", 9)), "truncated twice"},
+		"no columns":         {map[string]any{}, map[string]any{"type": "truncate", "columns": []any{}}, "at least 1 item"},
+		"length 0":           {map[string]any{}, step(col("public.orders", "notes", 0)), "greater than or equal to 1"},
+		"tables not allowed": {map[string]any{}, map[string]any{"type": "truncate", "tables": []any{"public.orders"}, "columns": []any{col("public.orders", "notes", 5)}}, "every table"},
+	} {
+		if _, errs := parse(c.columns, c.step); !strings.Contains(errs, c.want) {
+			t.Errorf("%s: %s", name, errs)
+		}
+	}
+	// The preview cuts text, and only text.
+	spec, _ := parse(map[string]any{}, step(col("public.orders", "notes", 3)))
+	res := domain.Preview(domain.PreviewInput{SourceType: "postgresql", Pipeline: "p", Spec: spec, Table: "public.orders", Operation: "insert",
+		Columns: []domain.PreviewColumn{{Name: "id", Type: "integer"}, {Name: "notes", Type: "text"}}, PrimaryKey: []string{"id"}})
+	if !strings.Contains(res.Steps[0].Note, "notes to 3 characters") {
+		t.Fatal(res.Steps)
+	}
+}
+
+func TestRouteStep(t *testing.T) {
+	for pattern, cases := range map[string]map[string]bool{
+		"shop.orders_*": {"shop.orders_eu": true, "shop.orders_": true, "shop.orders": false, "crm.orders_eu": false},
+		"*.orders":      {"shop.orders": true, "crm.orders": true, "shop.orders_eu": false},
+		"shop.*_eu":     {"shop.orders_eu": true, "shop.eu": false, "shop.x_eu_y": false},
+		"shop.orders":   {"shop.orders": true, "shop.orders2": false},
+		// A middle part never takes the end's characters; the ends never overlap.
+		"p*s*s": {"public.sales": true, "public.orders": false, "ps": false, "pss": true},
+		"a*a":   {"a": false, "aa": true},
+		"*":     {"shop.x": true},
+	} {
+		for table, want := range cases {
+			if got := domain.GlobMatch(pattern, table); got != want {
+				t.Errorf("%s ~ %s: %v", pattern, table, got)
+			}
+		}
+	}
+	parse := func(steps ...any) (domain.PipelineSpec, string) {
+		v := &val.V{}
+		s, _ := domain.ParseSpec(v, nil, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders_eu", "shop.orders_us", "shop.refunds"}}},
+			"transforms": steps})
+		var msgs []string
+		for _, e := range v.Errors {
+			msgs = append(msgs, e.Message)
+		}
+		return s, strings.Join(msgs, "|")
+	}
+	route := func(rules ...any) map[string]any {
+		return map[string]any{"type": "route", "id": "rt01", "routes": rules}
+	}
+	rule := func(match, to string) map[string]any { return map[string]any{"match": match, "to": to} }
+	s, errs := parse(route(rule("shop.orders_*", "shop.orders_all")))
+	if errs != "" {
+		t.Fatal(errs)
+	}
+	if got := domain.RouteTargets(s); len(got) != 2 || got["shop.orders_eu"] != "shop.orders_all" || got["shop.refunds"] != "" {
+		t.Fatal(got)
+	}
+	b, _ := json.Marshal(s)
+	if !strings.Contains(string(b), `{"type":"route","id":"rt01","routes":[{"match":"shop.orders_*","to":"shop.orders_all"}]}`) {
+		t.Fatal(string(b))
+	}
+	// T10: a table two routes match.
+	if _, errs := parse(route(rule("shop.orders_*", "a"), rule("shop.*_eu", "b"))); !strings.Contains(errs, "shop.orders_eu matches more than one route") {
+		t.Fatal(errs)
+	}
+	for _, bad := range []map[string]any{rule("orders", "x"), rule("shop.orders_*", "${X}"), rule("shop.orders_*", "a b")} {
+		if _, errs := parse(route(bad)); errs == "" {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+	// The preview says where the table goes.
+	res := domain.Preview(domain.PreviewInput{SourceType: "postgresql", Pipeline: "p", Spec: s, Table: "shop.orders_us", Operation: "insert",
+		Columns: []domain.PreviewColumn{{Name: "id", Type: "integer"}}, PrimaryKey: []string{"id"}})
+	if res.Destination != "shop.orders_all" {
+		t.Fatal(res.Destination)
+	}
+}

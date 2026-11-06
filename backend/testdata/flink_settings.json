@@ -1,0 +1,118 @@
+{
+ "defaults": {
+  "taskmanager.memory.managed.fraction": "0.05"
+ },
+ "settings": [
+  {
+   "key": "execution.checkpointing.timeout",
+   "title": "Save timeout",
+   "type": "duration",
+   "default": "10 min",
+   "min": "1m",
+   "max": "1h",
+   "why": "How long saving the position may take before that attempt is abandoned."
+  },
+  {
+   "key": "execution.checkpointing.tolerable-failed-checkpoints",
+   "title": "Failed saves tolerated",
+   "type": "int",
+   "default": "3",
+   "min": "0",
+   "max": "100",
+   "why": "How many saves in a row may fail before the job restarts."
+  },
+  {
+   "key": "execution.checkpointing.min-pause",
+   "title": "Pause between saves",
+   "type": "duration",
+   "default": "0 ms",
+   "min": "0s",
+   "max": "10m",
+   "why": "The least time between two saves, so a slow destination still gets time to write."
+  },
+  {
+   "key": "restart-strategy.type",
+   "title": "Restart strategy",
+   "type": "enum",
+   "default": "exponential-delay",
+   "choices": [
+    "exponential-delay",
+    "fixed-delay",
+    "failure-rate"
+   ],
+   "why": "How the job restarts after a failure."
+  },
+  {
+   "key": "restart-strategy.exponential-delay.initial-backoff",
+   "title": "First restart delay",
+   "type": "duration",
+   "default": "1 s",
+   "min": "1s",
+   "max": "10m",
+   "why": "Exponential delay: the wait before the first restart."
+  },
+  {
+   "key": "restart-strategy.exponential-delay.max-backoff",
+   "title": "Longest restart delay",
+   "type": "duration",
+   "default": "1 min",
+   "min": "10s",
+   "max": "1h",
+   "why": "Exponential delay: the longest wait between restarts."
+  },
+  {
+   "key": "restart-strategy.fixed-delay.attempts",
+   "title": "Restart attempts",
+   "type": "int",
+   "default": "1",
+   "min": "1",
+   "max": "1000",
+   "why": "Fixed delay: restarts before the job fails for good."
+  },
+  {
+   "key": "restart-strategy.fixed-delay.delay",
+   "title": "Restart delay",
+   "type": "duration",
+   "default": "1 s",
+   "min": "1s",
+   "max": "1h",
+   "why": "Fixed delay: the wait between restarts."
+  },
+  {
+   "key": "taskmanager.memory.managed.fraction",
+   "title": "Managed memory",
+   "type": "fraction",
+   "default": "0.05",
+   "min": "0",
+   "max": "0.9",
+   "why": "The share of TaskManager memory Flink keeps off the heap for RocksDB and batch work. A pipeline keeps its state on the heap, so little is needed."
+  },
+  {
+   "key": "taskmanager.memory.network.fraction",
+   "title": "Network memory",
+   "type": "fraction",
+   "default": "0.1",
+   "min": "0.05",
+   "max": "0.5",
+   "why": "The share of TaskManager memory for buffers between operators."
+  },
+  {
+   "key": "pekko.ask.timeout",
+   "title": "Internal call timeout",
+   "type": "duration",
+   "default": "10 s",
+   "min": "10s",
+   "max": "10m",
+   "why": "How long the JobManager and TaskManagers wait for each other's answers."
+  },
+  {
+   "key": "heartbeat.timeout",
+   "title": "Heartbeat timeout",
+   "type": "duration",
+   "default": "50 s",
+   "min": "10s",
+   "max": "10m",
+   "why": "How long without a heartbeat before a TaskManager counts as lost."
+  }
+ ]
+}

@@ -1,13 +1,17 @@
 package services
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 )
 
@@ -76,5 +80,49 @@ func TestFlinkTableChecks(t *testing.T) {
 	got = flinkTableChecks("mysql", spec, found)
 	if len(got) != 1 || got[0].Status != "pass" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestFlinkSlotsCheck(t *testing.T) {
+	report := func(used, maxSlots, senders, maxSenders int) checks.Report {
+		msg := fmt.Sprintf("Replication slots %d of %d used · WAL senders %d of %d.", used, maxSlots, senders, maxSenders)
+		return checks.Report{Checks: []checks.Check{{Code: "pg_capacity", Status: checks.Pass, Message: msg}}}
+	}
+	spec := func(size, mode string) domain.PipelineSpec {
+		s := domain.DefaultSpec()
+		s.Policies.Resources, s.Snapshot.Mode = size, mode
+		return s
+	}
+	draft := &models.Pipeline{}
+	deployed := &models.Pipeline{DeployedVersionID: &uuid.UUID{}}
+	// Medium copies with 4 readers: 1 + 4 slots and senders.
+	if c := flinkSlotsCheck(draft, spec("medium", "initial"), engine.FlinkSizes["medium"], report(3, 8, 3, 8)); c == nil || c.Status != checks.Pass || !strings.Contains(c.Message, "5 replication slots") {
+		t.Fatal(c)
+	}
+	c := flinkSlotsCheck(draft, spec("medium", "initial"), engine.FlinkSizes["medium"], report(4, 8, 0, 20))
+	if c == nil || c.Status != checks.Fail || !c.Blocking || !strings.Contains(c.Message, "only 4 slots") || !strings.Contains(c.Fix.Code, "max_replication_slots = 13") {
+		t.Fatal(c)
+	}
+	// WAL senders run out first.
+	if c := flinkSlotsCheck(draft, spec("large", "initial"), engine.FlinkSizes["large"], report(0, 30, 27, 30)); c == nil || c.Status != checks.Fail || !strings.Contains(c.Message, "3 WAL senders are free") {
+		t.Fatal(c)
+	}
+	// Streaming from now: only its own slot.
+	if c := flinkSlotsCheck(draft, spec("large", "no_data"), engine.FlinkSizes["large"], report(9, 10, 0, 10)); c == nil || c.Status != checks.Pass || !strings.Contains(c.Message, "1 replication slot and") {
+		t.Fatal(c)
+	}
+	// A redeploy neither creates the slot nor copies.
+	if c := flinkSlotsCheck(deployed, spec("large", "initial"), engine.FlinkSizes["large"], report(10, 10, 10, 10)); c != nil {
+		t.Fatal(c)
+	}
+	// No pg_capacity (it couldn't run): nothing to say here.
+	if c := flinkSlotsCheck(draft, spec("small", "initial"), engine.FlinkSizes["small"], checks.Report{}); c != nil {
+		t.Fatal(c)
+	}
+	// A failing pg_capacity carries its numbers in Technical; negative free counts show as 0.
+	failed := checks.Report{Checks: []checks.Check{{Code: "pg_capacity", Status: checks.Fail, Message: "No free replication slot or WAL sender for a new pipeline.",
+		Technical: "Replication slots 12 of 10 used · WAL senders 1 of 10."}}}
+	if c := flinkSlotsCheck(draft, spec("small", "initial"), engine.FlinkSizes["small"], failed); c == nil || !strings.Contains(c.Message, "only 0 slots") {
+		t.Fatal(c)
 	}
 }

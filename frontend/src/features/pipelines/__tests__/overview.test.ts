@@ -248,7 +248,7 @@ describe('chart readout', () => {
   });
 });
 
-import { flinkView } from '../page/overview';
+import { flinkView, shapeView } from '../page/overview';
 
 describe('flinkView', () => {
   const ago = (iso: string) => `ago(${iso})`;
@@ -287,5 +287,32 @@ describe('transformView on Flink CDC', () => {
     expect(steps).toEqual([]);
     const iceberg = transformView(spec, { sinkType: 'iceberg' }).output;
     expect(iceberg[1]).toMatchObject({ title: 'Deleted rows are kept', code: ['__op = -D'] });
+  });
+});
+
+describe('shapeView', () => {
+  const size = { task_managers: 2, slots: 3, task_manager_cpu: '3', task_manager_memory: '6656Mi' };
+  const streaming_size = { task_managers: 1, slots: 6, task_manager_cpu: '3', task_manager_memory: '3584Mi' };
+  const agoOf = () => '2 h ago';
+  it('is nothing for a cluster that never shrinks', () => {
+    expect(shapeView({}, agoOf)).toBeNull();
+    expect(shapeView({ flink_shape: { phase: 'copy', size } }, agoOf)).toBeNull();
+    expect(shapeView(null, agoOf)).toBeNull();
+  });
+  it('says which shape it runs and offers Shrink now only when ready', () => {
+    expect(shapeView({ flink_shape: { phase: 'copy', size, streaming_size } }, agoOf)).toEqual({
+      text: 'Copy shape, shrinks after the first copy · 2 TaskManagers × 3 slots, 3 CPU and 6656Mi each',
+      ready: false,
+      problem: null,
+    });
+    expect(shapeView({ flink_shape: { phase: 'copy', size, streaming_size, shrink_ready: true } }, agoOf)?.ready).toBe(true);
+    expect(shapeView({ flink_shape: { phase: 'streaming', size, streaming_size, shrunk_at: '2026-11-06T10:00:00Z' } }, agoOf)?.text).toBe(
+      'Streaming shape, shrank 2 h ago · 1 TaskManager × 6 slots, 3 CPU and 3584Mi each',
+    );
+  });
+  it('says when it stopped trying', () => {
+    const v = shapeView({ flink_shape: { phase: 'copy', size, streaming_size, shrink_off: true, shrink_failures: 3, shrink_ready: true } }, agoOf);
+    expect(v?.ready).toBe(false);
+    expect(v?.problem).toContain('failed 3 times');
   });
 });

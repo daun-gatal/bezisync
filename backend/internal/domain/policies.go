@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -36,7 +37,52 @@ type ProjectPolicies struct {
 	AllowCustomTransforms   bool     `json:"allow_custom_transforms"`
 	AllowedTransforms       []string `json:"allowed_transforms"` // nil = every built-in type
 	AllowedEngines          []string `json:"allowed_engines"`    // nil = every engine
+	// AllowAdvancedProperties lets Experts pass raw Debezium properties (refused by preflight
+	// otherwise). Dumped only when set.
+	AllowAdvancedProperties bool `json:"allow_advanced_properties"`
+	// ShrinkAfterCopy is what happens once a custom Flink CDC cluster with a streaming slot size
+	// finishes its first copy: "auto" (default; BeziSync repacks it) or "suggest" (someone
+	// chooses Shrink now). Dumped only when "suggest".
+	ShrinkAfterCopy string `json:"shrink_after_copy"`
+	// ResourceLimits caps what one pipeline asks for at its peak (a Flink CDC cluster's first copy),
+	// on both engines, beside MaxResources. Dumped only when set.
+	ResourceLimits *ResourceLimits `json:"resource_limits"`
+	// SettingLimits bound typed settings per key (engine.Setting): a tighter range, fewer
+	// choices, a pinned value or hidden. Checked against the registry when Admins save them;
+	// read leniently, so a key a later registry drops is kept (shown obsolete) and ignored.
+	// Dumped only when set.
+	SettingLimits map[string]SettingLimit `json:"setting_limits"`
 }
+
+// SettingLimit is one setting's project limit (each part optional).
+type SettingLimit struct {
+	Min     string   `json:"min,omitempty"`
+	Max     string   `json:"max,omitempty"`
+	Choices []string `json:"choices,omitempty"`
+	// Pin is the value every pipeline gets: written into the spec when it deploys.
+	Pin string `json:"pin,omitempty"`
+	// Hide keeps the setting from being set at all.
+	Hide bool `json:"hide,omitempty"`
+}
+
+// ResourceLimits is a project's most CPU, memory and readers per pipeline (each optional).
+type ResourceLimits struct {
+	MaxCPU         string `json:"max_cpu,omitempty"`    // "6", "1.5"
+	MaxMemory      string `json:"max_memory,omitempty"` // "12Gi"
+	MaxParallelism int    `json:"max_parallelism,omitempty"`
+}
+
+// Resource limit bounds: no lower than the smallest preset (Small: 0.5 CPU, 768 MiB), or no
+// pipeline could deploy.
+const (
+	MinLimitCPU    = 500
+	MaxLimitCPU    = 256000
+	MinLimitMemory = 768
+	MaxLimitMemory = 1 << 20
+)
+
+// ShrinkAuto reports whether BeziSync shrinks custom Flink CDC clusters after their copy itself.
+func (p ProjectPolicies) ShrinkAuto() bool { return p.ShrinkAfterCopy != "suggest" }
 
 // DefaultPolicies is ProjectPolicies().
 func DefaultPolicies() ProjectPolicies {
@@ -87,6 +133,54 @@ func (p ProjectPolicies) Dump() *om.Map {
 	}
 	if p.AllowedEngines != nil {
 		out.Set("allowed_engines", strList(p.AllowedEngines))
+	}
+	if p.AllowAdvancedProperties {
+		out.Set("allow_advanced_properties", true)
+	}
+	if p.ShrinkAfterCopy == "suggest" {
+		out.Set("shrink_after_copy", "suggest")
+	}
+	if len(p.SettingLimits) > 0 {
+		m := om.New()
+		keys := make([]string, 0, len(p.SettingLimits))
+		for k := range p.SettingLimits {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			l := p.SettingLimits[k]
+			e := om.New()
+			if l.Min != "" {
+				e.Set("min", l.Min)
+			}
+			if l.Max != "" {
+				e.Set("max", l.Max)
+			}
+			if l.Choices != nil {
+				e.Set("choices", strList(l.Choices))
+			}
+			if l.Pin != "" {
+				e.Set("pin", l.Pin)
+			}
+			if l.Hide {
+				e.Set("hide", true)
+			}
+			m.Set(k, e)
+		}
+		out.Set("setting_limits", m)
+	}
+	if l := p.ResourceLimits; l != nil {
+		m := om.New()
+		if l.MaxCPU != "" {
+			m.Set("max_cpu", l.MaxCPU)
+		}
+		if l.MaxMemory != "" {
+			m.Set("max_memory", l.MaxMemory)
+		}
+		if l.MaxParallelism > 0 {
+			m.Set("max_parallelism", l.MaxParallelism)
+		}
+		out.Set("resource_limits", m)
 	}
 	return out
 }
@@ -160,6 +254,22 @@ func ParsePolicies(v *val.V, loc val.Loc, raw any) (ProjectPolicies, bool) {
 	if f := o.Get("allow_custom_transforms"); f.Present {
 		if b, ok := v.Bool(f.Loc, f.Raw); ok {
 			p.AllowCustomTransforms = b
+		}
+	}
+	if f := o.Get("allow_advanced_properties"); f.Present {
+		if b, ok := v.Bool(f.Loc, f.Raw); ok {
+			p.AllowAdvancedProperties = b
+		}
+	}
+	if f := o.Get("setting_limits"); f.Present && !f.IsNull() {
+		p.SettingLimits = decodeSettingLimits(v, f.Loc, f.Raw)
+	}
+	if f := o.Get("resource_limits"); f.Present && !f.IsNull() {
+		p.ResourceLimits = decodeLimits(v, f.Loc, f.Raw)
+	}
+	if f := o.Get("shrink_after_copy"); f.Present && !f.IsNull() {
+		if s, ok := v.Literal(f.Loc, f.Raw, "auto", "suggest"); ok && s == "suggest" {
+			p.ShrinkAfterCopy = s
 		}
 	}
 	if f := o.Get("allowed_transforms"); f.Present && !f.IsNull() {
@@ -268,12 +378,30 @@ func EvaluatePoliciesOn(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UU
 			"Pick an allowed snapshot mode in the pipeline settings."))
 	}
 	size := spec.Policies.Resources
-	if p.MaxResources != nil && *p.MaxResources != "" && slices.Index(sizes, size) > slices.Index(sizes, *p.MaxResources) {
-		out = append(out, policyFail("policy_resources", "Resources",
-			fmt.Sprintf("The '%s' preset exceeds this project's limit (%s).", size, *p.MaxResources),
-			fmt.Sprintf("Choose %s or smaller.", *p.MaxResources)))
+	if p.MaxResources != nil && *p.MaxResources != "" {
+		limit := ResourcePresets[*p.MaxResources]
+		switch {
+		case size == "custom" && !spec.Policies.Amount().Within(limit):
+			out = append(out, policyFail("policy_resources", "Resources",
+				fmt.Sprintf("This custom size (%s) exceeds this project's limit (%s: %s).", spec.Policies.Amount(), *p.MaxResources, limit),
+				fmt.Sprintf("Choose at most %s.", limit)))
+		case size != "custom" && slices.Index(sizes, size) > slices.Index(sizes, *p.MaxResources):
+			out = append(out, policyFail("policy_resources", "Resources",
+				fmt.Sprintf("The '%s' preset exceeds this project's limit (%s).", size, *p.MaxResources),
+				fmt.Sprintf("Choose %s or smaller.", *p.MaxResources)))
+		}
 	}
 	out = append(out, transformPolicyChecks(p, spec)...)
+	if !p.AllowAdvancedProperties && len(spec.Advanced) > 0 {
+		keys := make([]string, 0, len(spec.Advanced))
+		for k := range spec.Advanced {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		out = append(out, policyFail("policy_advanced_properties", "Advanced properties",
+			fmt.Sprintf("This pipeline sets %d advanced Debezium propert%s (%s); this project does not allow them.",
+				len(keys), map[bool]string{true: "y", false: "ies"}[len(keys) == 1], strings.Join(keys, ", ")), AskAdmin))
+	}
 	if !p.AllowScriptedTransforms {
 		if steps := ScriptedSteps(spec); len(steps) > 0 {
 			out = append(out, policyFail("policy_scripted_transform", "Scripted transforms",
@@ -293,6 +421,105 @@ func EvaluatePoliciesOn(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UU
 			Code: "policy_ok", Title: "Project policies", Status: checks.Pass, Category: checks.CatPolicy,
 			Message: "Meets every project policy.",
 		})
+	}
+	return out
+}
+
+func decodeLimits(v *val.V, loc val.Loc, raw any) *ResourceLimits {
+	o := v.Model(loc, raw, "ResourceLimits")
+	if o.Failed {
+		return nil
+	}
+	out := &ResourceLimits{}
+	if f := o.Get("max_cpu"); f.Present && !f.IsNull() {
+		if s, ok := v.Str(f.Loc, f.Raw); ok {
+			if n, good := ParseCPUAny(s); !good || n < MinLimitCPU || n > MaxLimitCPU {
+				v.ValueError(f.Loc, "at least 0.5 CPU (Small, the smallest size: below it no pipeline could deploy), in quarters, like 6 or 1.5")
+			}
+			out.MaxCPU = s
+		}
+	}
+	if f := o.Get("max_memory"); f.Present && !f.IsNull() {
+		if s, ok := v.Str(f.Loc, f.Raw); ok {
+			if n, good := ParseMemoryAny(s); !good || n < MinLimitMemory || n > MaxLimitMemory {
+				v.ValueError(f.Loc, "at least 768Mi (Small, the smallest size: below it no pipeline could deploy), in steps of 256Mi, whole GiB written as Gi")
+			}
+			out.MaxMemory = s
+		}
+	}
+	if f := o.Get("max_parallelism"); f.Present && !f.IsNull() {
+		if n, ok := v.IntIn(f.Loc, f.Raw, val.Num{GE: val.F(1), LE: val.F(MaxParallelism)}); ok {
+			out.MaxParallelism = n
+		}
+	}
+	o.Forbid()
+	if *out == (ResourceLimits{}) {
+		return nil
+	}
+	return out
+}
+
+// Amounts are the limits in numbers (0: no limit).
+func (l *ResourceLimits) Amounts() (cpuMilli, memoryMiB, parallelism int) {
+	if l == nil {
+		return 0, 0, 0
+	}
+	cpuMilli, _ = ParseCPUAny(l.MaxCPU)
+	memoryMiB, _ = ParseMemoryAny(l.MaxMemory)
+	return cpuMilli, memoryMiB, l.MaxParallelism
+}
+
+// decodeSettingLimits reads setting_limits' shape; whether each limit fits its setting is checked
+// by services.ValidateSettingLimits when Admins save them.
+func decodeSettingLimits(v *val.V, loc val.Loc, raw any) map[string]SettingLimit {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		v.Fail(loc, "dict_type", "Input should be a valid dictionary")
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := map[string]SettingLimit{}
+	for _, k := range keys {
+		e := v.Model(loc.Add(k), m[k], "SettingLimit")
+		if e.Failed {
+			continue
+		}
+		var l SettingLimit
+		str := func(name string) string {
+			if g := e.Get(name); g.Present && !g.IsNull() {
+				if s, ok := v.Str(g.Loc, g.Raw); ok {
+					return s
+				}
+			}
+			return ""
+		}
+		l.Min, l.Max, l.Pin = str("min"), str("max"), str("pin")
+		if g := e.Get("choices"); g.Present && !g.IsNull() {
+			if items, ok := v.List(g.Loc, g.Raw); ok {
+				l.Choices = []string{}
+				for i, it := range items {
+					if s, ok := v.Str(g.Loc.Add(i), it); ok {
+						l.Choices = append(l.Choices, s)
+					}
+				}
+			}
+		}
+		if g := e.Get("hide"); g.Present {
+			if b, ok := v.Bool(g.Loc, g.Raw); ok {
+				l.Hide = b
+			}
+		}
+		e.Forbid()
+		if l.Min != "" || l.Max != "" || l.Choices != nil || l.Pin != "" || l.Hide {
+			out[k] = l
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

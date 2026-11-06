@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"slices"
+
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
 )
@@ -73,4 +75,30 @@ func containsString(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// withSoftDelete keeps deleted rows (a soft_delete step): the unwrap step rewrites deletes into a
+// row marked __deleted, with no tombstone, over what a destination would ask for; without an
+// unwrap step one is added where the soft delete is (T1, T2). The soft_delete step itself
+// compiles to nothing, so a spec without one compiles as before.
+func withSoftDelete(steps []domain.Transform) []domain.Transform {
+	at := slices.IndexFunc(steps, func(t domain.Transform) bool { return t.Type == "soft_delete" })
+	if at < 0 {
+		return steps
+	}
+	out := make([]domain.Transform, 0, len(steps))
+	unwrapped := slices.ContainsFunc(steps, func(t domain.Transform) bool { return t.Type == "unwrap" })
+	for i, t := range steps {
+		switch {
+		case t.Type == "unwrap":
+			t.DeleteHandling = "rewrite"
+			out = append(out, t)
+		case t.Type == "soft_delete" && i == at && !unwrapped:
+			out = append(out, domain.Transform{Type: "unwrap", DeleteHandling: "rewrite", AddFields: []string{"op", "source.ts_ms"}})
+		case t.Type == "soft_delete":
+		default:
+			out = append(out, t)
+		}
+	}
+	return out
 }

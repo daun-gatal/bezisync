@@ -20,11 +20,12 @@ import (
 
 // FlinkChecks are a Flink CDC pipeline's own preflight checks.
 func FlinkChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec, rt *models.Runtime,
-	sourceConn *models.Connection, discover *discoverOnce) ([]checks.Check, error) {
+	sourceConn *models.Connection, discover *discoverOnce, sourceReport checks.Report) ([]checks.Check, error) {
 	var out []checks.Check
 	if c := flinkAgentCheck(rt); c != nil {
 		out = append(out, *c)
 	}
+	packed := FlinkSizeOf(p, spec, RuntimeCapacityFor(p, spec, rt))
 	if c := flinkServicesCheck(ctx, q, rt); c != nil {
 		out = append(out, *c)
 	}
@@ -35,8 +36,13 @@ func FlinkChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec dom
 	} else {
 		out = append(out, flinkTableChecks(sourceConn.Type, spec, found)...)
 	}
+	if sourceConn.Type == "postgresql" {
+		if c := flinkSlotsCheck(p, spec, packed.Size, sourceReport); c != nil {
+			out = append(out, *c)
+		}
+	}
 	if sourceConn.Type == "mysql" {
-		c, err := flinkServerIDCheck(ctx, q, p, spec)
+		c, err := flinkServerIDCheck(ctx, q, p, packed.Size)
 		if err != nil {
 			return nil, err
 		}
@@ -144,13 +150,57 @@ func plural(n int, one, many string) string {
 	return many
 }
 
+// flinkSlotsCheck: during a copy each reader of a Flink CDC PostgreSQL source opens its own
+// temporary replication slot (<slot>_<reader>, each with a WAL sender) next to the pipeline's own
+// one, so a copy needs 1 + parallelism of each. Measured by the source's pg_capacity check; nil when
+// that didn't run, or when this deploy neither creates the slot nor copies.
+func flinkSlotsCheck(p *models.Pipeline, spec domain.PipelineSpec, size engine.FlinkSize, sourceReport checks.Report) *checks.Check {
+	var capacity connectors.PGCapacity
+	found := false
+	for _, c := range sourceReport.Checks {
+		if c.Code == "pg_capacity" {
+			capacity, found = connectors.ParsePGCapacity(c)
+		}
+	}
+	if !found {
+		return nil
+	}
+	readers := size.Parallelism()
+	firstDeploy := p.DeployedVersionID == nil
+	copies := firstDeploy && spec.Snapshot.Mode != "no_data"
+	need := 0
+	if firstDeploy {
+		need = 1 // the pipeline's own slot
+	}
+	if copies {
+		need += readers
+	}
+	if need == 0 {
+		return nil
+	}
+	freeSlots, freeSenders := capacity.MaxSlots-capacity.UsedSlots, capacity.MaxSenders-capacity.UsedSenders
+	what := fmt.Sprintf("%d replication slot%s and WAL sender%s", need, plural(need, "", "s"), plural(need, "", "s"))
+	if copies {
+		what += fmt.Sprintf(" (1 for streaming and 1 for each of its %d readers while it copies)", readers)
+	}
+	if freeSlots >= need && freeSenders >= need {
+		return &checks.Check{Code: "flink_replication_slots", Title: "Replication slots for the copy", Category: checks.CatCapacity, Status: checks.Pass,
+			Message: fmt.Sprintf("This deploy needs %s; %d slots and %d WAL senders are free.", what, freeSlots, freeSenders)}
+	}
+	limit := capacity.UsedSlots + need + 4
+	if s := capacity.UsedSenders + need + 4; s > limit {
+		limit = s
+	}
+	return &checks.Check{Code: "flink_replication_slots", Title: "Replication slots for the copy", Category: checks.CatCapacity, Status: checks.Fail,
+		Blocking: true, Message: fmt.Sprintf("This deploy needs %s, but only %d slots and %d WAL senders are free: the copy would stop part-way.",
+			what, max(freeSlots, 0), max(freeSenders, 0)),
+		Fix: &checks.Fix{Kind: "sql", RestartRequired: true, Who: "DBA", Code: "-- drop slots nobody uses:\nSELECT slot_name, active FROM pg_replication_slots;\n" +
+			fmt.Sprintf("-- or raise the limits (restart required):\nALTER SYSTEM SET max_replication_slots = %d;\nALTER SYSTEM SET max_wal_senders = %d;", limit, limit)}}
+}
+
 // flinkServerIDCheck: each reader of a MySQL source uses its own server id; two pipelines with the
 // same id disconnect each other.
-func flinkServerIDCheck(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec) (checks.Check, error) {
-	size, ok := engine.FlinkSizes[spec.Policies.Resources]
-	if !ok {
-		size = engine.FlinkSizes["small"]
-	}
+func flinkServerIDCheck(ctx context.Context, q db.Querier, p *models.Pipeline, size engine.FlinkSize) (checks.Check, error) {
 	ours := connectors.MyServerIDRange(p.ID.String(), size.Parallelism())
 	lo, hi := idRange(ours)
 	others, err := db.Select[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE source_id = $1 AND id <> $2 AND deleted_at IS NULL`, p.SourceID, p.ID)
@@ -189,13 +239,41 @@ func idRange(r string) (int64, int64) {
 	return lo, hi
 }
 
-// FlinkCapacityCheck is the runtime capacity check for a Flink CDC cluster's size.
-func FlinkCapacityCheck(capacity map[string]any, resources string) *checks.Check {
-	size, ok := engine.FlinkSizes[resources]
-	if !ok {
-		size = engine.FlinkSizes["small"]
+// flinkClusterFitCheck: a custom cluster's TaskManagers must fit a node. Blocking when one slot
+// alone is bigger than the largest node; Unknown (never a pass) when the runtime doesn't say how
+// big its nodes are. A runtime check: a forced deploy can't skip it (its pods would never start).
+func flinkClusterFitCheck(spec domain.PipelineSpec, packed engine.Packed, capacity map[string]any) *checks.Check {
+	if spec.Policies.Resources != "custom" || spec.FlinkCDC.Cluster == nil {
+		return nil
 	}
-	need := runtime.QuantityCPU(size.JobManagerCPU) + float64(size.TaskManagers)*runtime.QuantityCPU(size.TaskManagerCPU)
-	return capacityCheck(capacity, need, fmt.Sprintf(" (a JobManager and %d TaskManager%s, %d MiB in all)", size.TaskManagers,
-		plural(size.TaskManagers, "", "s"), size.TotalMemoryMiB()))
+	node := NodeOf(capacity)
+	s := packed.Size
+	shape := fmt.Sprintf("%d TaskManager%s × %d slots, %s CPU and %s each", s.TaskManagers, plural(s.TaskManagers, "", "s"), s.SlotsPerTaskManager(), s.TaskManagerCPU, s.TaskManagerMemory)
+	switch {
+	case !packed.Fits:
+		return &checks.Check{Code: "flink_cluster_fit", Title: "Cluster fits the nodes", Category: checks.CatCapacity, Status: checks.Fail, Blocking: true,
+			Message: packed.Why, Fix: &checks.Fix{Kind: "text", Who: "you", Code: "Give each slot less CPU or memory in Review → Size, or add bigger nodes to the runtime."}}
+	case !node.Known():
+		return &checks.Check{Code: "flink_cluster_fit", Title: "Cluster fits the nodes", Category: checks.CatCapacity, Status: checks.Unknown,
+			Message: shape + ". The runtime doesn't report its nodes' size, so BeziSync can't check they fit."}
+	case runtime.QuantityCPU(s.TaskManagerCPU)*1000 > float64(node.CPUMilli) || runtime.QuantityMem(s.TaskManagerMemory) > int64(node.MemoryMiB)<<20:
+		return &checks.Check{Code: "flink_cluster_fit", Title: "Cluster fits the nodes", Category: checks.CatCapacity, Status: checks.Fail, Blocking: true,
+			Message: fmt.Sprintf("%s, but the largest node has %.2g CPU and %d MiB.", shape, float64(node.CPUMilli)/1000, node.MemoryMiB),
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Use the automatic shape, or smaller TaskManagers, in Review → Size."}}
+	}
+	return &checks.Check{Code: "flink_cluster_fit", Title: "Cluster fits the nodes", Category: checks.CatCapacity, Status: checks.Pass, Message: shape + ". " + packed.Why}
+}
+
+// FlinkCapacityCheck is the runtime capacity check for a Flink CDC cluster's size.
+func FlinkCapacityCheck(capacity map[string]any, size engine.FlinkSize) *checks.Check {
+	return capacityCheck(capacity, FlinkNeed(size), Need{}, flinkWhat(size))
+}
+
+// FlinkNeed is what a Flink CDC cluster asks for in all.
+func FlinkNeed(size engine.FlinkSize) Need {
+	return Need{CPU: runtime.QuantityCPU(size.JobManagerCPU) + float64(size.TaskManagers)*runtime.QuantityCPU(size.TaskManagerCPU), MiB: size.TotalMemoryMiB()}
+}
+
+func flinkWhat(size engine.FlinkSize) string {
+	return fmt.Sprintf(" (a JobManager and %d TaskManager%s)", size.TaskManagers, plural(size.TaskManagers, "", "s"))
 }

@@ -275,7 +275,7 @@ func TestFlinkPreflight(t *testing.T) {
 		t.Fatal(c)
 	}
 	// The capacity check counts the whole cluster.
-	if c := checkOf(t, pre, "runtime_capacity"); c == nil || !strings.Contains(at(t, c, "message").(string), "a JobManager and 1 TaskManager, 3072 MiB in all") {
+	if c := checkOf(t, pre, "runtime_capacity"); c == nil || !strings.Contains(at(t, c, "message").(string), "this pipeline asks for 1.5 CPU and 3072 MiB (a JobManager and 1 TaskManager)") {
 		t.Fatal(c)
 	}
 }
@@ -317,5 +317,49 @@ func TestFlinkComponentLogs(t *testing.T) {
 	deb := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
 	if r := e.admin.get("/api/v1/projects/" + e.pid + "/pipelines/" + deb.Str("id") + "/logs?component=jobmanager").expect(503); !strings.Contains(r.Str("detail"), "Only Flink CDC") {
 		t.Fatal(string(r.Raw))
+	}
+}
+
+// A deployed Flink CDC pipeline keeps its readers while it has a saved position to restore; after
+// Start over they can change. A forced deploy can't skip it.
+func TestFlinkReadersChangeNeedsStartOver(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe, url := flinkPipeline(t, e)
+	short := shortOf(pipe.Str("id"))
+	exec(t, `UPDATE pipeline_versions SET sealed_at = now() WHERE pipeline_id = '`+pipe.Str("id")+`'`) // deployed: an edit is a new version
+	readers := func() map[string]any {
+		for _, s := range e.admin.post(url+"/preflight", nil).expect(200).List("sections") {
+			for _, c := range at(t, s, "report", "checks").([]any) {
+				if at(t, c, "code") == "flink_readers_changed" {
+					if at(t, s, "key") != "config" {
+						t.Fatal("not in the config section")
+					}
+					return c.(map[string]any)
+				}
+			}
+		}
+		return nil
+	}
+	if c := readers(); c != nil {
+		t.Fatal("unchanged readers say nothing", c)
+	}
+	cur := e.admin.get(url).expect(200)
+	medium := map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}, "policies": map[string]any{"resources": "medium"}}
+	e.admin.patch(url, map[string]any{"spec": medium}, ifMatch(cur.At("version"))...).expect(200)
+	// Never started: nothing to restore.
+	if c := readers(); c == nil || c["status"] != "pass" {
+		t.Fatal(c)
+	}
+	savePositions(t, short, 2)
+	c := readers()
+	if c == nil || c["status"] != "fail" || c["blocking"] != true || !strings.Contains(c["message"].(string), "runs 2 readers and this version asks for 4") {
+		t.Fatal(c)
+	}
+	if r := e.admin.post(url+"/deploy", map[string]any{"force_reason": "we know what we are doing"}).expect(409); !strings.Contains(string(r.Raw), "cannot be skipped") {
+		t.Fatal(string(r.Raw))
+	}
+	e.admin.post(url+"/offsets/reset", map[string]any{"mode": "resnapshot", "confirm": "lake-flink"}).expect(200)
+	if c := readers(); c == nil || c["status"] != "pass" {
+		t.Fatal(c)
 	}
 }

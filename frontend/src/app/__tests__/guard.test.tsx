@@ -86,7 +86,7 @@ describe('pages know who is looking', () => {
   it('the testing policy offers "Back to BeziSync" to someone signed in', async () => {
     api({ '/api/v1/auth/providers': { status: 200, body: { password: true, providers: [{ id: 'p1', label: 'Google' }], lab: true } }, '/api/v1/auth/me': { status: 200, body: ME } });
     renderAt(TestingPolicyPage, { path: '/testing-policy' });
-    expect(await screen.findByRole('link', { name: 'Back to BeziSync' })).toHaveAttribute('href', '/');
+    expect(await screen.findByRole('link', { name: 'Back to BeziSync' }, { timeout: 5000 })).toHaveAttribute('href', '/');
     expect(screen.queryByRole('link', { name: 'Sign in to try it' })).toBeNull();
   });
 

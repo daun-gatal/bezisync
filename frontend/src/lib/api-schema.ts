@@ -1013,6 +1013,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/debezium-images:effects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a Debezium version change
+         * @description What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes.
+         */
+        post: operations["image_effects_api_v1_projects__project_id__debezium_images_effects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/events": {
         parameters: {
             query?: never;
@@ -1151,6 +1171,46 @@ export interface paths {
         head?: never;
         /** Update Pipeline */
         patch: operations["update_pipeline_api_v1_projects__project_id__pipelines__pipeline_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pack a Flink CDC cluster
+         * @description How a custom Flink CDC cluster would be packed on the pipeline's runtime now: TaskManagers, slots, CPU and memory, why it splits, what it asks for in all and whether it fits the largest node. Pure: the deploy packs again and keeps that shape.
+         */
+        post: operations["pack_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_pack_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:shrink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Shrink a Flink CDC cluster now
+         * @description Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet.
+         */
+        post: operations["shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/config": {
@@ -1471,6 +1531,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A pipeline's engine settings
+         * @description What this pipeline may tune: its engine's settings for its source and destination, each with the value its current version has (empty for the default), where it lives (tuning, or flink_cdc.flink_conf) and this project's limit (a hidden setting is left out); and whether advanced (raw) properties are allowed, with the keys it has (never their values).
+         */
+        get: operations["pipeline_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings:classify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Classify advanced properties
+         * @description What BeziSync makes of advanced (raw) properties for this pipeline, so the wizard can say it as they are typed: allowed (passed through, not verified), or refused with why and where to set it instead. A key that is also a typed setting returns that setting. Pure; values are never echoed. Keys BeziSync compiles for the pipeline are refused by preflight.
+         */
+        post: operations["classify_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_classify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/snapshots": {
         parameters: {
             query?: never;
@@ -1597,6 +1697,26 @@ export interface paths {
         /** Put Policies */
         put: operations["put_policies_api_v1_projects__project_id__policies_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/policies/setting-limits:impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Count what setting limits would refuse
+         * @description How many of the project's pipelines (their current versions) proposed setting limits would refuse, with a few names; nothing is saved. Admins.
+         */
+        post: operations["setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2047,6 +2167,7 @@ export interface components {
             managed: string[];
             /** Mapped */
             mapped: string[];
+            plan: components["schemas"]["ImportPlan"];
             /** Replaced */
             replaced: string[];
             /** Sink Hint */
@@ -2072,6 +2193,15 @@ export interface components {
         AdoptRequest: {
             /** Properties */
             properties: string;
+        };
+        /** AdvancedKey */
+        AdvancedKey: {
+            /** Class */
+            class: string;
+            /** Key */
+            key: string;
+            /** Message */
+            message?: string;
         };
         /** AlertRead */
         AlertRead: {
@@ -2143,6 +2273,16 @@ export interface components {
         ApplyResultRead: {
             /** Action */
             action: string;
+            /**
+             * Advanced
+             * @description What BeziSync makes of each raw property (never its value).
+             */
+            advanced?: components["schemas"]["AdvancedKey"][];
+            /**
+             * Breaking
+             * @description Why deploying it breaks the running pipeline's consumers or positions (the CLI asks for --confirm).
+             */
+            breaking?: string[];
             /** Deploy */
             deploy: string | null;
             /** Diff */
@@ -2153,6 +2293,8 @@ export interface components {
             notes: string[];
             /** Pipeline Id */
             pipeline_id: string | null;
+            /** @description What deploying it changes in the running pipeline's settings (against the deployed version). */
+            settings_change?: components["schemas"]["SettingsChange"] | null;
             /** Version */
             version: number | null;
         };
@@ -2513,6 +2655,124 @@ export interface components {
             /** Tables */
             tables?: string[] | null;
         };
+        /** ClassifyItem */
+        ClassifyItem: {
+            /** Key */
+            key: string;
+            /**
+             * Value
+             * @default
+             */
+            value: string;
+        };
+        /** ClassifyRead */
+        ClassifyRead: {
+            /**
+             * Class
+             * @enum {string}
+             */
+            class: "allowed" | "invalid" | "credential" | "forbidden" | "modelled" | "owned";
+            /**
+             * Fix
+             * @description Where the value is set instead: tables, sink, transform, review or connection ("" when allowed).
+             */
+            fix: string;
+            /** Key */
+            key: string;
+            /** Message */
+            message: string;
+            /** @description The typed setting with this key, when there is one. */
+            setting: components["schemas"]["FlinkSetting"] | null;
+        };
+        /** ClassifyRequest */
+        ClassifyRequest: {
+            /** Items */
+            items: components["schemas"]["ClassifyItem"][];
+        };
+        /** ClassifyResponse */
+        ClassifyResponse: {
+            /** Items */
+            items: components["schemas"]["ClassifyRead"][];
+        };
+        /**
+         * ClusterNeed
+         * @description What the whole cluster asks for.
+         */
+        ClusterNeed: {
+            /** Cpu */
+            cpu: number;
+            /** Memory Mib */
+            memory_mib: number;
+        };
+        /** ClusterNode */
+        ClusterNode: {
+            /** Cpu */
+            cpu: number;
+            /** Memory Mib */
+            memory_mib: number;
+        };
+        /** ClusterPackRead */
+        ClusterPackRead: {
+            /** @description The flink_cluster_fit check for this shape. */
+            check: components["schemas"]["Check"] | null;
+            /** Job Manager Cpu */
+            job_manager_cpu: string;
+            /** Job Manager Memory */
+            job_manager_memory: string;
+            need: components["schemas"]["ClusterNeed"];
+            /** @description The runtime's largest node; null when it doesn't report one. */
+            node: components["schemas"]["ClusterNode"] | null;
+            /** Readers */
+            readers: number;
+            /**
+             * Slots
+             * @description Slots per TaskManager.
+             */
+            slots: number;
+            /** @description The shape once the first copy is done; null without streaming_slot. */
+            streaming: components["schemas"]["ClusterShapeRead"] | null;
+            /** Task Manager Cpu */
+            task_manager_cpu: string;
+            /** Task Manager Memory */
+            task_manager_memory: string;
+            /** Task Managers */
+            task_managers: number;
+            /**
+             * Why
+             * @description Why it has that many TaskManagers, naming the limit.
+             */
+            why: string;
+        };
+        /** ClusterPackRequest */
+        ClusterPackRequest: {
+            cluster: components["schemas"]["FlinkCluster"];
+        };
+        /** ClusterShapeRead */
+        ClusterShapeRead: {
+            /** Job Manager Cpu */
+            job_manager_cpu: string;
+            /** Job Manager Memory */
+            job_manager_memory: string;
+            need: components["schemas"]["ClusterNeed"];
+            /** Readers */
+            readers: number;
+            /**
+             * Slots
+             * @description Slots per TaskManager.
+             */
+            slots: number;
+            /** Task Manager Cpu */
+            task_manager_cpu: string;
+            /** Task Manager Memory */
+            task_manager_memory: string;
+            /** Task Managers */
+            task_managers: number;
+            /**
+             * Why
+             * @description Why it has that many TaskManagers, naming the limit.
+             */
+            why: string;
+        };
         /** Column */
         Column: {
             /** Name */
@@ -2547,6 +2807,18 @@ export interface components {
              * @description Columns replaced by a salted SHA-256 hash.
              */
             mask?: string[];
+        };
+        /**
+         * ComputedArg
+         * @description Exactly one of column, text or number.
+         */
+        ComputedArg: {
+            /** Column */
+            column?: string;
+            /** Number */
+            number?: number;
+            /** Text */
+            text?: string;
         };
         /** ConfigRead */
         ConfigRead: {
@@ -2846,6 +3118,19 @@ export interface components {
             /** Used By */
             used_by: string[];
         };
+        /** CustomResources */
+        CustomResources: {
+            /**
+             * Cpu
+             * @description 0.25 to 8, in quarters ("1.5").
+             */
+            cpu: string;
+            /**
+             * Memory
+             * @description 512Mi to 16Gi in steps of 256Mi; whole GiB written as Gi ("2Gi").
+             */
+            memory: string;
+        };
         /** Decision */
         Decision: {
             /**
@@ -2871,6 +3156,8 @@ export interface components {
             from: number;
             /** Lines */
             lines: string[];
+            /** @description Omitted when no setting changes. */
+            settings_change?: components["schemas"]["SettingsChange"];
             /** To */
             to: number;
         };
@@ -3200,6 +3487,8 @@ export interface components {
          * @description Choices of a pipeline that runs on Flink CDC. Unset fields take their default; returned only when something is set.
          */
         FlinkCDCSpec: {
+            /** @description A custom cluster, with policies.resources: custom. */
+            cluster?: components["schemas"]["FlinkCluster"] | null;
             /**
              * Commit Seconds
              * @description How often the position is saved and, for Iceberg, new data becomes visible (default 60).
@@ -3228,25 +3517,101 @@ export interface components {
              */
             schema_changes?: ("apply" | "ignore" | "stop") | null;
         };
-        /** FlinkSetting */
+        /**
+         * FlinkCluster
+         * @description A custom Flink CDC cluster (with policies.resources: custom): how many readers, what each needs and, by default, BeziSync packs the slots into TaskManagers the runtime's nodes can hold when the pipeline is deployed.
+         */
+        FlinkCluster: {
+            /** @description The JobManager's CPU (0.25 to 2) and memory (768Mi to 8Gi). */
+            job_manager: components["schemas"]["SlotSize"];
+            /**
+             * Parallelism
+             * @description How many readers copy and stream at once (1 to 128). Fixed once deployed: changing it starts over.
+             */
+            parallelism: number;
+            /**
+             * Shape
+             * @description auto: BeziSync packs the slots for the runtime's nodes at deploy; manual: task_managers as written.
+             * @default auto
+             * @enum {string}
+             */
+            shape: "auto" | "manual";
+            /** @description What each reader's slot needs: CPU 0.25 to 4, memory 512Mi to 8Gi. */
+            slot: components["schemas"]["SlotSize"];
+            /** @description What each slot needs once the first copy is done (smaller than slot; automatic shape only): BeziSync then shrinks the cluster, restarting it from its saved position, and grows it back before a later copy. */
+            streaming_slot?: components["schemas"]["SlotSize"] | null;
+            /** @description A manual shape's TaskManagers (only with shape: manual). */
+            task_managers?: components["schemas"]["ManualTaskManagers"] | null;
+        };
+        /**
+         * FlinkSetting
+         * @description A tunable setting of the registry (both engines).
+         */
         FlinkSetting: {
             /** Choices */
             choices?: string[];
+            /**
+             * Connectors
+             * @description Source or destination types it applies to (absent: every one).
+             */
+            connectors?: string[];
             /** Default */
             default: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
+            /**
+             * Experimental
+             * @description The engine marks it experimental; preflight warns when it is set.
+             */
+            experimental?: boolean;
+            /**
+             * Impact
+             * @description What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.
+             * @enum {string}
+             */
+            impact: "live" | "restart" | "first_copy" | "next_copy" | "breaks_positions";
             /** Key */
             key: string;
             /** Max */
             max?: string;
             /** Min */
             min?: string;
+            /**
+             * Renamed
+             * @description Its key from Until on.
+             */
+            renamed?: string;
+            /**
+             * Scope
+             * @description Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.
+             * @enum {string}
+             */
+            scope: "engine" | "source" | "sink" | "pipeline";
+            /**
+             * Since
+             * @description Debezium releases from this one have it.
+             */
+            since?: string;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "snapshot" | "streaming" | "delivery" | "engine";
             /** Title */
             title: string;
             /**
              * Type
              * @enum {string}
              */
-            type: "duration" | "int" | "fraction" | "enum";
+            type: "duration" | "int" | "fraction" | "enum" | "bool";
+            /**
+             * Until
+             * @description Debezium releases from this one no longer have it.
+             */
+            until?: string;
             /** Why */
             why: string;
         };
@@ -3266,6 +3631,23 @@ export interface components {
             taskmanagers: number;
             /** Total Memory Mib */
             total_memory_mib: number;
+        };
+        /**
+         * FootprintRead
+         * @description What the current version asks for at its peak: what project limits count.
+         */
+        FootprintRead: {
+            /** Cpu */
+            cpu: number;
+            /**
+             * Custom
+             * @description The size is custom.
+             */
+            custom: boolean;
+            /** Memory Mib */
+            memory_mib: number;
+            /** Readers */
+            readers: number;
         };
         /** FormatSpec */
         FormatSpec: {
@@ -3312,6 +3694,11 @@ export interface components {
         };
         /** ImageChangeResult */
         ImageChangeResult: {
+            /**
+             * Effects
+             * @description What the release does to the pipeline's settings; omitted when nothing.
+             */
+            effects?: components["schemas"]["SettingEffect"][];
             /** Message */
             message: string;
             /** Name */
@@ -3325,6 +3712,16 @@ export interface components {
             pipeline_id: string;
             /** Version */
             version: number | null;
+        };
+        /** ImageEffectsRequest */
+        ImageEffectsRequest: {
+            /**
+             * Image
+             * @description The image; null: each pipeline's runtime default.
+             */
+            image?: string | null;
+            /** Pipeline Ids */
+            pipeline_ids: string[];
         };
         /** ImageUsageRead */
         ImageUsageRead: {
@@ -3359,12 +3756,60 @@ export interface components {
             /** Images */
             images: components["schemas"]["ImageUsageRead"][];
         };
+        /** ImportKey */
+        ImportKey: {
+            /** Key */
+            key: string;
+            /**
+             * Problem
+             * @description Why it needs a change first (out of its bounds; never clamped).
+             */
+            problem?: string;
+            /** Title */
+            title?: string;
+        };
+        /**
+         * ImportPlan
+         * @description Every property in one of five buckets, and the spec to create the draft from: typed settings in tuning, excluded and masked columns mapped.
+         */
+        ImportPlan: {
+            /** @description Raw properties kept as advanced. */
+            expert: components["schemas"]["ImportKey"][];
+            /** @description Refused: BeziSync can't pass them on. */
+            forbidden: components["schemas"]["ImportKey"][];
+            /** @description Set by a wizard choice (or replaced by BeziSync's own). */
+            modelled: components["schemas"]["ImportKey"][];
+            /** @description BeziSync manages these itself (connection, offsets, slot, secrets). */
+            owned: components["schemas"]["ImportKey"][];
+            /** Spec */
+            spec: {
+                [key: string]: unknown;
+            };
+            /** @description Typed settings; one with a problem is left out until changed. */
+            tunable: components["schemas"]["ImportKey"][];
+            /** Warnings */
+            warnings: string[];
+        };
         /** InboxRead */
         InboxRead: {
             /** Items */
             items: components["schemas"]["NotificationRead"][];
             /** Unread */
             unread: number;
+        };
+        /** LimitImpact */
+        LimitImpact: {
+            /** Key */
+            key: string;
+            /** Names */
+            names: string[];
+            /** Pipelines */
+            pipelines: number;
+        };
+        /** LimitImpactRead */
+        LimitImpactRead: {
+            /** Items */
+            items: components["schemas"]["LimitImpact"][];
         };
         /** LoginRequest */
         LoginRequest: {
@@ -3478,6 +3923,26 @@ export interface components {
             }[];
             /** Yaml */
             yaml: string;
+        };
+        /**
+         * ManualTaskManagers
+         * @description TaskManagers of a manual Flink CDC cluster shape: count × slots must cover the parallelism, each slot at least 512Mi.
+         */
+        ManualTaskManagers: {
+            /** Count */
+            count: number;
+            /**
+             * Cpu
+             * @description Each TaskManager's CPU: 0.5 to 16, in quarters.
+             */
+            cpu: string;
+            /**
+             * Memory
+             * @description Each TaskManager's memory: 1Gi to 64Gi in steps of 256Mi; whole GiB written as Gi.
+             */
+            memory: string;
+            /** Slots */
+            slots: number;
         };
         /** MeRead */
         MeRead: {
@@ -3860,6 +4325,20 @@ export interface components {
             /** Template Id */
             template_id?: string | null;
         };
+        /** PipelineEffects */
+        PipelineEffects: {
+            /** Effects */
+            effects: components["schemas"]["SettingEffect"][];
+            /** Image */
+            image: string;
+            /** Name */
+            name: string;
+            /**
+             * Pipeline Id
+             * Format: uuid
+             */
+            pipeline_id: string;
+        };
         /** PipelineImageRead */
         PipelineImageRead: {
             /** Health */
@@ -3917,6 +4396,8 @@ export interface components {
              * @enum {string}
              */
             engine: "debezium" | "flink-cdc";
+            /** @description What the current version asks for at its peak. */
+            footprint?: components["schemas"]["FootprintRead"];
             /** Has Undeployed Changes */
             has_undeployed_changes: boolean;
             /** Health */
@@ -3953,6 +4434,100 @@ export interface components {
             /** Version */
             version: number;
         };
+        /**
+         * PipelineSetting
+         * @description A tunable setting of the registry (both engines).
+         */
+        PipelineSetting: {
+            /** Choices */
+            choices?: string[];
+            /**
+             * Connectors
+             * @description Source or destination types it applies to (absent: every one).
+             */
+            connectors?: string[];
+            /** Default */
+            default: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
+            /**
+             * Experimental
+             * @description The engine marks it experimental; preflight warns when it is set.
+             */
+            experimental?: boolean;
+            /**
+             * Impact
+             * @description What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.
+             * @enum {string}
+             */
+            impact: "live" | "restart" | "first_copy" | "next_copy" | "breaks_positions";
+            /**
+             * In
+             * @enum {string}
+             */
+            in: "tuning" | "flink_cdc.flink_conf";
+            /** Key */
+            key: string;
+            limit?: components["schemas"]["SettingLimit"];
+            /** Max */
+            max?: string;
+            /** Min */
+            min?: string;
+            /**
+             * Renamed
+             * @description Its key from Until on.
+             */
+            renamed?: string;
+            /**
+             * Scope
+             * @description Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.
+             * @enum {string}
+             */
+            scope: "engine" | "source" | "sink" | "pipeline";
+            /**
+             * Since
+             * @description Debezium releases from this one have it.
+             */
+            since?: string;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "snapshot" | "streaming" | "delivery" | "engine";
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "duration" | "int" | "fraction" | "enum" | "bool";
+            /**
+             * Until
+             * @description Debezium releases from this one no longer have it.
+             */
+            until?: string;
+            /** Value */
+            value: string;
+            /** Why */
+            why: string;
+        };
+        /** PipelineSettingsRead */
+        PipelineSettingsRead: {
+            /** Advanced Allowed */
+            advanced_allowed: boolean;
+            /** Advanced Keys */
+            advanced_keys: string[];
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "debezium" | "flink-cdc";
+            /** Settings */
+            settings: components["schemas"]["PipelineSetting"][];
+        };
         /** PipelineSpec */
         PipelineSpec: {
             /** Advanced */
@@ -3974,12 +4549,24 @@ export interface components {
             keys?: {
                 [key: string]: string[];
             };
+            /**
+             * Placement
+             * @description The runtime's placement profile the pods run with (Kubernetes); returned only when set.
+             */
+            placement?: string;
             policies?: components["schemas"]["Policies"];
             sink?: components["schemas"]["SinkSpec"];
             snapshot?: components["schemas"]["SnapshotSpec"];
             source?: components["schemas"]["SourceSpec"];
             /** Transforms */
             transforms?: components["schemas"]["Transform"][];
+            /**
+             * Tuning
+             * @description Typed settings from the registry (GET /engines, settings), setting key → value in its canonical form. Debezium keys start with debezium.; Flink CDC keys with source., sink. or pipeline. (Flink settings go in flink_cdc.flink_conf). Returned only when set.
+             */
+            tuning?: {
+                [key: string]: string;
+            };
             values?: components["schemas"]["ValueFormats"];
         };
         /** PipelineUpdate */
@@ -4010,8 +4597,39 @@ export interface components {
             sink_id?: string | null;
             spec?: components["schemas"]["PipelineSpec"] | null;
         };
+        /**
+         * PlacementProfile
+         * @description Where a Kubernetes runtime's pipelines may run: values are taken as they are (no ${…} or {{…}}), label keys and values are Kubernetes names, and BeziSync's own pod labels can't be set.
+         */
+        PlacementProfile: {
+            /**
+             * Labels
+             * @description Added to the pods.
+             */
+            labels?: {
+                [key: string]: string;
+            };
+            /**
+             * Name
+             * @description What a pipeline's spec.placement names: lowercase letters, digits and dashes.
+             */
+            name: string;
+            /** Node Selector */
+            node_selector?: {
+                [key: string]: string;
+            };
+            /**
+             * Priority Class
+             * @default
+             */
+            priority_class: string;
+            /** Tolerations */
+            tolerations?: components["schemas"]["Toleration"][];
+        };
         /** Policies */
         Policies: {
+            /** @description The size when resources is custom (Debezium only); the Java heap is worked out from memory. Returned only when set. */
+            custom_resources?: components["schemas"]["CustomResources"] | null;
             /**
              * Delivery Canary
              * @description Write a canary row to the source every few minutes and confirm it reaches the destination (PostgreSQL/MySQL sources, destinations BeziSync can read).
@@ -4031,10 +4649,11 @@ export interface components {
             latency_target_seconds: number;
             /**
              * Resources
+             * @description A preset size, or custom: custom_resources (Debezium) or flink_cdc.cluster (Flink CDC).
              * @default small
              * @enum {string}
              */
-            resources: "small" | "medium" | "large";
+            resources: "small" | "medium" | "large" | "custom";
             /**
              * Source Retained Limit Gb
              * @description Alert when the source retains more log than this for the pipeline.
@@ -4094,8 +4713,15 @@ export interface components {
             ok: boolean;
             /** Properties */
             properties: string | null;
+            /**
+             * Recommendations
+             * @description Omitted when there are none.
+             */
+            recommendations?: components["schemas"]["Recommendation"][];
             /** Sections */
             sections: components["schemas"]["PreflightSection"][];
+            /** @description Omitted when no setting changes. */
+            settings_change?: components["schemas"]["SettingsChange"];
             /** Summary */
             summary: string;
         };
@@ -4163,6 +4789,11 @@ export interface components {
         /** ProjectPolicies */
         ProjectPolicies: {
             /**
+             * Allow Advanced Properties
+             * @description Lets Experts pass raw Debezium properties (Review → Advanced Debezium properties). BeziSync can't verify them; preflight shows them as Unknown. Returned only when true.
+             */
+            allow_advanced_properties?: boolean;
+            /**
              * Allow Custom Transforms
              * @description Lets Experts add custom transform steps (any SMT class in the pipeline's Debezium image). Returned only when true.
              */
@@ -4194,7 +4825,7 @@ export interface components {
              * Allowed Transforms
              * @description Built-in step types this project allows; omitted or null = all.
              */
-            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten")[] | null;
+            allowed_transforms?: ("unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "soft_delete" | "truncate" | "route" | "computed")[] | null;
             /** Max Pipelines Per Source */
             max_pipelines_per_source?: number | null;
             /** Max Resources */
@@ -4204,6 +4835,22 @@ export interface components {
              * @default false
              */
             require_approval: boolean;
+            /** @description Limits on each pipeline's peak footprint, beside max_resources. Returned only when set. */
+            resource_limits?: components["schemas"]["ResourceLimits"] | null;
+            /**
+             * Setting Limits
+             * @description Limits on typed settings, by key (returned only when set). A key the registry no longer has is kept and ignored.
+             */
+            setting_limits?: {
+                [key: string]: components["schemas"]["SettingLimit"];
+            };
+            /**
+             * Shrink After Copy
+             * @description What happens once a custom Flink CDC cluster with a streaming slot size finishes its first copy: auto (BeziSync shrinks it) or suggest (someone chooses Shrink now). Returned only when suggest.
+             * @default auto
+             * @enum {string}
+             */
+            shrink_after_copy: "auto" | "suggest";
         };
         /** ProjectRead */
         ProjectRead: {
@@ -4295,6 +4942,23 @@ export interface components {
             /** Providers */
             providers: components["schemas"]["SignInOption"][];
         };
+        /**
+         * Recommendation
+         * @description A setting value preflight suggests from this run's evidence; hide it once evidence_at is older than 10 minutes.
+         */
+        Recommendation: {
+            /**
+             * Evidence At
+             * Format: date-time
+             */
+            evidence_at: string;
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
+            /** Why */
+            why: string;
+        };
         /** RefCheck */
         RefCheck: {
             /** Key */
@@ -4321,11 +4985,45 @@ export interface components {
             };
         };
         /**
+         * ResourceLimits
+         * @description The most one pipeline may ask for at its peak (a Flink CDC cluster during its first copy); each optional.
+         */
+        ResourceLimits: {
+            /**
+             * Max Cpu
+             * @description CPU, at least 0.5, in quarters ("6", "1.5").
+             */
+            max_cpu?: string;
+            /**
+             * Max Memory
+             * @description Memory, at least 768Mi, in steps of 256Mi; whole GiB written as Gi ("12Gi").
+             */
+            max_memory?: string;
+            /**
+             * Max Parallelism
+             * @description Readers (Flink CDC), 1 to 128.
+             */
+            max_parallelism?: number;
+        };
+        /**
          * Role
          * @description A role in one project. Admin is account-wide (``User.is_superuser``), not a project role.
          * @enum {string}
          */
         Role: "editor" | "operator" | "viewer";
+        /** Route */
+        Route: {
+            /**
+             * Match
+             * @description schema.table, where * matches any run of characters.
+             */
+            match: string;
+            /**
+             * To
+             * @description The destination name the matched tables go to.
+             */
+            to: string;
+        };
         /** RuleKind */
         RuleKind: {
             /** Default For Seconds */
@@ -4457,6 +5155,11 @@ export interface components {
             mode: "direct" | "agent";
             /** Name */
             name: string;
+            /**
+             * Placement Profiles
+             * @description Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.
+             */
+            placement_profiles?: components["schemas"]["PlacementProfile"][];
             /** Secrets */
             secrets?: {
                 [key: string]: unknown;
@@ -4536,6 +5239,11 @@ export interface components {
             name: string;
             /** Pipelines */
             pipelines: number;
+            /**
+             * Placement Profiles
+             * @description Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.
+             */
+            placement_profiles: components["schemas"]["PlacementProfile"][];
             /** Secret Fields Set */
             secret_fields_set: string[];
             /** Version */
@@ -4569,6 +5277,11 @@ export interface components {
             enabled?: boolean | null;
             /** Name */
             name?: string | null;
+            /**
+             * Placement Profiles
+             * @description Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.
+             */
+            placement_profiles?: components["schemas"]["PlacementProfile"][];
             /** Secrets */
             secrets?: {
                 [key: string]: unknown | null;
@@ -4942,6 +5655,95 @@ export interface components {
             /** Path */
             path: string;
         };
+        /**
+         * SettingChange
+         * @description One setting a deploy changes. from or to is null when the setting is unset (its default applies).
+         */
+        SettingChange: {
+            /** From */
+            from: string | null;
+            /**
+             * Impact
+             * @enum {string}
+             */
+            impact: "live" | "restart" | "first_copy" | "next_copy" | "breaks_positions";
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /** To */
+            to: string | null;
+            /**
+             * Unverified
+             * @description An advanced property: passed as typed, so BeziSync can only say it restarts the pipeline.
+             */
+            unverified?: boolean;
+        };
+        /** SettingEffect */
+        SettingEffect: {
+            /** Blocking */
+            blocking: boolean;
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "removed" | "renamed" | "missing" | "unknown" | "unchecked";
+            /** Key */
+            key: string;
+            /** Message */
+            message: string;
+            /** Title */
+            title?: string;
+            /**
+             * To
+             * @description The key a renamed setting moves to.
+             */
+            to?: string;
+        };
+        /**
+         * SettingLimit
+         * @description A project's limit on one typed setting; each part optional.
+         */
+        SettingLimit: {
+            /**
+             * Choices
+             * @description Only these choices (a setting with choices).
+             */
+            choices?: string[];
+            /**
+             * Hide
+             * @description Pipelines can't set it.
+             */
+            hide?: boolean;
+            /**
+             * Max
+             * @description At most this (a number or a duration).
+             */
+            max?: string;
+            /**
+             * Min
+             * @description At least this.
+             */
+            min?: string;
+            /**
+             * Pin
+             * @description Every pipeline gets this value, written into its spec when it deploys.
+             */
+            pin?: string;
+        };
+        /**
+         * SettingsChange
+         * @description What a deploy changes in the pipeline’s settings, and the heaviest impact of it.
+         */
+        SettingsChange: {
+            /**
+             * Impact
+             * @enum {string}
+             */
+            impact: "live" | "restart" | "first_copy" | "next_copy" | "breaks_positions";
+            /** Settings */
+            settings: components["schemas"]["SettingChange"][];
+        };
         /** SignInOption */
         SignInOption: {
             /**
@@ -5074,6 +5876,19 @@ export interface components {
             /** Required */
             required: boolean;
         };
+        /** SlotSize */
+        SlotSize: {
+            /**
+             * Cpu
+             * @description CPU in quarters ("1.5").
+             */
+            cpu: string;
+            /**
+             * Memory
+             * @description Memory in steps of 256Mi; whole GiB written as Gi ("2Gi").
+             */
+            memory: string;
+        };
         /** SnapshotRequest */
         SnapshotRequest: {
             /**
@@ -5130,7 +5945,7 @@ export interface components {
          * Status
          * @enum {string}
          */
-        Status: "pass" | "warn" | "fail" | "skip";
+        Status: "pass" | "warn" | "fail" | "skip" | "unknown";
         /** StoreChoice */
         StoreChoice: {
             /**
@@ -5449,15 +6264,52 @@ export interface components {
             /** Token */
             token?: string | null;
         };
+        /** Toleration */
+        Toleration: {
+            /**
+             * Effect
+             * @description NoSchedule, PreferNoSchedule, NoExecute, or empty: any.
+             * @default
+             * @enum {string}
+             */
+            effect: "" | "NoSchedule" | "PreferNoSchedule" | "NoExecute";
+            /**
+             * Key
+             * @description The taint's key; empty with Exists tolerates every taint.
+             * @default
+             */
+            key: string;
+            /**
+             * Operator
+             * @enum {string}
+             */
+            operator: "Equal" | "Exists";
+            /**
+             * Value
+             * @description With Equal only.
+             * @default
+             */
+            value: string;
+        };
         /** Transform */
         Transform: {
             /** Add Fields */
             add_fields?: string[];
             /**
+             * Args
+             * @description computed: the function's arguments, in order.
+             */
+            args?: components["schemas"]["ComputedArg"][];
+            /**
              * Class
              * @description custom: the SMT class (Expert; needs the project policy allow_custom_transforms).
              */
             class?: string;
+            /**
+             * Columns
+             * @description truncate: text columns cut to at most length characters (Debezium: PostgreSQL and MySQL; Flink CDC: any source).
+             */
+            columns?: components["schemas"]["Truncation"][];
             /**
              * Condition
              * @description Filter: raw Groovy/JS expression (expert). Needs the project policy allow_scripted_transforms; not combined with operations or rules.
@@ -5475,6 +6327,12 @@ export interface components {
              * @enum {string}
              */
             delimiter?: "_" | ".";
+            /**
+             * Function
+             * @description computed: the function (Flink CDC only).
+             * @enum {string}
+             */
+            function?: "concat" | "date_format" | "length" | "lower" | "substr" | "to_integer" | "to_text" | "trim" | "upper";
             /**
              * Id
              * @description Stable step id; names the step t_<id> in the compiled chain. Returned only when set.
@@ -5505,8 +6363,18 @@ export interface components {
             };
             /** Renames */
             renames?: components["schemas"]["Rename"][];
+            /**
+             * Routes
+             * @description route: tables a pattern matches to one destination (a table two routes match is refused).
+             */
+            routes?: components["schemas"]["Route"][];
             /** Rules */
             rules?: components["schemas"]["FilterRule"][];
+            /**
+             * Table
+             * @description computed: the table (schema.table) the column is added to.
+             */
+            table?: string;
             /**
              * Tables
              * @description Limit the step to these captured tables (filter with operations or rules, rename, add_field, flatten, custom). Omitted = every table.
@@ -5516,7 +6384,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom";
+            type: "unwrap" | "filter" | "outbox" | "rename" | "add_field" | "flatten" | "custom" | "soft_delete" | "truncate" | "route" | "computed";
             value?: components["schemas"]["FieldValue"];
         };
         /**
@@ -5579,6 +6447,15 @@ export interface components {
             replica_identity?: string | null;
             /** @description Draft spec; omitted = the latest version. */
             spec?: components["schemas"]["PipelineSpec"] | null;
+            /** Table */
+            table: string;
+        };
+        /** Truncation */
+        Truncation: {
+            /** Column */
+            column: string;
+            /** Length */
+            length: number;
             /** Table */
             table: string;
         };
@@ -8098,6 +8975,41 @@ export interface operations {
             };
         };
     };
+    image_effects_api_v1_projects__project_id__debezium_images_effects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageEffectsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEffects"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_events_api_v1_projects__project_id__events_get: {
         parameters: {
             query?: {
@@ -8479,6 +9391,74 @@ export interface operations {
                 "application/json": components["schemas"]["PipelineUpdate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pack_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_pack_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterPackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterPackRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -9117,6 +10097,74 @@ export interface operations {
             };
         };
     };
+    pipeline_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    classify_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_classify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassifyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     snapshot_api_v1_projects__project_id__pipelines__pipeline_id__snapshots_post: {
         parameters: {
             query?: never;
@@ -9375,6 +10423,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPolicies"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectPolicies"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitImpactRead"];
                 };
             };
             /** @description Validation Error */

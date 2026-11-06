@@ -61,6 +61,7 @@ var RuleKinds = []RuleKind{
 	{"delivery_unverified", "Delivery not verified", "A delivery canary written to the source did not reach the destination in time.", "critical", 0, map[string]any{}},
 	{"schema_breaking", "Breaking schema change", "A captured table dropped a column, changed a column's type, or disappeared.", "warning", 0, map[string]any{}},
 	{"transform_drift", "Transform needs attention", "After a schema change, a transform step refers to a column that is gone, a filter rule can no longer match, or two fields would get one name.", "warning", 0, map[string]any{}},
+	{"cluster_shrink_failed", "Cluster stopped shrinking", "A custom Flink CDC cluster failed on its smaller streaming shape several times, so BeziSync keeps it at its copy size.", "warning", 0, map[string]any{}},
 }
 
 // RuleKindByName finds a rule kind.
@@ -194,6 +195,11 @@ func Evaluate(kind string, p *models.Pipeline, params map[string]any, now time.T
 			}
 			return Condition{true, "Transform needs attention on " + p.Name, message,
 				"Open the pipeline's Transform step: pick the new column or remove the step, then deploy.", severity}
+		}
+	case "cluster_shrink_failed":
+		if shape, _ := p.Artifacts[ArtifactFlinkShape].(map[string]any); p.DeployedVersionID != nil && shape["shrink_off"] == true {
+			return Condition{true, p.Name + "'s cluster stopped shrinking", fmt.Sprintf("Its streaming shape failed %d times before saving a position; it runs at its copy size.",
+				int(toFloat(shape["shrink_failures"]))), "Give each reader more CPU or memory while streaming (Review → Size), then deploy.", ""}
 		}
 	case "position_regressed":
 		if r := status["position_regressed"]; truthyAny(r) {

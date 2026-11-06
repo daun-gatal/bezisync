@@ -313,3 +313,37 @@ export function flinkView(f: FlinkStatus | undefined, agoOf: (iso: string) => st
     problem: f.store_error ? `Saving positions failed: ${f.store_error}` : null,
   };
 }
+
+/** What a custom Flink CDC cluster that shrinks after its copy is doing (artifacts.flink_shape). */
+export interface ShapeView {
+  /** "Copy shape" or "Streaming shape", with when it shrank. */
+  text: string;
+  /** Shrink now is offered (the "suggest" policy, the copy done). */
+  ready: boolean;
+  /** BeziSync stopped shrinking it after failed attempts. */
+  problem: string | null;
+}
+
+type ShapeSize = { task_managers?: number; slots?: number; task_manager_cpu?: string; task_manager_memory?: string };
+
+function shapeWords(s: ShapeSize | undefined): string {
+  if (!s?.task_managers) return '';
+  return ` · ${s.task_managers} TaskManager${s.task_managers === 1 ? '' : 's'} × ${s.slots ?? 0} slots, ${s.task_manager_cpu} CPU and ${s.task_manager_memory} each`;
+}
+
+export function shapeView(artifacts: Record<string, unknown> | null | undefined, agoOf: (iso: string) => string): ShapeView | null {
+  const a = (artifacts ?? {}).flink_shape as
+    | { phase?: string; size?: ShapeSize; streaming_size?: ShapeSize; shrunk_at?: string; shrink_ready?: boolean; shrink_off?: boolean; shrink_failures?: number }
+    | undefined;
+  if (!a?.streaming_size) return null;
+  const streaming = a.phase === 'streaming';
+  return {
+    text: streaming
+      ? `Streaming shape${a.shrunk_at ? `, shrank ${agoOf(a.shrunk_at)}` : ''}${shapeWords(a.streaming_size)}`
+      : `Copy shape${a.shrink_off ? '' : a.shrink_ready ? ', ready to shrink' : ', shrinks after the first copy'}${shapeWords(a.size)}`,
+    ready: !streaming && a.shrink_ready === true && !a.shrink_off,
+    problem: a.shrink_off
+      ? `The streaming shape failed ${a.shrink_failures ?? 0} times before it saved a position, so BeziSync keeps the copy shape. Give each reader more while streaming, then deploy.`
+      : null,
+  };
+}

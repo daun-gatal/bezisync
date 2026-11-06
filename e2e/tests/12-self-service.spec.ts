@@ -158,3 +158,128 @@ test('an admin decides whether pipelines may run scripted transforms', async ({ 
   await expect(page.getByRole('button', { name: 'Save policies' })).toBeDisabled();
   expect((await admin.get<{ allow_scripted_transforms?: boolean }>(`${base}/policies`)).allow_scripted_transforms).toBeUndefined();
 });
+
+test('an admin decides whether pipelines may pass advanced Debezium properties', async ({ page }) => {
+  const admin = await Api.signIn();
+  const tag = unique('raw');
+  const project = await admin.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `Raw ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/settings/policies`);
+  const raw = page.getByRole('switch', { name: 'Allow advanced Debezium properties' });
+  await expect(raw).not.toBeChecked();
+  await expect(page.getByText('can’t verify the rest', { exact: false })).toBeVisible();
+  await raw.click();
+  await page.getByRole('button', { name: 'Save policies' }).click();
+  await expect(page.getByText('Policies saved')).toBeVisible();
+  expect((await admin.get<{ allow_advanced_properties?: boolean }>(`${base}/policies`)).allow_advanced_properties).toBe(true);
+
+  // A raw property BeziSync sets is refused when saved, with where to set it instead.
+  const { password, ...pg } = SOURCE_PG;
+  const src = await admin.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const refused = await admin.raw('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id,
+    spec: { source: { tables: { include: ['shop.orders'] } }, advanced: { 'debezium.source.column.exclude.list': 'shop.orders.total' } },
+  });
+  expect(refused.status()).toBe(422);
+  const problem = (await refused.json()) as { code: string; errors: { loc: string[]; message: string }[] };
+  expect(problem.code).toBe('managed_property');
+  expect(problem.errors[0]!.message).toContain('Tables');
+
+  // Switching it off again is returned without the key. (The saved toast covers the Save button
+  // until it closes, and a pointer resting on it keeps it open.)
+  await page.mouse.move(0, 0);
+  await expect(page.getByText('Policies saved')).toBeHidden();
+  await raw.click();
+  await page.getByRole('button', { name: 'Save policies' }).click();
+  await expect(page.getByRole('button', { name: 'Save policies' })).toBeDisabled();
+  expect((await admin.get<{ allow_advanced_properties?: boolean }>(`${base}/policies`)).allow_advanced_properties).toBeUndefined();
+});
+
+test('an admin sets resource limits; Policies counts the running pipelines they would block', async ({ page }) => {
+  test.setTimeout(300_000);
+  const admin = await Api.signIn();
+  const tag = unique('limits');
+  const project = await admin.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `Limits ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  const { password, ...pg } = SOURCE_PG;
+  const rt = await admin.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await admin.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await admin.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'kafka', name: `k-${tag}`, config: KAFKA }, 201);
+  const p = await admin.send<{ id: string; footprint: { memory_mib: number } }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id,
+    spec: { source: { tables: { include: ['shop.orders'] } }, snapshot: { mode: 'no_data' }, policies: { resources: 'medium' } },
+  }, 201);
+  expect(p.footprint.memory_mib).toBe(1536);
+  await admin.send('POST', `${base}/pipelines/${p.id}/deploy`, {});
+
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/settings/policies`);
+  await choose(page.getByLabel('Most memory per pipeline'), '1 GiB');
+  await expect(page.getByText('1 running pipeline would be blocked at the next deploy')).toBeVisible();
+  await expect(page.getByText('1536 MiB at its peak')).toBeVisible();
+  await choose(page.getByLabel('Most readers per pipeline'), '4 readers');
+  await page.getByRole('button', { name: 'Offer Shrink now' }).click();
+  await page.getByRole('button', { name: 'Save policies' }).click();
+  await expect(page.getByText('Policies saved')).toBeVisible();
+  const saved = await admin.get<{ resource_limits?: Record<string, unknown>; shrink_after_copy?: string }>(`${base}/policies`);
+  expect(saved.resource_limits).toEqual({ max_memory: '1Gi', max_parallelism: 4 });
+  expect(saved.shrink_after_copy).toBe('suggest');
+
+  // It keeps running; its next deploy is refused by the limit.
+  const pre = await admin.send<{ sections: { key: string; report: { checks: { code: string; status: string }[] } }[] }>('POST', `${base}/pipelines/${p.id}/preflight`, {});
+  expect(pre.sections.find((s) => s.key === 'policy')?.report.checks.find((c) => c.code === 'policy_resource_limits')?.status).toBe('fail');
+
+  // Clearing them leaves nothing behind.
+  await choose(page.getByLabel('Most memory per pipeline'), 'No limit');
+  await choose(page.getByLabel('Most readers per pipeline'), 'No limit');
+  await page.getByRole('button', { name: 'Shrink it' }).click();
+  await page.getByRole('button', { name: 'Save policies' }).click();
+  await expect(page.getByRole('button', { name: 'Save policies' })).toBeDisabled();
+  const cleared = await admin.get<Record<string, unknown>>(`${base}/policies`);
+  expect(cleared.resource_limits).toBeUndefined();
+  expect(cleared.shrink_after_copy).toBeUndefined();
+  await admin.send('DELETE', `${base}/pipelines/${p.id}?drop_destinations=true`);
+});
+
+test('an admin limits a setting; Policies counts who it blocks, and Review shows a pinned one', async ({ page }) => {
+  test.setTimeout(180_000);
+  const admin = await Api.signIn();
+  const tag = unique('slim');
+  const project = await admin.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `Slim ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  const { password, ...pg } = SOURCE_PG;
+  const src = await admin.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  // A complete draft (destination and runtime), so the wizard opens at Review.
+  const dst = await admin.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'kafka', name: `k-${tag}`, config: KAFKA }, 201);
+  const rt = await admin.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const p = await admin.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, spec: { source: { tables: { include: ['shop.orders'] } }, tuning: { 'debezium.source.snapshot.max.threads': '8' } },
+  }, 201);
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/settings/policies`);
+  await choose(page.getByLabel('Setting', { exact: true }), 'Snapshot threads');
+  await choose(page.getByLabel('Limit', { exact: true }), 'At most');
+  await page.getByLabel('Value', { exact: true }).fill('4');
+  await page.getByRole('button', { name: 'Add the limit' }).click();
+  await expect(page.getByText(`Would block 1 pipeline at the next deploy: p-${tag}`)).toBeVisible({ timeout: 20_000 });
+  await choose(page.getByLabel('Setting', { exact: true }), 'Poll interval');
+  await choose(page.getByLabel('Limit', { exact: true }), 'Always this value');
+  await page.getByLabel('Value', { exact: true }).fill('500');
+  await page.getByRole('button', { name: 'Add the limit' }).click();
+  await page.getByRole('button', { name: 'Save policies' }).click();
+  await expect(page.getByText('Policies saved')).toBeVisible();
+  const saved = await admin.get<{ setting_limits?: Record<string, unknown> }>(`${base}/policies`);
+  expect(saved.setting_limits).toEqual({ 'debezium.source.poll.interval.ms': { pin: '500' }, 'debezium.source.snapshot.max.threads': { max: '4' } });
+
+  // Review: the pinned setting is shown as the project's, and the limit bounds the control.
+  await admin.send('PATCH', '/api/v1/auth/me', { ui_mode: 'expert' });
+  try {
+    await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=review`);
+    const card = page.getByRole('region', { name: 'Engine settings' });
+    await expect(card.getByText(/Set by project policy/)).toBeVisible();
+    await expect(card.getByText(/This project allows at most 4/)).toBeVisible();
+  } finally {
+    await admin.send('PATCH', '/api/v1/auth/me', { ui_mode: 'guided' });
+  }
+});

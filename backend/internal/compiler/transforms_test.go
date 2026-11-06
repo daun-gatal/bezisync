@@ -223,3 +223,86 @@ func TestSQLServerTopicsCarryTheDatabase(t *testing.T) {
 		t.Errorf("topic.regex %q", r)
 	}
 }
+
+// T1, T2: a soft delete makes the unwrap step mark deletes (no tombstone), adding one where the
+// pipeline has none; the step itself compiles to nothing.
+func TestSoftDeleteDebezium(t *testing.T) {
+	with, err := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "unwrap", "id": "u1a0", "delete_handling": "drop"}, {"type": "soft_delete", "id": "sd01"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if with.Properties["debezium.transforms.t_u1a0.delete.tombstone.handling.mode"] != "rewrite" || strings.Contains(with.Properties["debezium.transforms"], "sd01") {
+		t.Fatal(with.Properties["debezium.transforms"], with.Properties["debezium.transforms.t_u1a0.delete.tombstone.handling.mode"])
+	}
+	without, err := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "soft_delete", "id": "sd01"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := strings.Split(without.Properties["debezium.transforms"], ",")
+	var unwrap string
+	for _, step := range chain {
+		if without.Properties["debezium.transforms."+step+".type"] == "io.debezium.transforms.ExtractNewRecordState" {
+			unwrap = step
+		}
+	}
+	if unwrap == "" || without.Properties["debezium.transforms."+unwrap+".delete.tombstone.handling.mode"] != "rewrite" {
+		t.Fatal(without.Properties)
+	}
+	// Without the step nothing changes.
+	plain, _ := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "unwrap", "id": "u1a0", "delete_handling": "drop"}]}`)
+	if plain.Properties["debezium.transforms.t_u1a0.delete.tombstone.handling.mode"] != "drop" {
+		t.Fatal(plain.Properties)
+	}
+}
+
+// T7: a Truncate step compiles to exactly the source property a raw one was, outside the chain.
+func TestTruncateDebezium(t *testing.T) {
+	got, err := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "unwrap", "id": "u1a0"},
+	  {"type": "truncate", "id": "tr01", "columns": [{"table": "public.orders", "column": "notes", "length": 100}, {"table": "public.orders", "column": "status", "length": 10},
+	   {"table": "public.orders", "column": "memo", "length": 100}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := got.Properties
+	if p["debezium.source.column.truncate.to.100.chars"] != "public.orders.notes,public.orders.memo" || p["debezium.source.column.truncate.to.10.chars"] != "public.orders.status" ||
+		strings.Contains(p["debezium.transforms"], "tr01") {
+		t.Fatal(p["debezium.source.column.truncate.to.100.chars"], p["debezium.transforms"])
+	}
+	if _, err := compileSpec(t, "mongo", "kafka", `{"source": {"tables": {"include": ["shop.orders"]}}, "transforms": [{"type": "truncate", "columns": [{"table": "shop.orders", "column": "notes", "length": 5}]}]}`); err == nil ||
+		!strings.Contains(err.Error(), "not available") {
+		t.Fatal(err)
+	}
+}
+
+// Routes on Debezium: after bzroute, one router per destination; the destinations follow.
+func TestRouteDebezium(t *testing.T) {
+	got, err := compileSpec(t, "pg", "kafka", `{"source": {"tables": {"include": ["public.orders", "public.orders_eu", "public.items"]}},
+	  "transforms": [{"type": "unwrap", "id": "u1a0"}, {"type": "route", "id": "rt01", "routes": [{"match": "public.orders*", "to": "shop.all_orders"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := got.Properties
+	if !strings.HasSuffix(p["debezium.transforms"], ",bzroute,bzmerge1") || p["debezium.transforms.bzmerge1.replacement"] != "shop.all_orders" ||
+		!strings.Contains(p["debezium.transforms.bzmerge1.regex"], "orders_eu") || strings.Contains(p["debezium.transforms.bzmerge1.regex"], "items") {
+		t.Fatal(p["debezium.transforms"], p["debezium.transforms.bzmerge1.regex"])
+	}
+	if got.Destinations["public.orders_eu"] != "shop.all_orders" || got.Destinations["public.items"] == "shop.all_orders" {
+		t.Fatal(got.Destinations)
+	}
+	// A route onto the destination an unrouted table already has is refused, not mixed in.
+	items := got.Destinations["public.items"]
+	_, err = compileSpec(t, "pg", "kafka", `{"source": {"tables": {"include": ["public.orders", "public.items"]}},
+	  "transforms": [{"type": "route", "id": "rt01", "routes": [{"match": "public.orders", "to": "`+items+`"}]}]}`)
+	var pe *problem.Problem
+	if !errors.As(err, &pe) || pe.Code != "destination_collision" || !strings.Contains(pe.Detail, "public.orders and public.items") {
+		t.Fatal(err)
+	}
+}
+
+// T16: Debezium has no computed columns.
+func TestComputedDebezium(t *testing.T) {
+	_, err := compileSpec(t, "pg", "kafka", `{`+orders+`, "transforms": [{"type": "computed", "id": "cc01", "table": "public.orders", "name": "x", "function": "upper", "args": [{"column": "status"}]}]}`)
+	if err == nil || !strings.Contains(err.Error(), "runs only on Flink CDC") {
+		t.Fatal(err)
+	}
+}

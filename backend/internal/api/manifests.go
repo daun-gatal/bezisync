@@ -189,7 +189,14 @@ func manifestRoutes(r chi.Router) {
 		if err := a.Require(auth.PipelineEdit); err != nil {
 			return err
 		}
-		httpapi.JSON(w, http.StatusOK, services.Adopt(props))
+		// Adopt's report as recorded, and the five-bucket plan the draft is created from.
+		report := services.Adopt(props)
+		out, err := services.ToMap(report)
+		if err != nil {
+			return err
+		}
+		out["plan"] = services.PlanImport(props, report)
+		httpapi.JSON(w, http.StatusOK, out)
 		return nil
 	}))
 	r.Post("/projects/{project_id}/pipelines/{pipeline_id}/promote", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {

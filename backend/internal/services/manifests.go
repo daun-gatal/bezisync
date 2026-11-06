@@ -3,12 +3,16 @@ package services
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/daun-gatal/bezisync/backend/internal/auth"
+	"github.com/daun-gatal/bezisync/backend/internal/compiler"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
@@ -25,6 +29,70 @@ type ApplyResult struct {
 	Diff       []string   `json:"diff"`
 	Notes      []string   `json:"notes"`
 	Deploy     *string    `json:"deploy"`
+	// SettingsChange is what the change does to the running pipeline's settings (against the
+	// deployed version; absent when it isn't deployed or none change).
+	SettingsChange *domain.SettingsChange `json:"settings_change,omitempty"`
+	// Breaking says why deploying it breaks a running pipeline's consumers or positions (CLI
+	// apply and diff ask for --confirm).
+	Breaking []string `json:"breaking,omitempty"`
+	// Advanced is what BeziSync makes of each raw property (never its value).
+	Advanced []AdvancedKey `json:"advanced,omitempty"`
+}
+
+// AdvancedKey is one raw property of a manifest and its class.
+type AdvancedKey struct {
+	Key     string `json:"key"`
+	Class   string `json:"class"`
+	Message string `json:"message,omitempty"`
+}
+
+// planEffects fills what deploying parsed over the deployed version would do (D18) and the raw
+// properties' classes.
+func planEffects(ctx context.Context, q db.Querier, existing *models.Pipeline, eng engine.ID, spec domain.PipelineSpec, r *ApplyResult) error {
+	for _, k := range sortedStrings(spec.Advanced) {
+		var v compiler.AdvancedVerdict
+		if eng == engine.FlinkCDC {
+			v = compiler.ClassifyFlinkAdvanced(k, spec.Advanced[k], nil)
+		} else {
+			v = compiler.ClassifyAdvanced(k, spec.Advanced[k], nil)
+		}
+		r.Advanced = append(r.Advanced, AdvancedKey{Key: k, Class: string(v.Class), Message: v.Message})
+	}
+	if existing == nil || existing.DeployedVersionID == nil {
+		return nil
+	}
+	deployed, err := SpecOf(ctx, q, existing.DeployedVersionID)
+	if err != nil || deployed == nil {
+		return err
+	}
+	r.SettingsChange = domain.SummarizeSettings(deployed, spec)
+	if r.SettingsChange != nil {
+		for _, c := range r.SettingsChange.Settings {
+			if c.Impact == engine.ImpactBreaksPositions {
+				r.Breaking = append(r.Breaking, c.Title+" changes: the pipeline starts over")
+			}
+		}
+	}
+	sum := domain.SummarizeChange(deployed, spec)
+	if sum.NamingChanged {
+		r.Breaking = append(r.Breaking, "the destination naming changes: events go to other destinations")
+	}
+	if sum.FormatChanged {
+		r.Breaking = append(r.Breaking, "the event format changes: consumers read another format")
+	}
+	if len(sum.TablesRemoved) > 0 {
+		r.Breaking = append(r.Breaking, "tables stop being captured: "+strings.Join(sum.TablesRemoved, ", "))
+	}
+	return nil
+}
+
+func sortedStrings(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ExportPipeline renders a pipeline as a manifest document.
@@ -177,7 +245,32 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 	engineChanged := existing != nil && parsed.Engine != "" && parsed.Engine != existing.Engine
 	metaChanged := existing != nil && (existing.Description != parsed.Description || existing.Owner != parsed.Owner ||
 		!labelsEqual(existing.Labels, parsed.Labels) || uuidChanged(existing.SinkID, sinkID) || uuidChanged(existing.RuntimeID, runtimeID) || engineChanged)
+	eng := engine.Debezium
+	if parsed.Engine != "" {
+		eng = engine.ID(parsed.Engine)
+	} else if existing != nil {
+		eng = EngineOf(existing)
+	}
 	if o.DryRun {
+		// What this project's setting limits make of it (Promote's and apply's plan).
+		rules, err := PoliciesOf(ctx, q, pid)
+		if err != nil {
+			return nil, err
+		}
+		refused := SettingLimitViolations(rules, eng, parsed.Spec, nil)
+		for _, k := range tuningKeys(refused) {
+			notes = append(notes, fmt.Sprintf("Refused by this project's setting limits: %s (%s).", k, refused[k]))
+		}
+		limits := LimitsFor(rules, eng)
+		pinned := map[string]string{}
+		for k, l := range limits {
+			if _, set := parsed.Spec.Tuning[k]; l.Pin != "" && !set {
+				pinned[k] = l.Pin
+			}
+		}
+		for _, k := range tuningKeys(pinned) {
+			notes = append(notes, fmt.Sprintf("This project sets %s to %s when it deploys.", k, pinned[k]))
+		}
 		action := "would_create"
 		var id *uuid.UUID
 		if existing != nil {
@@ -187,7 +280,11 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 				action = "would_update"
 			}
 		}
-		return &ApplyResult{Name: parsed.Name, Action: action, PipelineID: id, Diff: diff, Notes: notes}, nil
+		r := &ApplyResult{Name: parsed.Name, Action: action, PipelineID: id, Diff: diff, Notes: notes}
+		if err := planEffects(ctx, q, existing, eng, parsed.Spec, r); err != nil {
+			return nil, err
+		}
+		return r, nil
 	}
 	var p *models.Pipeline
 	action := "unchanged"
@@ -223,6 +320,9 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 		number = &n
 	}
 	result := &ApplyResult{Name: parsed.Name, Action: action, PipelineID: &p.ID, Version: number, Diff: diff, Notes: notes}
+	if err := planEffects(ctx, q, existing, eng, parsed.Spec, result); err != nil {
+		return nil, err
+	}
 	differs := p.CurrentVersionID == nil || p.DeployedVersionID == nil || *p.CurrentVersionID != *p.DeployedVersionID
 	if o.Deploy && differs {
 		required, err := ApprovalRequired(ctx, q, pid)

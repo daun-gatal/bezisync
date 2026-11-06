@@ -181,8 +181,10 @@ message transforms (SMTs); BeziSync offers them by goal and puts each step where
 |---|---|---|
 | Value formats | Decimals as exact bytes (default), a number or exact text; timestamps as epoch numbers (default) or ISO-8601 text; binary as base64 or hex | Connector options. ISO text exists for PostgreSQL and MySQL only; CockroachDB and Vitess send decimals as text only; MongoDB and Spanner have none |
 | Keep events | Keep only some operations (insert, update, delete, snapshot) and/or rows matching rules on columns (`is`, `is one of`, `>`, `is empty`, …), for all or some tables | Runs on the full change event, so deletes are judged on the row before. PostgreSQL sends only the key of a deleted row unless the table has `REPLICA IDENTITY FULL`. Dropped events are gone for that pipeline; re-snapshot to bring rows back. MongoDB can filter on operations only |
-| Event shape | The row after the change (with deletes kept as `__deleted = true`, as tombstones, or dropped, and optional metadata fields such as `__op`) or the full change envelope | |
-| Field changes | Rename fields, add a field (fixed text or the pipeline's name), flatten nested fields, custom transforms (Experts, policy) | Order matters within this stage; they need the row shape. The message key keeps column names |
+| Event shape | The row after the change (with deletes kept as `__deleted = true`, as tombstones, or dropped, and optional metadata fields such as `__op`) or the full change envelope; **Keep deleted rows** (soft delete) keeps every deleted row, marked — `__deleted = true` on Debezium (the row shape is added when missing, and no tombstone follows), `__op = -D` on Flink CDC, where Iceberg and StarRocks keep the row | A table that already has a column of that name is refused (field name duplication). Adding it changes what consumers get |
+| Field changes | Rename fields, add a field (fixed text or the pipeline's name), flatten nested fields, **cut long text** (text columns to at most a length: Debezium on PostgreSQL and MySQL, Flink CDC on any source; a masked or left-out column can't be cut; another type is left as it is, and blocks on Flink CDC), custom transforms (Experts, policy) | Order matters within this stage; they need the row shape. The message key keeps column names |
+| Destinations | **Send tables elsewhere** (routes): tables a pattern matches (`schema.table`, where `*` matches any run of characters, e.g. `shop.orders_*`) go to one topic or table you name, instead of each to its own; a table two routes match is refused, and the step lists where every captured table goes | Debezium routes after its own naming; Flink CDC writes the matched tables into the named table. Tables sent to one destination must have the same key and columns (preflight blocks otherwise), and a route that matches no captured table is a warning. Adding or changing one moves events, so consumers of the old destination stop receiving them |
+| Computed column | **Flink CDC only**: a new column of one table from one function of a fixed set — upper or lower case, trim, length, join columns and texts, part of a text, a date or timestamp as text (`yyyy`, `yyyy-MM`, …), any value as text, text as a whole number — with its arguments picked from the table's columns of the kind the function takes. Debezium shows the step with why it can't run it (it would need scripting) | Compiled into the Flink CDC projection, columns back-quoted and texts quoted, so no input becomes SQL; text that isn't a number becomes empty (`TRY_CAST`), never a failed job. A masked or left-out column can't be an input. Preflight blocks an input the table no longer has or of another type, and a name the table already has (one added later raises *Transform needs attention*) |
 | Message key | Key columns per table, e.g. for tables without a primary key | PostgreSQL, MySQL, Oracle, CockroachDB and Vitess. A key column the table lacks is ignored by Debezium |
 
 Fields are picked from the discovered columns; only new names and rule values are typed, and
@@ -200,6 +202,61 @@ the Events tab says whether real events match the preview, and when a schema cha
 the pipeline's Overview shows it with a **Fix** link and the *Transform needs attention* alert
 fires. Every step is in the spec (`transforms`, `values`, `keys`), so YAML, templates, promote and
 rollback carry it; `debezium.transforms*` cannot be set as advanced properties.
+
+**Size** (Review): a Debezium pipeline runs at Small (0.5 CPU · 768 MiB), Medium (1 CPU · 1.5 GiB),
+Large (2 CPU · 3 GiB) or, in Expert mode, a Custom size: CPU from 0.25 to 8 in quarters and memory
+from 512 MiB to 16 GiB in 256 MiB steps (`policies: {resources: custom, custom_resources: {cpu:
+"1.5", memory: 2Gi}}`). BeziSync works out the Java heap (70% of memory, leaving the JVM at least
+256 MiB) and takes the batch and queue sizes of the largest preset the memory reaches. A project's
+largest size limits a custom one by its CPU and memory, and a destination's smallest size too.
+Preflight measures the runtime when it runs (`runtime_capacity`): it warns when the CPU or memory
+free right now is short (the pods may wait for room), blocks — even forced — when the Kubernetes
+namespace's ResourceQuota leaves less than the pipeline asks for (Kubernetes would refuse its
+pods), and is *unknown*, never passed, when the runtime doesn't report its capacity. A redeploy
+counts only what it adds to what the pipeline runs now. Two deploys checked at the same moment can
+each fit alone; Kubernetes then refuses the pods of the second, and the pipeline shows why.
+
+**Engine settings** (Review, Expert mode) lists the typed settings BeziSync offers for the pipeline's
+engine, source and destination, grouped by when they matter (snapshot, streaming, delivery,
+engine): each has its bounds, default and what changing it does to a running pipeline. Add one from
+the searchable list; removing it restores the default. Debezium pipelines offer snapshot threads, the
+poll interval, the queue and batch sizes (BeziSync sets them from the size; the batch stays below the
+queue), a queue memory limit, the wait before reconnecting, skipping unchanged updates, the position
+save interval and the log level, and each connector's own: PostgreSQL's slot feedback interval and
+slot retries, MySQL's keep-alive, connect timeout and binlog look-ahead, Oracle LogMiner's batch and
+pause, MongoDB's check for new collections; Kafka's producer linger, batch bytes and compression,
+Pub/Sub's batch delay and size, Redis's batch size and retry delay. A connector's setting is offered
+only on that connector, a destination key a connection field sets is never a setting, and sources
+without JDBC (MongoDB, Spanner) refuse `debezium.source.driver.*` properties. Preflight checks them
+against this run's evidence: each tuned
+setting exists in the image's Debezium release (`setting_version`; unknown for an image BeziSync
+can't place), snapshot threads fit the source's free connections (`setting_threads`; read from
+PostgreSQL and MySQL, unknown otherwise), and a full queue and a copy fetch fit the heap
+(`setting_queue_memory`, `setting_fetch_memory`, estimated from the tables' sizes). Review — in
+both modes — suggests settings from the same evidence with one click to use them (snapshot threads
+for large copies with free connections; skipping unchanged updates when columns are left out) and
+hides a suggestion once its evidence is ten minutes old.
+
+**Advanced Debezium properties** (Review, Expert mode, one row per key and value) pass raw `debezium.source.*` and
+`debezium.sink.*` keys to Debezium Server for options BeziSync doesn't offer. They may only add what
+BeziSync doesn't set: a key BeziSync compiles for the pipeline, or one a wizard choice sets (tables,
+columns and personal data, keys, transforms, the event format, where events go, connection and TLS
+details, heartbeats and signals, the error policy), is refused with where to set it instead.
+Credentials (any key naming a password, secret, token, key store or SASL) belong on the connection.
+Unsafe options are never passed: SQL on the source (`database.initial.statements`,
+`heartbeat.action.query`, `replica.identity.autoset.values`), dropping or skipping changes
+(`slot.drop.on.stop`, `offset.mismatch.strategy`, `lsn.flush.*`), weaker TLS
+(`database.sslfactory`), classes loaded into the connector (`converters`, `*.custom.name`,
+`post.processors`, `topic.naming.strategy`), JDBC driver options (`driver.*`, `database.*`) that read
+local files, load classes, call out, log to files or change TLS and sign-in (such as MySQL's
+`allowLoadLocalInfile` and `autoDeserialize`, or a `socketFactory`), `snapshot.select.statement.overrides`, logging
+changes that could reveal secrets, and every `quarkus.*` key. Values can't hold `${…}` (Debezium
+Server would fill it in from the pod's environment) or line breaks. Saving refuses a key it adds or
+changes, and each row says, as you type, whether BeziSync will pass it on or why not (a key that is
+also a typed setting offers to become one); one an older pipeline already has still saves, and its deploy is blocked by the
+*Advanced properties* check until it is removed (a forced deploy can't skip it). They need the
+project policy *Allow advanced properties*; the ones that pass show in preflight as **Unknown**
+(grey, "not verified by BeziSync"), never as passed.
 
 ## Destinations
 
@@ -246,7 +303,13 @@ through the same catalogs.
 - **On Flink CDC** (chosen in the wizard when a Flink CDC image is registered; Debezium stays the
   default): the same connections and tables, written by Flink CDC's Iceberg sink. Rows are upserted
   by key (deleted rows are removed, or kept and marked `__op = '-D'`; *every change appended* is
-  Debezium only), tables are unpartitioned and new columns are added.
+  Debezium only) and new columns are added. Tables are unpartitioned unless **Partition by** (the
+  Destination step) gives a table up to four fields: a column and each value, the year, month, day
+  or hour of a date or timestamp, buckets of a hash (`bucket[N]`, N from 1 to 1024) or the leading
+  part (`truncate[N]`), compiled into Flink CDC's `partition.key`. Flink CDC applies it when it
+  creates a table; an existing table keeps its partitioning, so preflight blocks a deploy that asks
+  an existing table for other partitioning (drop it with Start over, or keep its own), and blocks
+  a partition column the rows don't carry or a transform the column's type can't take.
   The namespace must be one level of letters, digits and underscores, and a Glue catalog signs in
   with the runtime's AWS role (no access keys). Catalog and storage credentials travel to the
   cluster as catalog properties, filled in by BeziSync's helper inside the pipeline's containers.
@@ -442,6 +505,13 @@ hold the rest.
 - **Edit** — name, settings, credentials (write-only: leave a secret empty to keep it) and the
   default Debezium image. Changing where a runtime points needs its running pipelines paused first.
   Pipeline manifests refer to runtimes by name, so update them after a rename.
+- **Placement profiles** (Kubernetes, in Edit) — named places pipelines may run: a node selector,
+  tolerations, a priority class and pod labels, taken as they are (no `${…}` or `{{…}}`; Kubernetes
+  label names; BeziSync's own labels can't be set). A pipeline picks one in Review (`spec.placement`)
+  and keeps the profile it deployed with until its next deploy, so editing a profile restarts
+  nothing; one in use can't be removed (the error names its pipelines). Preflight's `placement`
+  check blocks a profile no schedulable node takes, or an agent too old to apply it, and a custom
+  Flink CDC cluster is packed for the largest node the profile can use. Docker runtimes have none.
 - **Disable / Enable** — disabling *cordons* the runtime: pipelines already on it keep running and
   can still be paused, resumed, restarted and snapshotted, but nobody can create, move or deploy
   pipelines onto it (a blocking `runtime_disabled` check). Both are audited.
@@ -489,7 +559,9 @@ and needs no cloud IAM sign-in or kubeconfig in BeziSync.
   `gke-gcloud-auth-plugin` are not available in the image).
 
 The identity needs the Role from the agent chart in the connector namespace: Deployments,
-ConfigMaps, Secrets, Services (Flink CDC pipelines only), pods, logs and `pods/proxy`.
+ConfigMaps, Secrets, Services (Flink CDC pipelines only), pods, logs, `pods/proxy` and reading
+ResourceQuotas (so preflight can tell a deploy the namespace's quota would refuse; both charts grant
+it from 0.2.1).
 
 Around the cluster:
 
@@ -543,7 +615,9 @@ to an offered version, any other image, or back to the default (pipelines that a
 default are redeployed when it changed). A pipeline's flow strip shows the version it runs and why
 (chosen for this pipeline, the runtime's default, or the default) with a **Change** button. Change
 one first, watch it reach Healthy, then the rest. Each change is a new version, so rollback is
-deploying the previous one.
+deploying the previous one. Before you confirm, the dialog says what the release does to each
+pipeline's settings: a tuned setting it doesn't have refuses that pipeline's change until you remove
+it, a renamed one moves to its new key, and raw properties are listed as not checked.
 
 ## Flink CDC engine (optional)
 
@@ -604,10 +678,45 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   the next deploy (default) or sent at once, how often the position is saved (and, for Iceberg, data
   committed: 30 s, 1 min or 5 min) and, for StarRocks and Doris, how long a load batch may wait (2, 5
   or 30 s). Expert mode adds Flink settings from a fixed list (checkpoint timeouts, restart
-  strategy, memory fractions, timeouts), each with its range; BeziSync keeps the rest.
+  strategy, memory fractions, timeouts), each with its range; BeziSync keeps the rest. Engine
+  settings also offer the connectors' options: the sources' connect timeout and attempts (MySQL,
+  PostgreSQL), PostgreSQL's WAL release delay, copying the open-ended chunk first (experimental: a
+  pill, and a preflight warning), StarRocks' load batch bytes and threads, Iceberg's target file
+  size and the schema change timeout. **Advanced Flink CDC options** pass through only the
+  connectors' own prefixes — `source.jdbc.properties.*` (unsafe driver options refused, as for
+  Debezium), `source.debezium.*` (Debezium's rules), and the destination's `sink.properties.*`,
+  `table.create.properties.*` and `table.properties.*` (not the Iceberg keys that would move or
+  rewrite a table); catalog and Hadoop options, bare Flink keys and anything BeziSync sets are
+  refused, and values are written by the YAML encoder.
 - **Size**: small runs one TaskManager (2 readers), medium two (4), large four (8); each
-  TaskManager asks for 1 CPU and 2 GiB, the JobManager 1 to 1.5 GiB. Preflight checks the runtime
-  has room (`runtime_capacity`). Kubernetes runtimes need the Role to allow Services
+  TaskManager asks for 1 CPU and 2 GiB, the JobManager 1 to 1.5 GiB. A **custom cluster**
+  (`policies: {resources: custom}` with `flink_cdc: {cluster: {parallelism, slot: {cpu, memory},
+  job_manager: {cpu, memory}}}`) names how many readers run (1 to 128) and what each reader's slot
+  needs (CPU 0.25 to 4, memory 512 MiB to 8 GiB) — in Review → Size → Custom (Expert mode), which
+  starts from the size the pipeline had and draws how the cluster would be packed now, with why it
+  splits and its total against the largest node; when it deploys, BeziSync packs the slots into the
+  fewest TaskManagers the runtime's largest node holds (at most 8 slots each, plus 512 MiB per
+  TaskManager) and keeps that shape until the next deploy, so nodes coming and going never restart
+  it. `shape: manual` with `task_managers: {count, slots, cpu, memory}` sets the TaskManagers
+  yourself. `flink_cluster_fit` blocks a cluster whose slot or TaskManager is bigger than any node,
+  even when forced, and is *unknown* when the runtime doesn't report its nodes. A deployed pipeline
+  can change its TaskManagers, slots, CPU and memory: the deploy saves the position, recreates the
+  cluster and restores it. Its number of readers stays while a saved position is left to restore
+  (the position is kept per reader): `flink_readers_changed` blocks that deploy, even when forced,
+  until you pause it and use Positions → Start over. **Shrink after the first copy**
+  (`streaming_slot: {cpu, memory}`, smaller than `slot`; automatic shape only): streaming reads the
+  log with one reader, so once every table is copied and a position was saved after streaming
+  began, the controller repacks the cluster for the streaming size — a restart from that position,
+  audited as `controller`, shown on the Overview's cluster card. It grows back to the copy size
+  before copying again (Start over that copies every table, restoring a position saved during the
+  copy, a deploy that adds tables). If the streaming shape fails before it saves a position it goes
+  back to the copy size; after three such failures BeziSync stops shrinking it (alert *Cluster
+  stopped shrinking*). With the project policy `shrink_after_copy: suggest` the Overview offers
+  **Shrink now** instead. Preflight and project limits count the copy size, the peak. Preflight checks the runtime has room
+  (`runtime_capacity`). Every reader copies in parallel, but streaming reads the binlog or
+  WAL with one. On PostgreSQL each reader opens its own temporary replication slot while it copies,
+  so a first copy needs 1 + readers free slots and WAL senders: `flink_replication_slots` blocks a
+  deploy that would run out part-way. Kubernetes runtimes need the Role to allow Services
   (`flink_kubernetes_services`; both charts grant it from 0.2.0), and agent runtimes an agent of this
   BeziSync version (`flink_agent_version`).
 
@@ -672,11 +781,24 @@ per-pipeline choices and is accepted but ignored when sent to the API.
 ## Guardrails: policies, approvals, templates
 
 **Settings → Policies** (Admins, per project): allowed runtimes, source/destination types and snapshot
-modes; the largest size; pipelines per source (each
+modes; **Resources** — the largest preset size (a custom size is held to its CPU and memory, a
+custom Flink CDC cluster to the totals of the Flink CDC preset of that name), the most CPU, memory
+and readers one pipeline may ask for at its peak (`resource_limits: {max_cpu, max_memory,
+max_parallelism}`; a Flink CDC cluster's peak is its first copy; no lower than Small, or nothing
+could deploy) and whether clusters shrink after their first copy or only offer Shrink now;
+**Setting limits** — per typed setting, at most or at least a value, only some choices, always a
+value (written into each pipeline's version when it deploys; Review shows it as set by project
+policy), or hidden; checked against the setting when you add it, with the pipelines it would block
+counted before you save; a pipeline over a limit keeps running and its next deploy is blocked
+(`policy_setting_limit`), Promote's plan names what a target project's limits refuse, and a limit on
+a setting BeziSync no longer offers is shown obsolete and ignored; pipelines per source (each
 holds a replication slot or log reader); whether "Deploy anyway" exists; whether deploys need
 **approval**; which transform types pipelines may use; and whether **custom transforms** (any SMT
 class in the image) and **scripted transforms** (Groovy/JavaScript filter scripts, which run next to
-the connector's credentials) are allowed — both are off by default. The section groups these by what
+the connector's credentials) are allowed, and whether **advanced Debezium properties** (raw
+properties BeziSync can't verify) are allowed — all three are off by default. Upgrading to the
+release that added the advanced-properties policy turned it on for every project that already had a
+pipeline using them, with an audit entry, so nothing that deployed before is blocked. The section groups these by what
 you decide, refuses an empty allow-list, and before you save lists the running pipelines whose next
 deploy the change would block. The wizard applies policies up front (disallowed options stay visible
 and say why); the server enforces them at save and deploy.
@@ -948,7 +1070,19 @@ spec:
   sink: {connection: events, naming: "cdc.{schema}.{table}", format: {type: json}}
   snapshot: {mode: initial}
   policies: {resources: medium}
+  tuning: {debezium.source.snapshot.max.threads: "4"}
 ```
+
+`tuning` holds typed engine settings from BeziSync's registry (`GET /api/v1/engines` lists them per
+engine, with their bounds and what changing one does to a running pipeline). Each must apply to the
+pipeline's engine, source and destination, and its value be written the one way BeziSync stores it
+(`4`, not `04`); otherwise saving refuses it and says why. Debezium keys start with `debezium.`,
+Flink CDC ones with the block they go in (`source.`, `sink.`, `pipeline.`); Flink settings stay
+under `flink_cdc.flink_conf`. A setting always wins over an advanced property with the same key.
+Preflight (and the version diff) lists every setting a deploy changes, typed settings, Flink
+settings and advanced properties, from what to what, with what it does to the running pipeline
+(applies live, restarts it, matters only for the first copy, takes effect on the next copy, or
+starts it over) and the heaviest of those (`settings_change`).
 
 Connections and runtimes are referenced by name. Apply from **Import YAML** or CI:
 
@@ -958,6 +1092,21 @@ bezisync remote diff -f pipelines/                # what would change (a file, a
 bezisync remote apply -f pipelines.yaml --deploy  # all or nothing; respects approvals
 bezisync remote get
 ```
+
+`diff` (and `apply`) print, for each pipeline, the spec diff, each setting a deploy changes from
+what to what with what it does to the running pipeline, what BeziSync makes of each advanced
+property (passed through, or refused and why), and what would **break** a deployed pipeline: a
+setting that starts it over, another destination naming, another event format, or tables no longer
+captured. `diff` then exits **3** (so CI can stop for a person), and `apply --deploy` changes
+nothing, until `--confirm` is given. The CLI sends manifests as written, so fields it doesn't know
+reach the server unchanged.
+
+Agents read what a pipeline may tune with the MCP tool `list_engine_settings` (or `GET
+…/pipelines/{id}/settings`): its engine's settings for its source and destination, each with its
+bounds, what changing it does, the current value and this project's limit (a hidden one is left
+out), and whether advanced properties are allowed (their keys, never their values). They change
+them with `update_pipeline`, which applies the same checks, limits, policies and approvals as for
+their person.
 
 The CLI is the `bezisync` binary in the `bezisync` image: run it from the image (mount your manifests,
 e.g. `docker run --rm -v "$PWD:/w" -w /w -e BEZISYNC_URL -e BEZISYNC_TOKEN
@@ -973,8 +1122,12 @@ other project has no matching source or destination, it offers to copy this pipe
 
 **Pipelines → Adopt existing:** paste its `application.properties`. BeziSync maps tables, snapshot
 mode, naming, format, value formats, key columns and transforms (known SMTs become steps, any other
-becomes a custom step that needs its policy), keeps safe extras as advanced properties, and lists
-what it manages itself (connection, offsets, slot, history) with warnings. Stop the old deployment first;
+becomes a custom step that needs its policy), and sorts every property into five buckets: typed
+settings (created as settings; one out of its bounds is listed as needing a change, never clamped),
+wizard choices (a key a choice sets stays that choice, even when it is also a setting), managed by
+BeziSync (connection, offsets, slot, history), kept as advanced, and refused. Excluded and masked
+columns (`column.exclude.list`, `column.mask.with.N.chars`) become the Tables step's choices;
+patterns it can't map are named in a warning. Stop the old deployment first;
 BeziSync uses its own slot and offsets, so choose "Only new changes" to avoid copying rows again,
 and drop the old slot afterwards.
 

@@ -24,6 +24,9 @@
             "title": "Mapped",
             "type": "array"
           },
+          "plan": {
+            "$ref": "#/components/schemas/ImportPlan"
+          },
           "replaced": {
             "items": {
               "type": "string"
@@ -86,7 +89,8 @@
           "kept",
           "managed",
           "replaced",
-          "warnings"
+          "warnings",
+          "plan"
         ],
         "title": "AdoptRead",
         "type": "object"
@@ -104,6 +108,28 @@
           "properties"
         ],
         "title": "AdoptRequest",
+        "type": "object"
+      },
+      "AdvancedKey": {
+        "properties": {
+          "class": {
+            "title": "Class",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "class"
+        ],
+        "title": "AdvancedKey",
         "type": "object"
       },
       "AlertRead": {
@@ -269,6 +295,22 @@
             "title": "Action",
             "type": "string"
           },
+          "advanced": {
+            "description": "What BeziSync makes of each raw property (never its value).",
+            "items": {
+              "$ref": "#/components/schemas/AdvancedKey"
+            },
+            "title": "Advanced",
+            "type": "array"
+          },
+          "breaking": {
+            "description": "Why deploying it breaks the running pipeline's consumers or positions (the CLI asks for --confirm).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Breaking",
+            "type": "array"
+          },
           "deploy": {
             "anyOf": [
               {
@@ -309,6 +351,17 @@
               }
             ],
             "title": "Pipeline Id"
+          },
+          "settings_change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettingsChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What deploying it changes in the running pipeline's settings (against the deployed version)."
           },
           "version": {
             "anyOf": [
@@ -1206,6 +1259,304 @@
         "title": "CheckRequest",
         "type": "object"
       },
+      "ClassifyItem": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "maxLength": 300,
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "maxLength": 5000,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "ClassifyItem",
+        "type": "object"
+      },
+      "ClassifyRead": {
+        "properties": {
+          "class": {
+            "enum": [
+              "allowed",
+              "invalid",
+              "credential",
+              "forbidden",
+              "modelled",
+              "owned"
+            ],
+            "title": "Class",
+            "type": "string"
+          },
+          "fix": {
+            "description": "Where the value is set instead: tables, sink, transform, review or connection (\"\" when allowed).",
+            "title": "Fix",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "setting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlinkSetting"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The typed setting with this key, when there is one."
+          }
+        },
+        "required": [
+          "key",
+          "class",
+          "message",
+          "fix",
+          "setting"
+        ],
+        "title": "ClassifyRead",
+        "type": "object"
+      },
+      "ClassifyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClassifyItem"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ClassifyRequest",
+        "type": "object"
+      },
+      "ClassifyResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClassifyRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ClassifyResponse",
+        "type": "object"
+      },
+      "ClusterNeed": {
+        "description": "What the whole cluster asks for.",
+        "properties": {
+          "cpu": {
+            "title": "Cpu",
+            "type": "number"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory_mib"
+        ],
+        "title": "ClusterNeed",
+        "type": "object"
+      },
+      "ClusterNode": {
+        "properties": {
+          "cpu": {
+            "title": "Cpu",
+            "type": "number"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory_mib"
+        ],
+        "title": "ClusterNode",
+        "type": "object"
+      },
+      "ClusterPackRead": {
+        "properties": {
+          "check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Check"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The flink_cluster_fit check for this shape."
+          },
+          "job_manager_cpu": {
+            "title": "Job Manager Cpu",
+            "type": "string"
+          },
+          "job_manager_memory": {
+            "title": "Job Manager Memory",
+            "type": "string"
+          },
+          "need": {
+            "$ref": "#/components/schemas/ClusterNeed"
+          },
+          "node": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterNode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The runtime's largest node; null when it doesn't report one."
+          },
+          "readers": {
+            "title": "Readers",
+            "type": "integer"
+          },
+          "slots": {
+            "description": "Slots per TaskManager.",
+            "title": "Slots",
+            "type": "integer"
+          },
+          "streaming": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterShapeRead"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The shape once the first copy is done; null without streaming_slot."
+          },
+          "task_manager_cpu": {
+            "title": "Task Manager Cpu",
+            "type": "string"
+          },
+          "task_manager_memory": {
+            "title": "Task Manager Memory",
+            "type": "string"
+          },
+          "task_managers": {
+            "title": "Task Managers",
+            "type": "integer"
+          },
+          "why": {
+            "description": "Why it has that many TaskManagers, naming the limit.",
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_managers",
+          "slots",
+          "readers",
+          "task_manager_cpu",
+          "task_manager_memory",
+          "job_manager_cpu",
+          "job_manager_memory",
+          "why",
+          "need",
+          "node",
+          "check",
+          "streaming"
+        ],
+        "title": "ClusterPackRead",
+        "type": "object"
+      },
+      "ClusterPackRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cluster": {
+            "$ref": "#/components/schemas/FlinkCluster"
+          }
+        },
+        "required": [
+          "cluster"
+        ],
+        "title": "ClusterPackRequest",
+        "type": "object"
+      },
+      "ClusterShapeRead": {
+        "properties": {
+          "job_manager_cpu": {
+            "title": "Job Manager Cpu",
+            "type": "string"
+          },
+          "job_manager_memory": {
+            "title": "Job Manager Memory",
+            "type": "string"
+          },
+          "need": {
+            "$ref": "#/components/schemas/ClusterNeed"
+          },
+          "readers": {
+            "title": "Readers",
+            "type": "integer"
+          },
+          "slots": {
+            "description": "Slots per TaskManager.",
+            "title": "Slots",
+            "type": "integer"
+          },
+          "task_manager_cpu": {
+            "title": "Task Manager Cpu",
+            "type": "string"
+          },
+          "task_manager_memory": {
+            "title": "Task Manager Memory",
+            "type": "string"
+          },
+          "task_managers": {
+            "title": "Task Managers",
+            "type": "integer"
+          },
+          "why": {
+            "description": "Why it has that many TaskManagers, naming the limit.",
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_managers",
+          "slots",
+          "readers",
+          "task_manager_cpu",
+          "task_manager_memory",
+          "job_manager_cpu",
+          "job_manager_memory",
+          "why",
+          "need"
+        ],
+        "title": "ClusterShapeRead",
+        "type": "object"
+      },
       "Column": {
         "properties": {
           "name": {
@@ -1263,6 +1614,29 @@
           }
         },
         "title": "ColumnRules",
+        "type": "object"
+      },
+      "ComputedArg": {
+        "additionalProperties": false,
+        "description": "Exactly one of column, text or number.",
+        "properties": {
+          "column": {
+            "title": "Column",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Number",
+            "type": "integer"
+          },
+          "text": {
+            "maxLength": 200,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "title": "ComputedArg",
         "type": "object"
       },
       "ConfigRead": {
@@ -1929,6 +2303,27 @@
         "title": "CopyStoreNeedRead",
         "type": "object"
       },
+      "CustomResources": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu": {
+            "description": "0.25 to 8, in quarters (\"1.5\").",
+            "title": "Cpu",
+            "type": "string"
+          },
+          "memory": {
+            "description": "512Mi to 16Gi in steps of 256Mi; whole GiB written as Gi (\"2Gi\").",
+            "title": "Memory",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory"
+        ],
+        "title": "CustomResources",
+        "type": "object"
+      },
       "Decision": {
         "properties": {
           "comment": {
@@ -1988,6 +2383,10 @@
             },
             "title": "Lines",
             "type": "array"
+          },
+          "settings_change": {
+            "$ref": "#/components/schemas/SettingsChange",
+            "description": "Omitted when no setting changes."
           },
           "to": {
             "title": "To",
@@ -2747,6 +3146,17 @@
         "additionalProperties": false,
         "description": "Choices of a pipeline that runs on Flink CDC. Unset fields take their default; returned only when something is set.",
         "properties": {
+          "cluster": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlinkCluster"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A custom cluster, with policies.resources: custom."
+          },
           "commit_seconds": {
             "anyOf": [
               {
@@ -2826,7 +3236,68 @@
         "title": "FlinkCDCSpec",
         "type": "object"
       },
+      "FlinkCluster": {
+        "additionalProperties": false,
+        "description": "A custom Flink CDC cluster (with policies.resources: custom): how many readers, what each needs and, by default, BeziSync packs the slots into TaskManagers the runtime's nodes can hold when the pipeline is deployed.",
+        "properties": {
+          "job_manager": {
+            "$ref": "#/components/schemas/SlotSize",
+            "description": "The JobManager's CPU (0.25 to 2) and memory (768Mi to 8Gi)."
+          },
+          "parallelism": {
+            "description": "How many readers copy and stream at once (1 to 128). Fixed once deployed: changing it starts over.",
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Parallelism",
+            "type": "integer"
+          },
+          "shape": {
+            "default": "auto",
+            "description": "auto: BeziSync packs the slots for the runtime's nodes at deploy; manual: task_managers as written.",
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "title": "Shape",
+            "type": "string"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/SlotSize",
+            "description": "What each reader's slot needs: CPU 0.25 to 4, memory 512Mi to 8Gi."
+          },
+          "streaming_slot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlotSize"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What each slot needs once the first copy is done (smaller than slot; automatic shape only): BeziSync then shrinks the cluster, restarting it from its saved position, and grows it back before a later copy."
+          },
+          "task_managers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManualTaskManagers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A manual shape's TaskManagers (only with shape: manual)."
+          }
+        },
+        "required": [
+          "parallelism",
+          "slot",
+          "job_manager"
+        ],
+        "title": "FlinkCluster",
+        "type": "object"
+      },
       "FlinkSetting": {
+        "description": "A tunable setting of the registry (both engines).",
         "properties": {
           "choices": {
             "items": {
@@ -2835,8 +3306,41 @@
             "title": "Choices",
             "type": "array"
           },
+          "connectors": {
+            "description": "Source or destination types it applies to (absent: every one).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Connectors",
+            "type": "array"
+          },
           "default": {
             "title": "Default",
+            "type": "string"
+          },
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
+            "type": "string"
+          },
+          "experimental": {
+            "description": "The engine marks it experimental; preflight warns when it is set.",
+            "title": "Experimental",
+            "type": "boolean"
+          },
+          "impact": {
+            "description": "What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.",
+            "enum": [
+              "live",
+              "restart",
+              "first_copy",
+              "next_copy",
+              "breaks_positions"
+            ],
+            "title": "Impact",
             "type": "string"
           },
           "key": {
@@ -2851,6 +3355,37 @@
             "title": "Min",
             "type": "string"
           },
+          "renamed": {
+            "description": "Its key from Until on.",
+            "title": "Renamed",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.",
+            "enum": [
+              "engine",
+              "source",
+              "sink",
+              "pipeline"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "since": {
+            "description": "Debezium releases from this one have it.",
+            "title": "Since",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "snapshot",
+              "streaming",
+              "delivery",
+              "engine"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2860,9 +3395,15 @@
               "duration",
               "int",
               "fraction",
-              "enum"
+              "enum",
+              "bool"
             ],
             "title": "Type",
+            "type": "string"
+          },
+          "until": {
+            "description": "Debezium releases from this one no longer have it.",
+            "title": "Until",
             "type": "string"
           },
           "why": {
@@ -2871,6 +3412,10 @@
           }
         },
         "required": [
+          "engine",
+          "scope",
+          "stage",
+          "impact",
           "key",
           "title",
           "type",
@@ -2921,6 +3466,36 @@
           "total_memory_mib"
         ],
         "title": "FlinkSize",
+        "type": "object"
+      },
+      "FootprintRead": {
+        "description": "What the current version asks for at its peak: what project limits count.",
+        "properties": {
+          "cpu": {
+            "title": "Cpu",
+            "type": "number"
+          },
+          "custom": {
+            "description": "The size is custom.",
+            "title": "Custom",
+            "type": "boolean"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          },
+          "readers": {
+            "title": "Readers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory_mib",
+          "readers",
+          "custom"
+        ],
+        "title": "FootprintRead",
         "type": "object"
       },
       "FormatSpec": {
@@ -3020,6 +3595,14 @@
       },
       "ImageChangeResult": {
         "properties": {
+          "effects": {
+            "description": "What the release does to the pipeline's settings; omitted when nothing.",
+            "items": {
+              "$ref": "#/components/schemas/SettingEffect"
+            },
+            "title": "Effects",
+            "type": "array"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -3057,6 +3640,37 @@
           "version"
         ],
         "title": "ImageChangeResult",
+        "type": "object"
+      },
+      "ImageEffectsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The image; null: each pipeline's runtime default.",
+            "title": "Image"
+          },
+          "pipeline_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Pipeline Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pipeline_ids"
+        ],
+        "title": "ImageEffectsRequest",
         "type": "object"
       },
       "ImageUsageRead": {
@@ -3163,6 +3777,91 @@
         "title": "ImagesRead",
         "type": "object"
       },
+      "ImportKey": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "problem": {
+            "description": "Why it needs a change first (out of its bounds; never clamped).",
+            "title": "Problem",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "ImportKey",
+        "type": "object"
+      },
+      "ImportPlan": {
+        "description": "Every property in one of five buckets, and the spec to create the draft from: typed settings in tuning, excluded and masked columns mapped.",
+        "properties": {
+          "expert": {
+            "description": "Raw properties kept as advanced.",
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array"
+          },
+          "forbidden": {
+            "description": "Refused: BeziSync can't pass them on.",
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array"
+          },
+          "modelled": {
+            "description": "Set by a wizard choice (or replaced by BeziSync's own).",
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array"
+          },
+          "owned": {
+            "description": "BeziSync manages these itself (connection, offsets, slot, secrets).",
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "title": "Spec",
+            "type": "object"
+          },
+          "tunable": {
+            "description": "Typed settings; one with a problem is left out until changed.",
+            "items": {
+              "$ref": "#/components/schemas/ImportKey"
+            },
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "owned",
+          "modelled",
+          "tunable",
+          "expert",
+          "forbidden",
+          "spec",
+          "warnings"
+        ],
+        "title": "ImportPlan",
+        "type": "object"
+      },
       "InboxRead": {
         "properties": {
           "items": {
@@ -3182,6 +3881,48 @@
           "items"
         ],
         "title": "InboxRead",
+        "type": "object"
+      },
+      "LimitImpact": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "pipelines": {
+            "title": "Pipelines",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "pipelines",
+          "names"
+        ],
+        "title": "LimitImpact",
+        "type": "object"
+      },
+      "LimitImpactRead": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LimitImpact"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LimitImpactRead",
         "type": "object"
       },
       "LoginRequest": {
@@ -3464,6 +4205,42 @@
           "documents"
         ],
         "title": "ManifestRead",
+        "type": "object"
+      },
+      "ManualTaskManagers": {
+        "additionalProperties": false,
+        "description": "TaskManagers of a manual Flink CDC cluster shape: count \u00d7 slots must cover the parallelism, each slot at least 512Mi.",
+        "properties": {
+          "count": {
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "cpu": {
+            "description": "Each TaskManager's CPU: 0.5 to 16, in quarters.",
+            "title": "Cpu",
+            "type": "string"
+          },
+          "memory": {
+            "description": "Each TaskManager's memory: 1Gi to 64Gi in steps of 256Mi; whole GiB written as Gi.",
+            "title": "Memory",
+            "type": "string"
+          },
+          "slots": {
+            "maximum": 8,
+            "minimum": 1,
+            "title": "Slots",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "slots",
+          "cpu",
+          "memory"
+        ],
+        "title": "ManualTaskManagers",
         "type": "object"
       },
       "MeRead": {
@@ -4491,6 +5268,38 @@
         "title": "PipelineCreate",
         "type": "object"
       },
+      "PipelineEffects": {
+        "properties": {
+          "effects": {
+            "items": {
+              "$ref": "#/components/schemas/SettingEffect"
+            },
+            "title": "Effects",
+            "type": "array"
+          },
+          "image": {
+            "title": "Image",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pipeline_id": {
+            "format": "uuid",
+            "title": "Pipeline Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pipeline_id",
+          "name",
+          "image",
+          "effects"
+        ],
+        "title": "PipelineEffects",
+        "type": "object"
+      },
       "PipelineImageRead": {
         "properties": {
           "health": {
@@ -4629,6 +5438,10 @@
             "title": "Engine",
             "type": "string"
           },
+          "footprint": {
+            "$ref": "#/components/schemas/FootprintRead",
+            "description": "What the current version asks for at its peak."
+          },
           "has_undeployed_changes": {
             "title": "Has Undeployed Changes",
             "type": "boolean"
@@ -4747,6 +5560,190 @@
         "title": "PipelineRead",
         "type": "object"
       },
+      "PipelineSetting": {
+        "description": "A tunable setting of the registry (both engines).",
+        "properties": {
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "connectors": {
+            "description": "Source or destination types it applies to (absent: every one).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Connectors",
+            "type": "array"
+          },
+          "default": {
+            "title": "Default",
+            "type": "string"
+          },
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
+            "type": "string"
+          },
+          "experimental": {
+            "description": "The engine marks it experimental; preflight warns when it is set.",
+            "title": "Experimental",
+            "type": "boolean"
+          },
+          "impact": {
+            "description": "What changing it does to a running pipeline: applies live, restarts it, only matters for the first copy, takes effect on the next copy, or starts it over.",
+            "enum": [
+              "live",
+              "restart",
+              "first_copy",
+              "next_copy",
+              "breaks_positions"
+            ],
+            "title": "Impact",
+            "type": "string"
+          },
+          "in": {
+            "enum": [
+              "tuning",
+              "flink_cdc.flink_conf"
+            ],
+            "title": "In",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "limit": {
+            "$ref": "#/components/schemas/SettingLimit"
+          },
+          "max": {
+            "title": "Max",
+            "type": "string"
+          },
+          "min": {
+            "title": "Min",
+            "type": "string"
+          },
+          "renamed": {
+            "description": "Its key from Until on.",
+            "title": "Renamed",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Where it goes: the engine itself, the source, the destination or a Flink CDC pipeline option.",
+            "enum": [
+              "engine",
+              "source",
+              "sink",
+              "pipeline"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "since": {
+            "description": "Debezium releases from this one have it.",
+            "title": "Since",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "snapshot",
+              "streaming",
+              "delivery",
+              "engine"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "duration",
+              "int",
+              "fraction",
+              "enum",
+              "bool"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "until": {
+            "description": "Debezium releases from this one no longer have it.",
+            "title": "Until",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "default",
+          "engine",
+          "impact",
+          "in",
+          "key",
+          "scope",
+          "stage",
+          "title",
+          "type",
+          "value",
+          "why"
+        ],
+        "title": "PipelineSetting",
+        "type": "object"
+      },
+      "PipelineSettingsRead": {
+        "properties": {
+          "advanced_allowed": {
+            "title": "Advanced Allowed",
+            "type": "boolean"
+          },
+          "advanced_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Advanced Keys",
+            "type": "array"
+          },
+          "engine": {
+            "enum": [
+              "debezium",
+              "flink-cdc"
+            ],
+            "title": "Engine",
+            "type": "string"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineSetting"
+            },
+            "title": "Settings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "engine",
+          "settings",
+          "advanced_allowed",
+          "advanced_keys"
+        ],
+        "title": "PipelineSettingsRead",
+        "type": "object"
+      },
       "PipelineSpec": {
         "additionalProperties": false,
         "properties": {
@@ -4800,6 +5797,11 @@
             "title": "Keys",
             "type": "object"
           },
+          "placement": {
+            "description": "The runtime's placement profile the pods run with (Kubernetes); returned only when set.",
+            "title": "Placement",
+            "type": "string"
+          },
           "policies": {
             "$ref": "#/components/schemas/Policies"
           },
@@ -4818,6 +5820,14 @@
             },
             "title": "Transforms",
             "type": "array"
+          },
+          "tuning": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Typed settings from the registry (GET /engines, settings), setting key \u2192 value in its canonical form. Debezium keys start with debezium.; Flink CDC keys with source., sink. or pipeline. (Flink settings go in flink_cdc.flink_conf). Returned only when set.",
+            "title": "Tuning",
+            "type": "object"
           },
           "values": {
             "$ref": "#/components/schemas/ValueFormats"
@@ -4937,9 +5947,65 @@
         "title": "PipelineUpdate",
         "type": "object"
       },
+      "PlacementProfile": {
+        "additionalProperties": false,
+        "description": "Where a Kubernetes runtime's pipelines may run: values are taken as they are (no ${\u2026} or {{\u2026}}), label keys and values are Kubernetes names, and BeziSync's own pod labels can't be set.",
+        "properties": {
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Added to the pods.",
+            "title": "Labels",
+            "type": "object"
+          },
+          "name": {
+            "description": "What a pipeline's spec.placement names: lowercase letters, digits and dashes.",
+            "maxLength": 63,
+            "title": "Name",
+            "type": "string"
+          },
+          "node_selector": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Node Selector",
+            "type": "object"
+          },
+          "priority_class": {
+            "default": "",
+            "title": "Priority Class",
+            "type": "string"
+          },
+          "tolerations": {
+            "items": {
+              "$ref": "#/components/schemas/Toleration"
+            },
+            "maxItems": 20,
+            "title": "Tolerations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PlacementProfile",
+        "type": "object"
+      },
       "Policies": {
         "additionalProperties": false,
         "properties": {
+          "custom_resources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomResources"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The size when resources is custom (Debezium only); the Java heap is worked out from memory. Returned only when set."
+          },
           "delivery_canary": {
             "default": false,
             "description": "Write a canary row to the source every few minutes and confirm it reaches the destination (PostgreSQL/MySQL sources, destinations BeziSync can read).",
@@ -4965,10 +6031,12 @@
           },
           "resources": {
             "default": "small",
+            "description": "A preset size, or custom: custom_resources (Debezium) or flink_cdc.cluster (Flink CDC).",
             "enum": [
               "small",
               "medium",
-              "large"
+              "large",
+              "custom"
             ],
             "title": "Resources",
             "type": "string"
@@ -5111,12 +6179,24 @@
             ],
             "title": "Properties"
           },
+          "recommendations": {
+            "description": "Omitted when there are none.",
+            "items": {
+              "$ref": "#/components/schemas/Recommendation"
+            },
+            "title": "Recommendations",
+            "type": "array"
+          },
           "sections": {
             "items": {
               "$ref": "#/components/schemas/PreflightSection"
             },
             "title": "Sections",
             "type": "array"
+          },
+          "settings_change": {
+            "$ref": "#/components/schemas/SettingsChange",
+            "description": "Omitted when no setting changes."
           },
           "summary": {
             "title": "Summary",
@@ -5308,6 +6388,11 @@
       "ProjectPolicies": {
         "additionalProperties": false,
         "properties": {
+          "allow_advanced_properties": {
+            "description": "Lets Experts pass raw Debezium properties (Review \u2192 Advanced Debezium properties). BeziSync can't verify them; preflight shows them as Unknown. Returned only when true.",
+            "title": "Allow Advanced Properties",
+            "type": "boolean"
+          },
           "allow_custom_transforms": {
             "description": "Lets Experts add custom transform steps (any SMT class in the pipeline's Debezium image). Returned only when true.",
             "title": "Allow Custom Transforms",
@@ -5409,7 +6494,11 @@
                     "outbox",
                     "rename",
                     "add_field",
-                    "flatten"
+                    "flatten",
+                    "soft_delete",
+                    "truncate",
+                    "route",
+                    "computed"
                   ],
                   "type": "string"
                 },
@@ -5455,6 +6544,35 @@
             "default": false,
             "title": "Require Approval",
             "type": "boolean"
+          },
+          "resource_limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceLimits"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Limits on each pipeline's peak footprint, beside max_resources. Returned only when set."
+          },
+          "setting_limits": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SettingLimit"
+            },
+            "description": "Limits on typed settings, by key (returned only when set). A key the registry no longer has is kept and ignored.",
+            "title": "Setting Limits",
+            "type": "object"
+          },
+          "shrink_after_copy": {
+            "default": "auto",
+            "description": "What happens once a custom Flink CDC cluster with a streaming slot size finishes its first copy: auto (BeziSync shrinks it) or suggest (someone chooses Shrink now). Returned only when suggest.",
+            "enum": [
+              "auto",
+              "suggest"
+            ],
+            "title": "Shrink After Copy",
+            "type": "string"
           }
         },
         "title": "ProjectPolicies",
@@ -5693,6 +6811,36 @@
         "title": "Providers",
         "type": "object"
       },
+      "Recommendation": {
+        "description": "A setting value preflight suggests from this run's evidence; hide it once evidence_at is older than 10 minutes.",
+        "properties": {
+          "evidence_at": {
+            "format": "date-time",
+            "title": "Evidence At",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "why",
+          "evidence_at"
+        ],
+        "title": "Recommendation",
+        "type": "object"
+      },
       "RefCheck": {
         "properties": {
           "key": {
@@ -5764,6 +6912,31 @@
         "title": "RequestResult",
         "type": "object"
       },
+      "ResourceLimits": {
+        "additionalProperties": false,
+        "description": "The most one pipeline may ask for at its peak (a Flink CDC cluster during its first copy); each optional.",
+        "properties": {
+          "max_cpu": {
+            "description": "CPU, at least 0.5, in quarters (\"6\", \"1.5\").",
+            "title": "Max Cpu",
+            "type": "string"
+          },
+          "max_memory": {
+            "description": "Memory, at least 768Mi, in steps of 256Mi; whole GiB written as Gi (\"12Gi\").",
+            "title": "Max Memory",
+            "type": "string"
+          },
+          "max_parallelism": {
+            "description": "Readers (Flink CDC), 1 to 128.",
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Parallelism",
+            "type": "integer"
+          }
+        },
+        "title": "ResourceLimits",
+        "type": "object"
+      },
       "Role": {
         "description": "A role in one project. Admin is account-wide (``User.is_superuser``), not a project role.",
         "enum": [
@@ -5773,6 +6946,27 @@
         ],
         "title": "Role",
         "type": "string"
+      },
+      "Route": {
+        "additionalProperties": false,
+        "properties": {
+          "match": {
+            "description": "schema.table, where * matches any run of characters.",
+            "title": "Match",
+            "type": "string"
+          },
+          "to": {
+            "description": "The destination name the matched tables go to.",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "match",
+          "to"
+        ],
+        "title": "Route",
+        "type": "object"
       },
       "RuleKind": {
         "properties": {
@@ -6098,6 +7292,15 @@
             "title": "Name",
             "type": "string"
           },
+          "placement_profiles": {
+            "description": "Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.",
+            "items": {
+              "$ref": "#/components/schemas/PlacementProfile"
+            },
+            "maxItems": 20,
+            "title": "Placement Profiles",
+            "type": "array"
+          },
           "secrets": {
             "additionalProperties": true,
             "title": "Secrets",
@@ -6293,6 +7496,15 @@
             "title": "Pipelines",
             "type": "integer"
           },
+          "placement_profiles": {
+            "description": "Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.",
+            "items": {
+              "$ref": "#/components/schemas/PlacementProfile"
+            },
+            "maxItems": 20,
+            "title": "Placement Profiles",
+            "type": "array"
+          },
           "secret_fields_set": {
             "items": {
               "type": "string"
@@ -6319,7 +7531,8 @@
           "last_seen_at",
           "capacity",
           "pipelines",
-          "version"
+          "version",
+          "placement_profiles"
         ],
         "title": "RuntimeRead",
         "type": "object"
@@ -6400,6 +7613,15 @@
               }
             ],
             "title": "Name"
+          },
+          "placement_profiles": {
+            "description": "Placement profiles (Kubernetes runtimes only). A profile a pipeline uses can't be removed (409 placement_in_use); editing one changes a running pipeline at its next deploy.",
+            "items": {
+              "$ref": "#/components/schemas/PlacementProfile"
+            },
+            "maxItems": 20,
+            "title": "Placement Profiles",
+            "type": "array"
           },
           "secrets": {
             "anyOf": [
@@ -7360,6 +8582,175 @@
         "title": "SecretKeysRequest",
         "type": "object"
       },
+      "SettingChange": {
+        "description": "One setting a deploy changes. from or to is null when the setting is unset (its default applies).",
+        "properties": {
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "impact": {
+            "enum": [
+              "live",
+              "restart",
+              "first_copy",
+              "next_copy",
+              "breaks_positions"
+            ],
+            "title": "Impact",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "unverified": {
+            "description": "An advanced property: passed as typed, so BeziSync can only say it restarts the pipeline.",
+            "title": "Unverified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "from",
+          "to",
+          "impact"
+        ],
+        "title": "SettingChange",
+        "type": "object"
+      },
+      "SettingEffect": {
+        "properties": {
+          "blocking": {
+            "title": "Blocking",
+            "type": "boolean"
+          },
+          "effect": {
+            "enum": [
+              "removed",
+              "renamed",
+              "missing",
+              "unknown",
+              "unchecked"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "to": {
+            "description": "The key a renamed setting moves to.",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "effect",
+          "message",
+          "blocking"
+        ],
+        "title": "SettingEffect",
+        "type": "object"
+      },
+      "SettingLimit": {
+        "additionalProperties": false,
+        "description": "A project's limit on one typed setting; each part optional.",
+        "properties": {
+          "choices": {
+            "description": "Only these choices (a setting with choices).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "hide": {
+            "description": "Pipelines can't set it.",
+            "title": "Hide",
+            "type": "boolean"
+          },
+          "max": {
+            "description": "At most this (a number or a duration).",
+            "title": "Max",
+            "type": "string"
+          },
+          "min": {
+            "description": "At least this.",
+            "title": "Min",
+            "type": "string"
+          },
+          "pin": {
+            "description": "Every pipeline gets this value, written into its spec when it deploys.",
+            "title": "Pin",
+            "type": "string"
+          }
+        },
+        "title": "SettingLimit",
+        "type": "object"
+      },
+      "SettingsChange": {
+        "description": "What a deploy changes in the pipeline\u2019s settings, and the heaviest impact of it.",
+        "properties": {
+          "impact": {
+            "enum": [
+              "live",
+              "restart",
+              "first_copy",
+              "next_copy",
+              "breaks_positions"
+            ],
+            "title": "Impact",
+            "type": "string"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/SettingChange"
+            },
+            "title": "Settings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "settings",
+          "impact"
+        ],
+        "title": "SettingsChange",
+        "type": "object"
+      },
       "SignInOption": {
         "properties": {
           "id": {
@@ -7631,6 +9022,27 @@
         "title": "SinkUnwrap",
         "type": "object"
       },
+      "SlotSize": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu": {
+            "description": "CPU in quarters (\"1.5\").",
+            "title": "Cpu",
+            "type": "string"
+          },
+          "memory": {
+            "description": "Memory in steps of 256Mi; whole GiB written as Gi (\"2Gi\").",
+            "title": "Memory",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory"
+        ],
+        "title": "SlotSize",
+        "type": "object"
+      },
       "SnapshotRequest": {
         "properties": {
           "ignore_window": {
@@ -7732,7 +9144,8 @@
           "pass",
           "warn",
           "fail",
-          "skip"
+          "skip",
+          "unknown"
         ],
         "title": "Status",
         "type": "string"
@@ -8560,6 +9973,48 @@
         "title": "TokenRead",
         "type": "object"
       },
+      "Toleration": {
+        "additionalProperties": false,
+        "properties": {
+          "effect": {
+            "default": "",
+            "description": "NoSchedule, PreferNoSchedule, NoExecute, or empty: any.",
+            "enum": [
+              "",
+              "NoSchedule",
+              "PreferNoSchedule",
+              "NoExecute"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "key": {
+            "default": "",
+            "description": "The taint's key; empty with Exists tolerates every taint.",
+            "title": "Key",
+            "type": "string"
+          },
+          "operator": {
+            "enum": [
+              "Equal",
+              "Exists"
+            ],
+            "title": "Operator",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "description": "With Equal only.",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operator"
+        ],
+        "title": "Toleration",
+        "type": "object"
+      },
       "Transform": {
         "additionalProperties": false,
         "properties": {
@@ -8570,11 +10025,27 @@
             "title": "Add Fields",
             "type": "array"
           },
+          "args": {
+            "description": "computed: the function's arguments, in order.",
+            "items": {
+              "$ref": "#/components/schemas/ComputedArg"
+            },
+            "title": "Args",
+            "type": "array"
+          },
           "class": {
             "description": "custom: the SMT class (Expert; needs the project policy allow_custom_transforms).",
             "maxLength": 300,
             "title": "Class",
             "type": "string"
+          },
+          "columns": {
+            "description": "truncate: text columns cut to at most length characters (Debezium: PostgreSQL and MySQL; Flink CDC: any source).",
+            "items": {
+              "$ref": "#/components/schemas/Truncation"
+            },
+            "title": "Columns",
+            "type": "array"
           },
           "condition": {
             "anyOf": [
@@ -8605,6 +10076,22 @@
               "."
             ],
             "title": "Delimiter",
+            "type": "string"
+          },
+          "function": {
+            "description": "computed: the function (Flink CDC only).",
+            "enum": [
+              "concat",
+              "date_format",
+              "length",
+              "lower",
+              "substr",
+              "to_integer",
+              "to_text",
+              "trim",
+              "upper"
+            ],
+            "title": "Function",
             "type": "string"
           },
           "id": {
@@ -8660,6 +10147,14 @@
             "title": "Renames",
             "type": "array"
           },
+          "routes": {
+            "description": "route: tables a pattern matches to one destination (a table two routes match is refused).",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            },
+            "title": "Routes",
+            "type": "array"
+          },
           "rules": {
             "items": {
               "$ref": "#/components/schemas/FilterRule"
@@ -8667,6 +10162,11 @@
             "maxItems": 20,
             "title": "Rules",
             "type": "array"
+          },
+          "table": {
+            "description": "computed: the table (schema.table) the column is added to.",
+            "title": "Table",
+            "type": "string"
           },
           "tables": {
             "description": "Limit the step to these captured tables (filter with operations or rules, rename, add_field, flatten, custom). Omitted = every table.",
@@ -8685,7 +10185,11 @@
               "rename",
               "add_field",
               "flatten",
-              "custom"
+              "custom",
+              "soft_delete",
+              "truncate",
+              "route",
+              "computed"
             ],
             "title": "Type",
             "type": "string"
@@ -8888,6 +10392,32 @@
           "table"
         ],
         "title": "TransformPreviewRequest",
+        "type": "object"
+      },
+      "Truncation": {
+        "additionalProperties": false,
+        "properties": {
+          "column": {
+            "title": "Column",
+            "type": "string"
+          },
+          "length": {
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Length",
+            "type": "integer"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "column",
+          "length"
+        ],
+        "title": "Truncation",
         "type": "object"
       },
       "UserAccessUpsert": {
@@ -12955,6 +14485,64 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/debezium-images:effects": {
+      "post": {
+        "description": "What moving pipelines to an image would do to their settings (a setting the release lacks blocks the change; a renamed one moves; raw properties are not checked). Nothing changes.",
+        "operationId": "image_effects_api_v1_projects__project_id__debezium_images_effects_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageEffectsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PipelineEffects"
+                  },
+                  "title": "Effects",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview a Debezium version change",
+        "tags": [
+          "debezium-images"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/events": {
       "get": {
         "operationId": "list_events_api_v1_projects__project_id__events_get",
@@ -13652,6 +15240,124 @@
           }
         },
         "summary": "Update Pipeline",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack": {
+      "post": {
+        "description": "How a custom Flink CDC cluster would be packed on the pipeline's runtime now: TaskManagers, slots, CPU and memory, why it splits, what it asks for in all and whether it fits the largest node. Pure: the deploy packs again and keeps that shape.",
+        "operationId": "pack_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_pack_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterPackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterPackRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pack a Flink CDC cluster",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:shrink": {
+      "post": {
+        "description": "Under the shrink_after_copy: suggest policy, moves a running custom Flink CDC cluster that finished its first copy to its streaming shape (a restart from its saved position). 409 when it has nothing to shrink to yet.",
+        "operationId": "shrink_cluster_api_v1_projects__project_id__pipelines__pipeline_id__cluster_shrink_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Shrink a Flink CDC cluster now",
         "tags": [
           "pipelines"
         ]
@@ -14815,6 +16521,124 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings": {
+      "get": {
+        "description": "What this pipeline may tune: its engine's settings for its source and destination, each with the value its current version has (empty for the default), where it lives (tuning, or flink_cdc.flink_conf) and this project's limit (a hidden setting is left out); and whether advanced (raw) properties are allowed, with the keys it has (never their values).",
+        "operationId": "pipeline_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "A pipeline's engine settings",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/settings:classify": {
+      "post": {
+        "description": "What BeziSync makes of advanced (raw) properties for this pipeline, so the wizard can say it as they are typed: allowed (passed through, not verified), or refused with why and where to set it instead. A key that is also a typed setting returns that setting. Pure; values are never echoed. Keys BeziSync compiles for the pipeline are refused by preflight.",
+        "operationId": "classify_settings_api_v1_projects__project_id__pipelines__pipeline_id__settings_classify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassifyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Classify advanced properties",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/snapshots": {
       "post": {
         "description": "Re-copy existing rows of some tables with an incremental snapshot while streaming continues.",
@@ -15244,6 +17068,60 @@
           }
         },
         "summary": "Put Policies",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/policies/setting-limits:impact": {
+      "post": {
+        "description": "How many of the project's pipelines (their current versions) proposed setting limits would refuse, with a few names; nothing is saved. Admins.",
+        "operationId": "setting_limit_impact_api_v1_projects__project_id__policies_setting_limits_impact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectPolicies"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitImpactRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Count what setting limits would refuse",
         "tags": [
           "approvals"
         ]

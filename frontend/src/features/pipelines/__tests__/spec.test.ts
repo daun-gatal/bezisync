@@ -1,5 +1,5 @@
 import { DEFAULT_SINK_CAPS, type SinkCaps } from '@/lib/connections';
-import { deriveSinkOptions, destinationFor, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
+import { deriveSinkOptions, destinationFor, flinkSinkOptions, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
 
 describe('pipeline spec helpers', () => {
   it('fills defaults that mirror the backend', () => {
@@ -127,7 +127,15 @@ describe('specForEngine', () => {
     debezium_image: 'quay.io/debezium/server:3.7.0.Final',
     snapshot: { mode: 'initial', delay_seconds: 30, window: '01:00-02:00' },
     flink_cdc: { new_columns: 'send' },
+    tuning: { 'debezium.source.snapshot.max.threads': '4', 'source.connection.pool.size': '8' },
   } as never);
+  it('keeps each engine’s own typed settings, and none when none are left', () => {
+    expect(specForEngine(base, 'flink-cdc').tuning).toEqual({ 'source.connection.pool.size': '8' });
+    expect(specForEngine(base, 'debezium').tuning).toEqual({ 'debezium.source.snapshot.max.threads': '4' });
+    const noFlink = fullSpec({ source: { tables: { include: ['s.t'] } }, tuning: { 'debezium.source.poll.interval.ms': '250' } } as never);
+    expect('tuning' in specForEngine(noFlink, 'flink-cdc')).toBe(false);
+    expect('tuning' in specForEngine(fullSpec({ source: { tables: { include: ['s.t'] } } } as never), 'debezium')).toBe(false);
+  });
   it('keeps only Flink CDC settings on Flink CDC', () => {
     const s = specForEngine(base, 'flink-cdc');
     expect(s.advanced).toEqual({});
@@ -142,5 +150,30 @@ describe('specForEngine', () => {
     expect(s.flink_cdc).toBeUndefined();
     expect(s.advanced).toEqual({ 'debezium.source.x': '1' });
     expect(s.snapshot.window).toBe('01:00-02:00');
+  });
+});
+
+describe('custom sizes', () => {
+  it('offers CPU and memory the way the server stores them, and works out the heap like it', async () => {
+    const { CUSTOM_CPUS, CUSTOM_MEMORIES, heapMiB, memoryMiB } = await import('../spec');
+    expect(CUSTOM_CPUS.slice(0, 5)).toEqual(['0.25', '0.5', '0.75', '1', '1.25']);
+    expect(CUSTOM_CPUS.at(-1)).toBe('8');
+    expect(CUSTOM_MEMORIES[0]).toBe('512Mi');
+    expect(CUSTOM_MEMORIES).toContain('2Gi');
+    expect(CUSTOM_MEMORIES).not.toContain('2048Mi');
+    expect(CUSTOM_MEMORIES.at(-1)).toBe('16Gi');
+    expect(memoryMiB('1536Mi')).toBe(1536);
+    expect(heapMiB(2048)).toBe(1433);
+    expect(heapMiB(512)).toBe(256);
+  });
+});
+
+describe('flinkSinkOptions', () => {
+  const schema = { properties: { write_mode: { type: 'string' }, format_version: { type: 'string' } } };
+  it('keeps Partition by, which its own card edits, in JSONB key order', () => {
+    const by = { 'shop.orders': [{ n: 4, column: 'id', transform: 'bucket' }] };
+    const out = flinkSinkOptions(schema, { write_mode: 'upsert', format_version: '2', partitions: { 'shop.orders': 'id' }, partition_by: by });
+    expect(JSON.stringify(out)).toBe(JSON.stringify({ write_mode: 'upsert', partition_by: by, format_version: '2' }));
+    expect(flinkSinkOptions(schema, { write_mode: 'upsert', partition_by: {} })).toEqual({ write_mode: 'upsert' });
   });
 });

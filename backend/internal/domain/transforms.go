@@ -22,7 +22,61 @@ import (
 // before the event shape; field changes need the row, so they come after it.
 
 // TransformTypes are the step types, in the order the UI offers them.
-var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom"}
+var TransformTypes = []string{"unwrap", "filter", "outbox", "rename", "add_field", "flatten", "custom", "soft_delete", "truncate", "route", "computed"}
+
+var (
+	routeMatchRe = regexp.MustCompile(`^[A-Za-z0-9_$*-]+\.[A-Za-z0-9_$*-]+$`)
+	routeToRe    = regexp.MustCompile(`^[A-Za-z0-9_$][A-Za-z0-9_$.-]{0,199}$`)
+)
+
+// GlobMatch reports whether a route pattern matches a table ("schema.table"; * is any run).
+func GlobMatch(pattern, table string) bool {
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		return pattern == table
+	}
+	// The first part anchors the start and the last the end; the middle parts are found in order,
+	// each at its first place, in what lies between (so none can take the end's characters).
+	first, last := parts[0], parts[len(parts)-1]
+	if len(table) < len(first)+len(last) || !strings.HasPrefix(table, first) || !strings.HasSuffix(table, last) {
+		return false
+	}
+	rest := table[len(first) : len(table)-len(last)]
+	for _, p := range parts[1 : len(parts)-1] {
+		at := strings.Index(rest, p)
+		if at < 0 {
+			return false
+		}
+		rest = rest[at+len(p):]
+	}
+	return true
+}
+
+// RouteTargets are the captured tables route steps send elsewhere: table → destination name.
+func RouteTargets(spec PipelineSpec) map[string]string {
+	out := map[string]string{}
+	for _, t := range spec.Transforms {
+		if t.Type != "route" {
+			continue
+		}
+		for _, r := range t.Routes {
+			for _, table := range spec.Source.Tables.Include {
+				if _, routed := out[table]; !routed && GlobMatch(r.Match, table) {
+					out[table] = r.To
+				}
+			}
+		}
+	}
+	return out
+}
+
+// TruncateSources are the Debezium sources whose columns BeziSync truncates (column.truncate.to.N.chars,
+// named schema.table.column); Flink CDC truncates on any source.
+var TruncateSources = []string{"postgresql", "mysql"}
+
+// SoftDeleteField is the field a soft delete marks deleted rows with, per engine: Debezium's
+// unwrap adds __deleted ("true" for a delete); Flink CDC writes its change type as __op ("-D").
+var SoftDeleteField = map[string]string{"debezium": "__deleted", "flink-cdc": "__op"}
 
 // Operations a filter keeps, with Debezium's op codes.
 var FilterOperations = map[string]string{"insert": "c", "update": "u", "delete": "d", "snapshot": "r"}
@@ -119,7 +173,7 @@ func (t Transform) Stage() int {
 	switch {
 	case t.Typed():
 		return 0
-	case t.Type == "unwrap":
+	case t.Type == "unwrap" || t.Type == "soft_delete":
 		return 1
 	case t.Type == "rename" || t.Type == "add_field" || t.Type == "flatten" || t.Type == "custom":
 		return 2
@@ -231,6 +285,12 @@ func decodeTransformExtras(v *val.V, o *val.Object, out *Transform) {
 		}
 	case "custom":
 		decodeCustom(v, o, out)
+	case "truncate":
+		decodeTruncate(v, o, out)
+	case "route":
+		decodeRoutes(v, o, out)
+	case "computed":
+		decodeComputed(v, o, out)
 	}
 	if out.Tables != nil && !scoped[out.Type] {
 		v.ValueError(o.Loc().Add("tables"), out.Type+" steps apply to every table")
@@ -395,6 +455,78 @@ func decodeRenames(v *val.V, o *val.Object, out *Transform) {
 	}
 }
 
+func decodeRoutes(v *val.V, o *val.Object, out *Transform) {
+	f := o.Get("routes")
+	if !f.Required() {
+		return
+	}
+	items, ok := v.List(f.Loc, f.Raw)
+	if !ok || !v.ListLen(f.Loc, len(items), 1, maxRules) {
+		return
+	}
+	for i, item := range items {
+		ro := v.Model(f.Loc.Add(i), item, "Route")
+		if ro.Failed {
+			continue
+		}
+		var r Route
+		if g := ro.Get("match"); g.Required() {
+			if s, ok := v.Str(g.Loc, g.Raw); ok {
+				if !routeMatchRe.MatchString(s) {
+					v.ValueError(g.Loc, "a table pattern: schema.table, where * matches any run of characters")
+				}
+				r.Match = s
+			}
+		}
+		if g := ro.Get("to"); g.Required() {
+			if s, ok := v.Str(g.Loc, g.Raw); ok {
+				if !routeToRe.MatchString(s) {
+					v.ValueError(g.Loc, "a destination name: letters, digits, _, $, . and -, at most 200")
+				}
+				r.To = s
+			}
+		}
+		ro.Forbid()
+		out.Routes = append(out.Routes, r)
+	}
+}
+
+func decodeTruncate(v *val.V, o *val.Object, out *Transform) {
+	f := o.Get("columns")
+	if !f.Required() {
+		return
+	}
+	items, ok := v.List(f.Loc, f.Raw)
+	if !ok || !v.ListLen(f.Loc, len(items), 1, maxRenames) {
+		return
+	}
+	seen := map[string]bool{}
+	for i, item := range items {
+		at := f.Loc.Add(i)
+		co := v.Model(at, item, "Truncation")
+		if co.Failed {
+			continue
+		}
+		var t Truncation
+		if g := co.Get("table"); g.Required() {
+			t.Table, _ = v.Constrained(g.Loc, g.Raw, val.StrRules{Pattern: tableRe.String()})
+		}
+		if g := co.Get("column"); g.Required() {
+			t.Column, _ = v.Constrained(g.Loc, g.Raw, val.StrRules{Pattern: fieldRe})
+		}
+		if g := co.Get("length"); g.Required() {
+			t.Length, _ = v.IntIn(g.Loc, g.Raw, val.Num{GE: val.F(1), LE: val.F(65535)})
+		}
+		co.Forbid()
+		if k := t.Table + "." + t.Column; seen[k] {
+			v.ValueError(at, k+" is truncated twice")
+		} else {
+			seen[k] = true
+		}
+		out.Truncate = append(out.Truncate, t)
+	}
+}
+
 func decodeAddField(v *val.V, o *val.Object, out *Transform) {
 	if f := o.Get("name"); f.Required() {
 		out.Name, _ = v.Constrained(f.Loc, f.Raw, val.StrRules{Pattern: newNameRe})
@@ -469,6 +601,28 @@ func validateTransforms(v *val.V, loc val.Loc, spec PipelineSpec) {
 		v.ValueError(loc, fmt.Sprintf("at most %d transform steps", maxSteps))
 		return
 	}
+	// T10: each table goes to one place; a table two routes match is refused.
+	first := -1
+	for i, t := range steps {
+		if t.Type == "route" && first < 0 {
+			first = i
+		}
+	}
+	if first >= 0 {
+		for _, table := range spec.Source.Tables.Include {
+			var hits []string
+			for _, t := range steps {
+				for _, r := range t.Routes {
+					if GlobMatch(r.Match, table) {
+						hits = append(hits, r.Match)
+					}
+				}
+			}
+			if len(hits) > 1 {
+				v.ValueError(loc.Add(first, "routes"), table+" matches more than one route ("+strings.Join(hits, ", ")+"): give it one")
+			}
+		}
+	}
 	ids := map[string]bool{}
 	unwrapAt := -1
 	for i, t := range steps {
@@ -482,6 +636,22 @@ func validateTransforms(v *val.V, loc val.Loc, spec PipelineSpec) {
 		for _, table := range t.Tables {
 			if !contains(spec.Source.Tables.Include, table) {
 				v.ValueError(at.Add("tables"), table+" is not captured by this pipeline")
+			}
+		}
+		if t.Type == "computed" {
+			validateComputed(v, at, spec, t)
+		}
+		if t.Type == "truncate" {
+			for j, c := range t.Truncate {
+				switch {
+				case !contains(spec.Source.Tables.Include, c.Table):
+					v.ValueError(at.Add("columns", j), c.Table+" is not captured by this pipeline")
+				case contains(spec.Source.Columns[c.Table].Mask, c.Column):
+					// T6: a masked value is replaced whole; cutting it would say nothing.
+					v.ValueError(at.Add("columns", j), c.Table+"."+c.Column+" is masked: the mask replaces it whole, so it can't be truncated too")
+				case contains(spec.Source.Columns[c.Table].Exclude, c.Column):
+					v.ValueError(at.Add("columns", j), c.Table+"."+c.Column+" is left out of the pipeline")
+				}
 			}
 		}
 		switch t.Stage() {
@@ -609,6 +779,20 @@ func dumpTransform(t Transform) *om.Map {
 		m.Set("name", t.Name).Set("value", value)
 	case "flatten":
 		m.Set("delimiter", t.Delimiter)
+	case "route":
+		routes := make([]any, len(t.Routes))
+		for i, r := range t.Routes {
+			routes[i] = om.New().Set("match", r.Match).Set("to", r.To)
+		}
+		m.Set("routes", routes)
+	case "computed":
+		dumpComputed(m, t)
+	case "truncate":
+		cols := make([]any, len(t.Truncate))
+		for i, c := range t.Truncate {
+			cols[i] = om.New().Set("table", c.Table).Set("column", c.Column).Set("length", c.Length)
+		}
+		m.Set("columns", cols)
 	case "custom":
 		props := om.New()
 		for _, k := range sortedStrKeys(t.Properties) {
@@ -668,6 +852,15 @@ func cloneTransform(t Transform) Transform {
 			props[k] = v
 		}
 		t.Properties = props
+	}
+	if t.Truncate != nil {
+		t.Truncate = append([]Truncation{}, t.Truncate...)
+	}
+	if t.Routes != nil {
+		t.Routes = append([]Route{}, t.Routes...)
+	}
+	if t.Args != nil {
+		t.Args = cloneArgs(t.Args)
 	}
 	return t
 }

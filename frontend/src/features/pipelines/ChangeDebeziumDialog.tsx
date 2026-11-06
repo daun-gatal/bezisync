@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDebounced } from '@/components/ui/hooks';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { InlineError, Notice, Pill } from '@/components/ui/feedback';
@@ -50,6 +51,21 @@ export function ChangeDebeziumDialog({
     // Reset only when the dialog opens; the catalog arriving later must not clear a choice.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // What the chosen release does to each pipeline's settings, before anything changes.
+  const asked = useDebounced(target === 'default' ? '' : chosen, 400);
+  const effects = useQuery({
+    queryKey: ['image-effects', project.id, pipelines.map((p) => p.id).join(','), target, asked],
+    enabled: open && !results && (target === 'default' || Boolean(asked)),
+    queryFn: () =>
+      unwrap(
+        client.POST('/api/v1/projects/{project_id}/debezium-images:effects', {
+          params: { path: { project_id: project.id } },
+          body: { pipeline_ids: pipelines.map((p) => p.id), image: target === 'default' ? null : asked },
+        }),
+      ),
+  });
+  const affected = (effects.data ?? []).filter((p) => p.effects.length);
 
   const apply = useMutation({
     mutationFn: () =>
@@ -165,6 +181,25 @@ export function ChangeDebeziumDialog({
                 />
               )}
             </Field>
+          ) : null}
+          {affected.length ? (
+            <Notice tone={affected.some((p) => p.effects.some((e) => e.blocking)) ? 'bad' : 'info'} title="What changes in the settings">
+              <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                {affected.map((p) => (
+                  <li key={p.pipeline_id} className="wrap-anywhere">
+                    <strong>{p.name}</strong> on <span className="font-mono">{p.image}</span>:
+                    <ul className="m-0 list-disc pl-5">
+                      {p.effects.map((e) => (
+                        <li key={e.key}>
+                          <span className="font-mono">{e.title ?? e.key}</span> — {e.message}
+                          {e.blocking ? ' Its change is refused until then.' : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            </Notice>
           ) : null}
           {canDeploy ? (
             <Check

@@ -26,6 +26,8 @@ import (
 
 // FlinkInput is what a Flink CDC compile needs besides the spec and the connections.
 type FlinkInput struct {
+	// Cluster is a custom cluster's resolved shape (services.FlinkSizeOf); nil for the presets.
+	Cluster *engine.FlinkSize
 	// RuntimeKind ("docker" or "kubernetes") decides the JobManager's address.
 	RuntimeKind string
 	// Columns are each spec table's columns as they were at deploy (nil when unknown). A table
@@ -117,9 +119,6 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	if err := connectors.FlinkTableNames(tables); err != nil {
 		return nil, err
 	}
-	if len(spec.Advanced) > 0 {
-		return nil, problem.New(422, "engine_settings", "Advanced Debezium properties apply only to pipelines that run on Debezium.")
-	}
 	if !spec.Values.Empty() {
 		return nil, problem.New(422, "engine_settings", "Value formats are Debezium options; Flink CDC writes each column with its own type.")
 	}
@@ -137,6 +136,12 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	size, ok := engine.FlinkSizes[spec.Policies.Resources]
 	if !ok {
 		size = engine.FlinkSizes["small"]
+	}
+	if spec.Policies.Resources == "custom" {
+		if in.Cluster == nil {
+			return nil, problem.New(422, "flink_cluster", "A custom Flink CDC cluster needs its shape resolved for the runtime.")
+		}
+		size = *in.Cluster
 	}
 	parallelism := size.Parallelism()
 
@@ -175,15 +180,57 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	if err := startupOptions(&srcBlock.Options, spec, in.Startup, source.Type); err != nil {
 		return nil, err
 	}
+	tuned, err := tuningSettings(engine.FlinkCDC, source.Type, sink.Type, spec.Tuning)
+	if err != nil {
+		return nil, err
+	}
+	pipelineTuning := connectors.FlinkOptions{}
+	for _, s := range tuned {
+		block, option := flinkTuningBlock(s.Key)
+		target := map[string]*connectors.FlinkOptions{"source": &srcBlock.Options, "sink": &snkBlock.Options, "pipeline": &pipelineTuning}[block]
+		if target == nil {
+			return nil, fmt.Errorf("compiler: setting %s has no block", s.Key)
+		}
+		if err := ownedByBeziSync(s, target.Get(option) != ""); err != nil {
+			return nil, err
+		}
+		target.Set(option, spec.Tuning[s.Key])
+	}
+	// Raw (expert) options, through the pass-through prefixes only; never over BeziSync's own or a
+	// setting's. The YAML encoder quotes every value (F1).
+	var refused []map[string]any
+	for _, k := range advancedKeys(spec.Advanced) {
+		block, option, _ := strings.Cut(k, ".")
+		target := map[string]*connectors.FlinkOptions{"source": &srcBlock.Options, "sink": &snkBlock.Options}[block]
+		managed := map[string]bool{}
+		if target != nil && target.Get(option) != "" {
+			managed[k] = true
+		}
+		if v := ClassifyFlinkAdvanced(k, spec.Advanced[k], managed); v.Refused() {
+			refused = append(refused, map[string]any{"loc": []string{"advanced", k}, "message": v.Message})
+			continue
+		}
+		target.Set(option, spec.Advanced[k])
+	}
+	if len(refused) > 0 {
+		return nil, problem.New(422, "managed_property", "Some advanced properties cannot be set.").WithErrors(refused)
+	}
 
 	// Routes: each table to its destination, first match only.
 	destinations := map[string]string{}
 	owner := map[string]string{}
+	routed := domain.RouteTargets(spec)
 	var routes []yamlMap
 	for _, t := range tables {
 		schema, table, _ := strings.Cut(t, ".")
-		dest := fsnk.FlinkDestination(sink, c, c.Destination(schema, table))
-		if other, taken := owner[dest]; taken {
+		name := c.Destination(schema, table)
+		to, merged := routed[t]
+		if merged {
+			name = to
+		}
+		dest := fsnk.FlinkDestination(sink, c, name)
+		// Two tables meet in one destination only when a route sends them there.
+		if other, taken := owner[dest]; taken && !(merged && routed[other] == to) {
 			return nil, problem.New(422, "destination_collision", fmt.Sprintf("%s and %s would both be written to %s. Change the naming pattern.", other, t, dest))
 		}
 		owner[dest], destinations[t] = t, dest
@@ -202,13 +249,22 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	if len(transforms) > 0 {
 		doc = append(doc, yamlKV{"transform", transforms})
 	}
-	doc = append(doc, yamlKV{"pipeline", yamlMap{
+	pipeline := yamlMap{
 		{"name", "bezisync " + c.Name},
 		{"parallelism", strconv.Itoa(parallelism)},
 		{"operator.uid.prefix", "bz-" + c.ShortID},
 		{"schema.change.behavior", behavior},
 		{"route-mode", "FIRST_MATCH"},
-	}})
+	}
+	for _, o := range pipelineTuning {
+		for _, kv := range pipeline {
+			if kv.k == o[0] {
+				return nil, problem.New(422, "tuning", "pipeline."+o[0]+" is set by BeziSync and can't be tuned.")
+			}
+		}
+		pipeline = append(pipeline, yamlKV{o[0], o[1]})
+	}
+	doc = append(doc, yamlKV{"pipeline", pipeline})
 
 	conf, err := flinkConf(c, in.RuntimeKind, size, fc)
 	if err != nil {
@@ -315,7 +371,7 @@ func flinkConf(c connectors.CompileContext, runtimeKind string, size engine.Flin
 		{"rest.bind-address", "127.0.0.1"},
 		{"jobmanager.memory.process.size", memSize(size.JobManagerMemory)},
 		{"taskmanager.memory.process.size", memSize(size.TaskManagerMemory)},
-		{"taskmanager.numberOfTaskSlots", strconv.Itoa(engine.FlinkSlots)},
+		{"taskmanager.numberOfTaskSlots", strconv.Itoa(size.SlotsPerTaskManager())},
 		{"parallelism.default", strconv.Itoa(size.Parallelism())},
 		{"pipeline.max-parallelism", "128"},
 		{"execution.checkpointing.interval", strconv.Itoa(fc.CommitSeconds) + " s"},

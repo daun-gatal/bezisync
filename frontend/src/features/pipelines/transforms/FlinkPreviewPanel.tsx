@@ -69,7 +69,7 @@ export function FlinkPreviewPanel({
                   <span className="font-mono wrap-anywhere">{c.name}</span> {c.key ? <Pill tone="info">key</Pill> : null}
                 </td>
                 <td className="py-1.5 text-muted wrap-anywhere">
-                  {c.from.kind === 'added' ? `added: "${c.from.value}"` : c.from.renamed ? `renamed from ${c.from.column}` : 'source column'}
+                  {c.from.kind === 'added' ? `added: "${c.from.value}"` : c.from.kind === 'computed' ? `computed: ${c.from.formula}` : c.from.renamed ? `renamed from ${c.from.column}` : 'source column'}
                 </td>
               </tr>
             ))}

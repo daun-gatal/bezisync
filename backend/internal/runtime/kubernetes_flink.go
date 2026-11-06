@@ -239,7 +239,7 @@ func (k *KubernetesDriver) flinkDeployment(w Workload, role string, replicas int
 	if stateSize == "" {
 		stateSize = "1Gi"
 	}
-	return &appsv1.Deployment{
+	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, Annotations: map[string]string{"app.bezisync.io/pipeline-name": w.Name}},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
@@ -271,6 +271,8 @@ func (k *KubernetesDriver) flinkDeployment(w Workload, role string, replicas int
 			},
 		},
 	}
+	applyPlacement(dep, w.Placement)
+	return dep
 }
 
 // observeFlink reports the JobManager's pod, with every pod of the cluster in Details.

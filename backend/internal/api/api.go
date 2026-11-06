@@ -56,6 +56,7 @@ func Router() http.Handler {
 		catalogRoutes(v1)
 		feedbackRoutes(v1)
 		transformRoutes(v1)
+		settingsRoutes(v1)
 		mcpRoutes(v1)
 		// Tools call this router in process, as the caller.
 		v1.Post("/mcp", mcpserver.Handler(r).ServeHTTP)

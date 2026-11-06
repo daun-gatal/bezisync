@@ -62,7 +62,11 @@ export interface FlinkChoices {
   freshness_seconds: 2 | 5 | 30;
   commit_seconds: 30 | 60 | 300;
   flink_conf: Record<string, string>;
+  /** A custom cluster (with policies.resources: custom). */
+  cluster?: FlinkCluster;
 }
+
+export type FlinkCluster = Schemas['FlinkCluster'];
 
 export function flinkChoices(raw: Partial<FlinkChoices> | null | undefined): FlinkChoices {
   return {
@@ -71,6 +75,20 @@ export function flinkChoices(raw: Partial<FlinkChoices> | null | undefined): Fli
     freshness_seconds: raw?.freshness_seconds ?? 5,
     commit_seconds: raw?.commit_seconds ?? 60,
     flink_conf: raw?.flink_conf ?? {},
+    ...(raw?.cluster ? { cluster: raw.cluster } : {}),
+  };
+}
+
+/** A cluster in the order the server dumps it (domain dumpCluster). */
+function clusterBlock(c: FlinkCluster): FlinkCluster {
+  const tm = c.task_managers;
+  return {
+    parallelism: c.parallelism,
+    slot: { cpu: c.slot.cpu, memory: c.slot.memory },
+    ...(c.streaming_slot ? { streaming_slot: { cpu: c.streaming_slot.cpu, memory: c.streaming_slot.memory } } : {}),
+    job_manager: { cpu: c.job_manager.cpu, memory: c.job_manager.memory },
+    shape: c.shape ?? 'auto',
+    ...(tm ? { task_managers: { count: tm.count, slots: tm.slots, cpu: tm.cpu, memory: tm.memory } } : {}),
   };
 }
 
@@ -88,5 +106,6 @@ export function flinkSpecBlock(c: FlinkChoices): Partial<FlinkChoices> {
     freshness_seconds: c.freshness_seconds,
     commit_seconds: c.commit_seconds,
     ...(keys.length ? { flink_conf: Object.fromEntries(keys.map((k) => [k, c.flink_conf[k]!])) } : {}),
+    ...(c.cluster ? { cluster: clusterBlock(c.cluster) } : {}),
   };
 }

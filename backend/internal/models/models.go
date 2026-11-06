@@ -238,6 +238,8 @@ type Runtime struct {
 	AgentState     db.Map     `db:"agent_state"`
 	CreatedAt      time.Time  `db:"created_at"`
 	UpdatedAt      time.Time  `db:"updated_at"`
+	// PlacementProfiles are a Kubernetes runtime's placement profiles (runtime.Placement each).
+	PlacementProfiles db.List `db:"placement_profiles"`
 }
 
 type Pipeline struct {

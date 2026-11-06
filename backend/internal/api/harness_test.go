@@ -270,6 +270,23 @@ type fakeDriver struct {
 	Health    [2]any
 	OK        bool
 	ImagePull string
+	// Cap is what the runtime reports as its capacity (Test and Capacity); nil: 4 CPUs only.
+	Cap map[string]any
+	// FlinkStatus is the helper's /bz/status body ("": {"phase": "running"}).
+	FlinkStatus string
+}
+
+func (d *fakeDriver) capacity() map[string]any {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.Cap == nil {
+		return map[string]any{"cpu_allocatable": 4}
+	}
+	out := map[string]any{}
+	for k, v := range d.Cap {
+		out[k] = v
+	}
+	return out
 }
 
 func installFake(t *testing.T) *fakeDriver {
@@ -328,6 +345,11 @@ func (d *fakeDriver) HTTPGet(_ context.Context, _ string, port int, path string,
 		return 200, d.Metrics, nil
 	}
 	if path == "/bz/status" {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if d.FlinkStatus != "" {
+			return 200, d.FlinkStatus, nil
+		}
 		return 200, `{"phase": "running"}`, nil
 	}
 	return d.Health[0].(int), d.Health[1].(string), nil
@@ -338,7 +360,7 @@ func (d *fakeDriver) Test(context.Context) runtime.TestResult {
 	if !d.OK {
 		msg = "fake runtime broken"
 	}
-	return runtime.TestResult{OK: d.OK, Message: msg, Details: map[string]any{"cpu_allocatable": 4}}
+	return runtime.TestResult{OK: d.OK, Message: msg, Details: d.capacity()}
 }
 
 func (d *fakeDriver) ListWorkloads(_ context.Context, owner string) ([]string, error) {
@@ -354,5 +376,5 @@ func (d *fakeDriver) ListWorkloads(_ context.Context, owner string) ([]string, e
 }
 
 func (d *fakeDriver) Capacity(context.Context) map[string]any {
-	return map[string]any{"cpu_allocatable": 4}
+	return d.capacity()
 }

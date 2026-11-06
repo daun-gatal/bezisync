@@ -11,7 +11,7 @@ import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { fullSpec, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
-import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext } from './editors';
+import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor, ComputedEditor } from './editors';
 import { FlinkPreviewPanel } from './FlinkPreviewPanel';
 import { PreviewPanel } from './PreviewPanel';
 import {
@@ -20,6 +20,7 @@ import {
   columnKind,
   DEBEZIUM_CLASS,
   DEBEZIUM_ONLY_STEPS,
+  FLINK_ONLY_STEPS,
   defaultStep,
   FLINK_TITLE,
   moveStep,
@@ -41,8 +42,12 @@ const CHOICES: { group: string; items: { type: TransformType; help: string }[] }
       { type: 'rename', help: 'Match the names consumers expect.' },
       { type: 'add_field', help: 'A fixed value or the pipeline’s name.' },
       { type: 'flatten', help: 'address.city becomes address_city.' },
+      { type: 'soft_delete', help: 'A deleted row stays, marked deleted, instead of being removed.' },
+      { type: 'truncate', help: 'Cut long text columns to a length.' },
+      { type: 'computed', help: 'A new column from a function of other columns (Flink CDC).' },
     ],
   },
+  { group: 'Destinations', items: [{ type: 'route', help: 'Send tables a pattern matches to one destination of your naming.' }] },
   { group: 'Expert', items: [{ type: 'custom', help: 'Any transform class the Debezium image ships.' }] },
 ];
 
@@ -98,7 +103,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
     const v = flink ? undefined : cleanValues(values, caps);
     return { ...rest, transforms: steps, ...(v ? { values: v } : {}), ...(Object.keys(keys).length ? { keys } : {}) };
   }, [spec, steps, values, keys, caps, flink]);
-  const errors = stepErrors(steps);
+  const errors = stepErrors(steps, captured);
   const dirty = JSON.stringify(draft) !== JSON.stringify(spec);
   useImperativeHandle(handle, () => ({
     dirty: () => dirty,
@@ -134,6 +139,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
 
   function locked(type: TransformType): string | null {
     if (flink && DEBEZIUM_ONLY_STEPS.includes(type)) return 'Runs only on Debezium: this pipeline runs on Flink CDC.';
+    if (!flink && FLINK_ONLY_STEPS.includes(type)) return 'Runs only on Flink CDC: Debezium has no formulas short of scripting, which stays behind its own policy.';
     if (type === 'custom') {
       if (!policies?.allow_custom_transforms) return 'Turned off by this project’s policy. Ask an Admin under Settings → Policies.';
       if (!expert) return 'Switch to Expert mode (account menu) to add custom transforms.';
@@ -176,6 +182,16 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
       flatten: <FlattenEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       custom: <CustomEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
       outbox: <p className="m-0 text-xs text-muted">The outbox router has no settings here yet; edit it through YAML or the API.</p>,
+      truncate: <TruncateEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
+      route: <RouteEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
+      computed: <ComputedEditor step={t} ctx={ctx} onChange={(s) => update(i, s)} />,
+      soft_delete: (
+        <p className="m-0 text-sm text-ink-2">
+          {flink
+            ? 'Deletes arrive as rows with __op = -D; other rows carry their change type (+I, +U). The destination keeps every row.'
+            : 'Deletes arrive as rows with __deleted = true, and no tombstone follows them. Consumers that remove rows on a delete now keep them.'}
+        </p>
+      ),
     };
     return (
       <StepRow

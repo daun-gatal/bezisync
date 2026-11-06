@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle2, CircleSlash, Mail, RefreshCw, TriangleAlert, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleHelp, CircleSlash, Mail, RefreshCw, TriangleAlert, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Pill } from '@/components/ui/feedback';
@@ -15,6 +15,7 @@ const ICON = {
   warn: <TriangleAlert className="size-4 text-warn" aria-label="Warning" />,
   fail: <XCircle className="size-4 text-bad" aria-label="Failed" />,
   skip: <CircleSlash className="size-4 text-muted" aria-label="Skipped" />,
+  unknown: <CircleHelp className="size-4 text-grey" aria-label="Not verified" />,
 } as const;
 
 const CATEGORY: Record<string, string> = {
@@ -32,7 +33,10 @@ const CATEGORY: Record<string, string> = {
 export function reportBadge(report: CheckReport | null | undefined) {
   if (!report) return <Pill tone="grey">Not checked</Pill>;
   if (!report.ok) return <Pill tone="bad">{report.summary}</Pill>;
-  return report.checks.some((c) => c.status === 'warn') ? <Pill tone="warn">{report.summary}</Pill> : <Pill tone="ok">Ready</Pill>;
+  if (report.checks.some((c) => c.status === 'warn')) return <Pill tone="warn">{report.summary}</Pill>;
+  // Something BeziSync can't verify is never shown as healthy.
+  if (report.checks.some((c) => c.status === 'unknown')) return <Pill tone="grey">{report.summary}</Pill>;
+  return <Pill tone="ok">Ready</Pill>;
 }
 
 function dbaMessage(check: Check, subject: string): string {
@@ -63,7 +67,7 @@ export function CheckList({
   title?: string;
 }) {
   const [showPassed, setShowPassed] = useState(false);
-  const order = { fail: 0, warn: 1, pass: 2, skip: 3 } as const;
+  const order = { fail: 0, warn: 1, unknown: 2, pass: 3, skip: 4 } as const;
   const sorted = [...report.checks].sort((a, b) => order[a.status] - order[b.status]);
   const visible = showPassed ? sorted : sorted.filter((c) => c.status !== 'pass' && c.status !== 'skip');
   const passed = report.checks.filter((c) => c.status === 'pass').length;

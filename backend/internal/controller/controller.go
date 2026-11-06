@@ -460,6 +460,10 @@ func (c *Controller) Reconcile(ctx context.Context, id uuid.UUID) error {
 			st["flink"] = flinkStatus(seen.flink, obs, spec.Source.Tables.Include)
 			p.Status = st
 		}
+		helperFailed := seen.flink != nil && (seen.flink.Phase == flinkhelper.PhaseFailed || seen.flink.Phase == flinkhelper.PhaseConfigError)
+		if err := c.flinkPhase(ctx, tx, p, spec, seen.flink, verdict.Lifecycle == domain.LifecycleFailed || helperFailed); err != nil {
+			return err
+		}
 		if positionNote != nil {
 			st := statusCopy(p)
 			for k, v := range positionNote {

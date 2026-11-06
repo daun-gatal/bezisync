@@ -1485,6 +1485,32 @@ Fix:
 Choose key columns for them in the Transform step (Message key).
 ```
 
+<a id="iceberg-partition-column"></a>
+### `iceberg_partition_column`
+
+**Partitioning**
+
+- Why: Flink CDC fails creating a table partitioned by a column its rows don't carry, or by a transform the column's type can't take.
+
+Fix:
+
+```
+Change Partition by in the Destination step.
+```
+
+<a id="iceberg-partition-existing"></a>
+### `iceberg_partition_existing`
+
+**Partitioning**
+
+- Why: Flink CDC sets a table's partitioning when it creates the table; Iceberg keeps it, so other partitioning asked for later never applies.
+
+Fix:
+
+```
+Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again.
+```
+
 <a id="iceberg-partitioning"></a>
 ### `iceberg_partitioning`
 
@@ -1965,6 +1991,26 @@ bin/pulsar-admin namespaces create <tenant>/<namespace>
 
 ## Deploy
 
+<a id="advanced-properties"></a>
+### `advanced_properties`
+
+**Advanced properties**
+
+- Why: {n} advanced properties can't be set: {keys}. BeziSync owns identity, state, credentials and routing, and every choice the wizard makes, so a raw property may only add what BeziSync doesn't set. Unsafe options (SQL on the source, dropping the slot, skipping changes, weakening TLS, loading classes) and credentials are never passed on.
+
+Fix:
+
+```
+Remove the listed properties under Review → Advanced Debezium properties, or set what they did where the message says.
+```
+
+<a id="advanced-unverified"></a>
+### `advanced_unverified`
+
+**Advanced properties**
+
+- Why: Advanced properties are passed to Debezium Server as typed. BeziSync can't check what they do, so this check is Unknown, never a pass: review them in Review, and approvers see them listed.
+
 <a id="agent-upgrade-required"></a>
 ### `agent_upgrade_required`
 
@@ -2071,12 +2117,39 @@ Fix:
 In Tables, choose Mask or Remove for each listed column, or Keep as is when it may be sent.
 ```
 
+<a id="placement"></a>
+### `placement`
+
+**Placement**
+
+- Why: The pipeline's pods run with one of its runtime's placement profiles (node selector, tolerations, priority class, labels). It blocks when the runtime has no such profile, when no schedulable node takes these pods, or when the runtime's agent can't apply placement; it is unknown when the runtime doesn't list its nodes.
+
+Fix:
+
+```
+Choose one of the runtime's profiles in Review.
+```
+
+Fix:
+
+```
+Ask the runtime's Admin to fix the profile, or label or untaint nodes for it.
+```
+
 <a id="runtime-capacity"></a>
 ### `runtime_capacity`
 
 **Runtime capacity**
 
 - Why: The connector may stay pending until resources free up.
+- Why: Over the namespace's ResourceQuota, Kubernetes refuses the pods, so the deploy is blocked (even forced). A redeploy counts only what it adds to what the pipeline runs now.
+- Why: Measured when preflight runs; when the runtime doesn't report its CPU and memory, the check is unknown, never passed.
+
+Fix:
+
+```
+Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota.
+```
 
 <a id="runtime-disabled"></a>
 ### `runtime_disabled`
@@ -2089,6 +2162,65 @@ In Tables, choose Mask or Remove for each listed column, or Keep as is when it m
 ### `runtime_ready`
 
 **Runtime {name}**
+
+<a id="setting-experimental"></a>
+### `setting_experimental`
+
+**Experimental settings**
+
+- Why: The engine marks these settings experimental: they may change or go in a later release.
+
+<a id="setting-fetch-memory"></a>
+### `setting_fetch_memory`
+
+**Copy fetch size**
+
+- Why: The first copy reads this many rows at once into the heap.
+
+Fix:
+
+```
+Lower the fetch size in the Snapshot step, or choose a bigger size.
+```
+
+<a id="setting-queue-memory"></a>
+### `setting_queue_memory`
+
+**Queue memory**
+
+- Why: A full queue holds that many changes in the Java heap; estimated from the tables' average row size, since no changes are seen before a deploy.
+
+Fix:
+
+```
+Lower Queue size, set a Queue memory limit, or choose a bigger size.
+```
+
+<a id="setting-threads"></a>
+### `setting_threads`
+
+**Connections for the copy**
+
+- Why: Each snapshot thread holds a connection to the source while the first copy runs, besides the stream's own. Unknown when BeziSync can't read the source's connection limit (no permission, or the source is checked by an agent).
+
+Fix:
+
+```
+Use fewer snapshot threads, or raise the source's connection limit.
+```
+
+<a id="setting-version"></a>
+### `setting_version`
+
+**Settings in this Debezium version**
+
+- Why: A tuned setting must exist in the Debezium release the pipeline runs: some arrive in a release, some go or are renamed. Unknown when BeziSync can't tell which release an image is.
+
+Fix:
+
+```
+Remove the setting in Review → Engine settings, or move the pipeline to a Debezium version that has it.
+```
 
 <a id="sink-image-platform"></a>
 ### `sink_image_platform`
@@ -2149,6 +2281,19 @@ Fix:
 Fix the source connection, then run the checks again.
 ```
 
+<a id="transform-computed-input"></a>
+### `transform_computed_input`
+
+**Transforms: computed columns**
+
+- Why: Flink CDC stops the job when a projection reads a column the table lacks, or calls a function on a value of another type.
+
+Fix:
+
+```
+Pick another column for the computed column, under Transform.
+```
+
 <a id="transform-custom-class-unknown"></a>
 ### `transform_custom_class_unknown`
 
@@ -2188,6 +2333,26 @@ Fix:
 Under Transform, choose key columns the table has.
 ```
 
+<a id="transform-route-idle"></a>
+### `transform_route_idle`
+
+**Routes**
+
+- Why: A route that matches no captured table does nothing (a table added later that matches is routed).
+
+<a id="transform-route-merge"></a>
+### `transform_route_merge`
+
+**Routes**
+
+- Why: Tables a route sends to one destination must have the same key and columns, or the destination can't hold both.
+
+Fix:
+
+```
+Route only tables of the same shape together, or give each its own destination.
+```
+
 <a id="transform-rule-type"></a>
 ### `transform_rule_type`
 
@@ -2201,6 +2366,19 @@ Fix:
 Compare the column with a value of its type, or pick another column.
 ```
 
+<a id="transform-truncate-type"></a>
+### `transform_truncate_type`
+
+**Truncated columns**
+
+- Why: A Truncate step cuts text only. On Debezium another type is left as it is; on Flink CDC it would fail the job, so it blocks. Unknown when BeziSync can't read the columns' types.
+
+Fix:
+
+```
+Remove those columns from the Truncate step.
+```
+
 ## Flink CDC
 
 <a id="flink-agent-version"></a>
@@ -2212,6 +2390,25 @@ Fix:
 
 ```
 Upgrade the agent to BeziSync 0.3.0 or later (Settings → Runtimes shows the install command).
+```
+
+<a id="flink-cluster-fit"></a>
+### `flink_cluster_fit`
+
+**Cluster fits the nodes**
+
+- Why: A custom Flink CDC cluster is packed into TaskManagers the runtime's largest node can hold. When even one slot needs more CPU or memory than that node offers, or a manual TaskManager is bigger than it, its pods would never be scheduled. When the runtime doesn't report its nodes' size, BeziSync can't check and says so.
+
+Fix:
+
+```
+Give each slot less CPU or memory in Review → Size, or add bigger nodes to the runtime.
+```
+
+Fix:
+
+```
+Use the automatic shape, or smaller TaskManagers, in Review → Size.
 ```
 
 <a id="flink-kubernetes-services"></a>
@@ -2239,6 +2436,19 @@ Fix:
 Pick key columns for these tables in the Transform step (Primary key), or add a primary key in the database.
 ```
 
+<a id="flink-readers-changed"></a>
+### `flink_readers_changed`
+
+**Readers**
+
+- Why: A Flink CDC pipeline's saved position holds what each of its readers had read, so it restores only with the same number of readers. After Start over nothing is left to restore and the number can change.
+
+Fix:
+
+```
+Keep the readers it runs, or pause the pipeline and use Positions → Start over, then deploy.
+```
+
 <a id="flink-replica-identity"></a>
 ### `flink_replica_identity`
 
@@ -2250,6 +2460,19 @@ Fix:
 
 ```
 ALTER TABLE "{schema}"."{table}" REPLICA IDENTITY FULL;
+```
+
+<a id="flink-replication-slots"></a>
+### `flink_replication_slots`
+
+**Replication slots for the copy**
+
+- Why: While a Flink CDC pipeline copies a PostgreSQL source, each of its readers opens its own temporary replication slot (and WAL sender) next to the pipeline's own one, so a copy needs 1 + parallelism of each. Without enough, the copy stops part-way.
+
+Fix:
+
+```
+Drop replication slots nobody uses, or raise max_replication_slots and max_wal_senders (a restart).
 ```
 
 <a id="flink-server-ids"></a>
@@ -2286,6 +2509,19 @@ Create this pipeline again: a new pipeline gets other server ids.
 
 ## Project policies
 
+<a id="policy-advanced-properties"></a>
+### `policy_advanced_properties`
+
+**Advanced properties**
+
+- Why: This pipeline sets {n} advanced Debezium properties ({keys}); this project does not allow them. BeziSync can't verify raw properties, so an Admin decides whether a project may use them.
+
+Fix:
+
+```
+Remove the advanced properties in Review, or ask an Admin to allow them under Settings → Policies.
+```
+
 <a id="policy-custom-transform"></a>
 ### `policy_custom_transform`
 
@@ -2310,6 +2546,19 @@ Ask an Admin to change the policy under Settings → Policies.
 ### `policy_ok`
 
 **Project policies**
+
+<a id="policy-resource-limits"></a>
+### `policy_resource_limits`
+
+**Resource limits**
+
+- Why: The project caps the CPU, memory and readers one pipeline may ask for at its peak (a Flink CDC cluster during its first copy). A running pipeline over a new limit keeps running; its next deploy is blocked.
+
+Fix:
+
+```
+Choose a smaller size, fewer readers, or ask an Admin to raise the limits under Settings → Policies.
+```
 
 <a id="policy-resources"></a>
 ### `policy_resources`
@@ -2342,6 +2591,19 @@ Fix:
 
 ```
 Ask an Admin to change the policy under Settings → Policies.
+```
+
+<a id="policy-setting-limit"></a>
+### `policy_setting_limit`
+
+**Setting limits**
+
+- Why: The project bounds some settings (a range, fewer choices, a pinned value, or hidden). A pipeline saved before a limit keeps running; its next deploy is blocked until its settings fit.
+
+Fix:
+
+```
+Change or remove them in Review → Engine settings.
 ```
 
 <a id="policy-sink-type"></a>

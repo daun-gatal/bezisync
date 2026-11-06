@@ -226,6 +226,7 @@ func (k *KubernetesDriver) Apply(ctx context.Context, w Workload) error {
 			},
 		},
 	}
+	applyPlacement(dep, w.Placement)
 	files := map[string][]byte{}
 	for key, v := range w.Files {
 		files[key] = []byte(v)
@@ -554,15 +555,34 @@ func (k *KubernetesDriver) Capacity(ctx context.Context) map[string]any {
 	if err != nil {
 		return nil
 	}
-	var allocCPU float64
-	var allocMem int64
+	var allocCPU, nodeCPU float64
+	var allocMem, nodeMem int64
 	var archs []string
+	var infos []any
 	for _, n := range nodes.Items {
 		archs = append(archs, n.Status.NodeInfo.Architecture)
 		cpu := n.Status.Allocatable[corev1.ResourceCPU]
 		mem := n.Status.Allocatable[corev1.ResourceMemory]
-		allocCPU += QuantityCPU(cpu.String())
-		allocMem += QuantityMem(mem.String())
+		c, m := QuantityCPU(cpu.String()), QuantityMem(mem.String())
+		allocCPU += c
+		allocMem += m
+		// The largest node a pod can still land on: what a Flink CDC TaskManager must fit.
+		if !n.Spec.Unschedulable {
+			nodeCPU, nodeMem = max(nodeCPU, c), max(nodeMem, m)
+			// Each schedulable node's labels and taints: a placement profile packs for the
+			// largest node it can land on.
+			if len(infos) < MaxReportedNodes {
+				taints := []any{}
+				for _, t := range n.Spec.Taints {
+					taints = append(taints, map[string]any{"key": t.Key, "value": t.Value, "effect": string(t.Effect)})
+				}
+				labels := map[string]any{}
+				for k, v := range n.Labels {
+					labels[k] = v
+				}
+				infos = append(infos, map[string]any{"labels": labels, "taints": taints, "cpu": c, "memory": m})
+			}
+		}
 	}
 	pods, err := k.cs.CoreV1().Pods(k.namespace).List(ctx, metav1.ListOptions{LabelSelector: ManagedBy + "=bezisync"})
 	if err != nil {
@@ -579,8 +599,53 @@ func (k *KubernetesDriver) Capacity(ctx context.Context) map[string]any {
 			}
 		}
 	}
-	return map[string]any{"cpu_allocatable": allocCPU, "memory_allocatable": allocMem, "cpu_requested": reqCPU,
-		"memory_requested": reqMem, "workloads": len(pods.Items), "architectures": Architectures(archs...)}
+	out := map[string]any{"cpu_allocatable": allocCPU, "memory_allocatable": allocMem, "cpu_requested": reqCPU,
+		"memory_requested": reqMem, "workloads": len(pods.Items), "architectures": Architectures(archs...),
+		"node_cpu_max": nodeCPU, "node_memory_max": nodeMem, "nodes": infos}
+	if infos == nil {
+		out["nodes"] = []any{}
+	}
+	for k, v := range k.quota(ctx) {
+		out[k] = v
+	}
+	return out
+}
+
+// quota is the headroom the namespace's ResourceQuotas leave for requests and limits of CPU and
+// memory (the tightest quota of each), as quota_cpu_free (CPUs) and quota_memory_free (bytes);
+// quota: false when the namespace has none, nothing when they can't be read.
+func (k *KubernetesDriver) quota(ctx context.Context) map[string]any {
+	list, err := k.cs.CoreV1().ResourceQuotas(k.namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil
+	}
+	cpuFree, memFree := -1.0, int64(-1)
+	for _, rq := range list.Items {
+		for _, name := range []corev1.ResourceName{corev1.ResourceRequestsCPU, corev1.ResourceCPU, corev1.ResourceLimitsCPU} {
+			if hard, ok := rq.Status.Hard[name]; ok {
+				used := rq.Status.Used[name]
+				if free := QuantityCPU(hard.String()) - QuantityCPU(used.String()); cpuFree < 0 || free < cpuFree {
+					cpuFree = max(free, 0)
+				}
+			}
+		}
+		for _, name := range []corev1.ResourceName{corev1.ResourceRequestsMemory, corev1.ResourceMemory, corev1.ResourceLimitsMemory} {
+			if hard, ok := rq.Status.Hard[name]; ok {
+				used := rq.Status.Used[name]
+				if free := QuantityMem(hard.String()) - QuantityMem(used.String()); memFree < 0 || free < memFree {
+					memFree = max(free, 0)
+				}
+			}
+		}
+	}
+	out := map[string]any{"quota": cpuFree >= 0 || memFree >= 0}
+	if cpuFree >= 0 {
+		out["quota_cpu_free"] = cpuFree
+	}
+	if memFree >= 0 {
+		out["quota_memory_free"] = memFree
+	}
+	return out
 }
 
 // --- managed-cluster bearer tokens (GKE, EKS) ---

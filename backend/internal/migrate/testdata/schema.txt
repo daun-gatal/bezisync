@@ -275,6 +275,7 @@ runtimes.last_seen_at timestamp with time zone YES
 runtimes.last_test jsonb YES 
 runtimes.mode character varying(16) NO 
 runtimes.name character varying(63) NO 
+runtimes.placement_profiles jsonb NO '[]'::jsonb
 runtimes.project_id uuid NO 
 runtimes.secrets_enc text YES 
 runtimes.updated_at timestamp with time zone NO 

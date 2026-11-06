@@ -379,7 +379,7 @@ func TestEveryMCPReadToolReachesItsRoute(t *testing.T) {
 		for k, v := range args[name] {
 			a[k] = v
 		}
-		if strings.Contains(name, "pipeline") && !strings.HasSuffix(name, "pipelines") && name != "adopt_pipeline_properties" {
+		if (strings.Contains(name, "pipeline") || name == "list_engine_settings") && !strings.HasSuffix(name, "pipelines") && name != "adopt_pipeline_properties" {
 			a["pipeline"] = "orders-cdc"
 		}
 		if strings.Contains(name, "connection") && name != "list_connections" {
@@ -430,6 +430,38 @@ func TestMCPFlinkCDCTools(t *testing.T) {
 		t.Fatal(text)
 	}
 	if text, isErr := callTool(t, e.srv, tok, "get_pipeline_logs", map[string]any{"pipeline": "lake-mcp", "component": "taskmanager-1"}); isErr || !strings.Contains(text, "logs of taskmanager-1") {
+		t.Fatal(text)
+	}
+}
+
+// An agent reads what a pipeline may tune, with the project's limits applied, and its changes meet
+// the same checks as its person's (D16): a refused raw key and a value outside a limit are refused.
+func TestMCPEngineSettings(t *testing.T) {
+	e := newPipelineEnv(t)
+	enableMCP(t, e.admin, nil)
+	base := "/api/v1/projects/" + e.pid
+	e.admin.put(base+"/policies", map[string]any{"allow_advanced_properties": true, "setting_limits": map[string]any{
+		"debezium.source.snapshot.max.threads": map[string]any{"max": "4"},
+		"debezium.source.poll.interval.ms":     map[string]any{"hide": true},
+	}}).expect(200)
+	tok := token(t, e.admin, map[string]any{"name": "tune"})
+	if text, isErr := callTool(t, e.srv, tok, "create_pipeline", map[string]any{"name": "tune-mcp", "source": "shop-pg", "destination": e.ids.Sink, "runtime": e.ids.Runtime,
+		"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}}, "tuning": map[string]any{"debezium.source.snapshot.max.threads": "2"},
+			"advanced": map[string]any{"debezium.source.status.update.interval.ms": "12345"}}}); isErr {
+		t.Fatal(text)
+	}
+	text, isErr := callTool(t, e.srv, tok, "list_engine_settings", map[string]any{"pipeline": "tune-mcp"})
+	if isErr || !strings.Contains(text, `"key": "debezium.source.snapshot.max.threads"`) || !strings.Contains(text, `"max": "4"`) || !strings.Contains(text, `"value": "2"`) ||
+		strings.Contains(text, "debezium.source.poll.interval.ms") || !strings.Contains(text, `"advanced_allowed": true`) ||
+		!strings.Contains(text, "status.update.interval.ms") || strings.Contains(text, "12345") {
+		t.Fatal(text)
+	}
+	if text, isErr := callTool(t, e.srv, tok, "update_pipeline", map[string]any{"pipeline": "tune-mcp",
+		"spec": map[string]any{"tuning": map[string]any{"debezium.source.snapshot.max.threads": "8"}}}); !isErr || !strings.Contains(text, "limits") {
+		t.Fatal(text)
+	}
+	if text, isErr := callTool(t, e.srv, tok, "update_pipeline", map[string]any{"pipeline": "tune-mcp",
+		"spec": map[string]any{"advanced": map[string]any{"debezium.source.database.password": "x"}}}); !isErr || strings.Contains(text, `"x"`) {
 		t.Fatal(text)
 	}
 }

@@ -7,10 +7,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/flinkhelper"
+	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
 	"github.com/daun-gatal/bezisync/backend/internal/runtime"
+	"github.com/daun-gatal/bezisync/backend/internal/services"
 )
 
 // A Flink CDC pipeline's evidence comes from the helper beside its JobManager: /q/health (UP once
@@ -145,4 +150,25 @@ func flinkStatus(st *flinkhelper.Status, obs *runtime.Observation, tables []stri
 		}
 	}
 	return out
+}
+
+// flinkPhase shrinks a custom Flink CDC cluster after its first copy, or puts it back on its copy
+// shape when its streaming shape failed (services.FlinkPhaseStep), auditing each resize as the
+// controller. The new shape takes effect on the next tick through its config hash.
+func (c *Controller) flinkPhase(ctx context.Context, tx pgx.Tx, p *models.Pipeline, spec domain.PipelineSpec, st *flinkhelper.Status, failed bool) error {
+	if services.EngineOf(p) != engine.FlinkCDC || p.DesiredState != "running" || p.DeployedVersionID == nil {
+		return nil
+	}
+	pol, err := services.PoliciesOf(ctx, tx, p.ProjectID)
+	if err != nil {
+		return err
+	}
+	ev := services.FlinkPhaseStep(p, spec, st, failed, pol.ShrinkAuto(), time.Now())
+	if ev == nil {
+		return nil
+	}
+	pid := p.ProjectID
+	_, err = services.Record(ctx, tx, services.AuditEvent{Kind: ev.Kind, Summary: ev.Summary, ProjectID: &pid, ResourceType: "pipeline", ResourceID: &p.ID,
+		Details: ev.Details, Actor: "controller"})
+	return err
 }

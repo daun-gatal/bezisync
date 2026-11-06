@@ -1851,13 +1851,80 @@
   },
   {
    "code": "runtime_capacity",
-   "fixes": [],
+   "fixes": [
+    "Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota."
+   ],
    "section": "Deploy",
    "titles": [
     "Runtime capacity"
    ],
    "whys": [
-    "The connector may stay pending until resources free up."
+    "The connector may stay pending until resources free up.",
+    "Over the namespace's ResourceQuota, Kubernetes refuses the pods, so the deploy is blocked (even forced). A redeploy counts only what it adds to what the pipeline runs now.",
+    "Measured when preflight runs; when the runtime doesn't report its CPU and memory, the check is unknown, never passed."
+   ]
+  },
+  {
+   "code": "setting_version",
+   "section": "Deploy",
+   "titles": [
+    "Settings in this Debezium version"
+   ],
+   "whys": [
+    "A tuned setting must exist in the Debezium release the pipeline runs: some arrive in a release, some go or are renamed. Unknown when BeziSync can't tell which release an image is."
+   ],
+   "fixes": [
+    "Remove the setting in Review → Engine settings, or move the pipeline to a Debezium version that has it."
+   ]
+  },
+  {
+   "code": "setting_experimental",
+   "section": "Deploy",
+   "titles": [
+    "Experimental settings"
+   ],
+   "whys": [
+    "The engine marks these settings experimental: they may change or go in a later release."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "setting_threads",
+   "section": "Deploy",
+   "titles": [
+    "Connections for the copy"
+   ],
+   "whys": [
+    "Each snapshot thread holds a connection to the source while the first copy runs, besides the stream's own. Unknown when BeziSync can't read the source's connection limit (no permission, or the source is checked by an agent)."
+   ],
+   "fixes": [
+    "Use fewer snapshot threads, or raise the source's connection limit."
+   ]
+  },
+  {
+   "code": "setting_queue_memory",
+   "section": "Deploy",
+   "titles": [
+    "Queue memory"
+   ],
+   "whys": [
+    "A full queue holds that many changes in the Java heap; estimated from the tables' average row size, since no changes are seen before a deploy."
+   ],
+   "fixes": [
+    "Lower Queue size, set a Queue memory limit, or choose a bigger size."
+   ]
+  },
+  {
+   "code": "setting_fetch_memory",
+   "section": "Deploy",
+   "titles": [
+    "Copy fetch size"
+   ],
+   "whys": [
+    "The first copy reads this many rows at once into the heap."
+   ],
+   "fixes": [
+    "Lower the fetch size in the Snapshot step, or choose a bigger size."
    ]
   },
   {
@@ -1872,6 +1939,20 @@
    ]
   },
   {
+   "code": "placement",
+   "section": "Deploy",
+   "titles": [
+    "Placement"
+   ],
+   "whys": [
+    "The pipeline's pods run with one of its runtime's placement profiles (node selector, tolerations, priority class, labels). It blocks when the runtime has no such profile, when no schedulable node takes these pods, or when the runtime's agent can't apply placement; it is unknown when the runtime doesn't list its nodes."
+   ],
+   "fixes": [
+    "Choose one of the runtime's profiles in Review.",
+    "Ask the runtime's Admin to fix the profile, or label or untaint nodes for it."
+   ]
+  },
+  {
    "code": "runtime_ready",
    "fixes": [],
    "section": "Deploy",
@@ -1879,6 +1960,30 @@
     "Runtime {name}"
    ],
    "whys": []
+  },
+  {
+   "code": "advanced_properties",
+   "fixes": [
+    "Remove the listed properties under Review → Advanced Debezium properties, or set what they did where the message says."
+   ],
+   "section": "Deploy",
+   "titles": [
+    "Advanced properties"
+   ],
+   "whys": [
+    "{n} advanced properties can't be set: {keys}. BeziSync owns identity, state, credentials and routing, and every choice the wizard makes, so a raw property may only add what BeziSync doesn't set. Unsafe options (SQL on the source, dropping the slot, skipping changes, weakening TLS, loading classes) and credentials are never passed on."
+   ]
+  },
+  {
+   "code": "advanced_unverified",
+   "fixes": [],
+   "section": "Deploy",
+   "titles": [
+    "Advanced properties"
+   ],
+   "whys": [
+    "Advanced properties are passed to Debezium Server as typed. BeziSync can't check what they do, so this check is Unknown, never a pass: review them in Review, and approvers see them listed."
+   ]
   },
   {
    "code": "config_valid",
@@ -2022,6 +2127,32 @@
    ]
   },
   {
+   "code": "policy_setting_limit",
+   "section": "Project policies",
+   "titles": [
+    "Setting limits"
+   ],
+   "whys": [
+    "The project bounds some settings (a range, fewer choices, a pinned value, or hidden). A pipeline saved before a limit keeps running; its next deploy is blocked until its settings fit."
+   ],
+   "fixes": [
+    "Change or remove them in Review → Engine settings."
+   ]
+  },
+  {
+   "code": "policy_resource_limits",
+   "section": "Project policies",
+   "titles": [
+    "Resource limits"
+   ],
+   "whys": [
+    "The project caps the CPU, memory and readers one pipeline may ask for at its peak (a Flink CDC cluster during its first copy). A running pipeline over a new limit keeps running; its next deploy is blocked."
+   ],
+   "fixes": [
+    "Choose a smaller size, fewer readers, or ask an Admin to raise the limits under Settings → Policies."
+   ]
+  },
+  {
    "code": "policy_source_budget",
    "fixes": [
     "Reuse an existing pipeline (add tables to it) or ask an admin to raise the limit."
@@ -2070,6 +2201,19 @@
    ]
   },
   {
+   "code": "policy_advanced_properties",
+   "fixes": [
+    "Remove the advanced properties in Review, or ask an Admin to allow them under Settings → Policies."
+   ],
+   "section": "Project policies",
+   "titles": [
+    "Advanced properties"
+   ],
+   "whys": [
+    "This pipeline sets {n} advanced Debezium properties ({keys}); this project does not allow them. BeziSync can't verify raw properties, so an Admin decides whether a project may use them."
+   ]
+  },
+  {
    "code": "policy_custom_transform",
    "fixes": [
     "Ask an Admin to change the policy under Settings → Policies."
@@ -2080,6 +2224,43 @@
    ],
    "whys": [
     "{steps} run(s) a custom transform class ({names}); this project does not allow custom transforms. Custom classes cannot be previewed or checked by BeziSync, so an Admin decides who may use them."
+   ]
+  },
+  {
+   "code": "transform_truncate_type",
+   "section": "Deploy",
+   "titles": [
+    "Truncated columns"
+   ],
+   "whys": [
+    "A Truncate step cuts text only. On Debezium another type is left as it is; on Flink CDC it would fail the job, so it blocks. Unknown when BeziSync can't read the columns' types."
+   ],
+   "fixes": [
+    "Remove those columns from the Truncate step."
+   ]
+  },
+  {
+   "code": "transform_route_idle",
+   "section": "Deploy",
+   "titles": [
+    "Routes"
+   ],
+   "whys": [
+    "A route that matches no captured table does nothing (a table added later that matches is routed)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "transform_route_merge",
+   "section": "Deploy",
+   "titles": [
+    "Routes"
+   ],
+   "whys": [
+    "Tables a route sends to one destination must have the same key and columns, or the destination can't hold both."
+   ],
+   "fixes": [
+    "Route only tables of the same shape together, or give each its own destination."
    ]
   },
   {
@@ -2094,6 +2275,19 @@
    "whys": [
     "{table}, step {n}: two fields would get one name. Debezium Server stops with \"Cannot create field because of field name duplication\" (an added field or a rename onto a field the event already has, or flattening that produces an existing name)."
    ]
+  },
+  {
+   "code": "transform_computed_input",
+   "titles": [
+    "Transforms: computed columns"
+   ],
+   "whys": [
+    "Flink CDC stops the job when a projection reads a column the table lacks, or calls a function on a value of another type."
+   ],
+   "fixes": [
+    "Pick another column for the computed column, under Transform."
+   ],
+   "section": "Deploy"
   },
   {
    "code": "transform_column_missing",
@@ -2305,6 +2499,32 @@
    "whys": [
     "New tables are bucketed by their key column, recorded by the wizard from discovery."
    ]
+  },
+  {
+   "code": "iceberg_partition_column",
+   "titles": [
+    "Partitioning"
+   ],
+   "whys": [
+    "Flink CDC fails creating a table partitioned by a column its rows don't carry, or by a transform the column's type can't take."
+   ],
+   "fixes": [
+    "Change Partition by in the Destination step."
+   ],
+   "section": "Apache Iceberg"
+  },
+  {
+   "code": "iceberg_partition_existing",
+   "titles": [
+    "Partitioning"
+   ],
+   "whys": [
+    "Flink CDC sets a table's partitioning when it creates the table; Iceberg keeps it, so other partitioning asked for later never applies."
+   ],
+   "fixes": [
+    "Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again."
+   ],
+   "section": "Apache Iceberg"
   },
   {
    "code": "iceberg_existing_tables",
@@ -2814,6 +3034,19 @@
    ]
   },
   {
+   "code": "flink_replication_slots",
+   "fixes": [
+    "Drop replication slots nobody uses, or raise max_replication_slots and max_wal_senders (a restart)."
+   ],
+   "section": "Flink CDC",
+   "titles": [
+    "Replication slots for the copy"
+   ],
+   "whys": [
+    "While a Flink CDC pipeline copies a PostgreSQL source, each of its readers opens its own temporary replication slot (and WAL sender) next to the pipeline's own one, so a copy needs 1 + parallelism of each. Without enough, the copy stops part-way."
+   ]
+  },
+  {
    "code": "flink_server_ids",
    "section": "Flink CDC",
    "titles": [
@@ -2822,6 +3055,33 @@
    "whys": [],
    "fixes": [
     "Create this pipeline again: a new pipeline gets other server ids."
+   ]
+  },
+  {
+   "code": "flink_cluster_fit",
+   "section": "Flink CDC",
+   "titles": [
+    "Cluster fits the nodes"
+   ],
+   "whys": [
+    "A custom Flink CDC cluster is packed into TaskManagers the runtime's largest node can hold. When even one slot needs more CPU or memory than that node offers, or a manual TaskManager is bigger than it, its pods would never be scheduled. When the runtime doesn't report its nodes' size, BeziSync can't check and says so."
+   ],
+   "fixes": [
+    "Give each slot less CPU or memory in Review → Size, or add bigger nodes to the runtime.",
+    "Use the automatic shape, or smaller TaskManagers, in Review → Size."
+   ]
+  },
+  {
+   "code": "flink_readers_changed",
+   "section": "Flink CDC",
+   "titles": [
+    "Readers"
+   ],
+   "whys": [
+    "A Flink CDC pipeline's saved position holds what each of its readers had read, so it restores only with the same number of readers. After Start over nothing is left to restore and the number can change."
+   ],
+   "fixes": [
+    "Keep the readers it runs, or pause the pipeline and use Positions → Start over, then deploy."
    ]
   },
   {

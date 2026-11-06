@@ -7,6 +7,7 @@ func TestGroupPutsEngineAndPositionToolsWhereTheyBelong(t *testing.T) {
 		"list_engines":                       "Engine versions",
 		"get_debezium_catalog":               "Engine versions",
 		"list_saved_positions":               "Pipelines",
+		"list_engine_settings":               "Pipelines",
 		"restore_saved_position":             "Pipelines",
 		"move_pipelines_to_debezium_version": "Pipelines",
 	} {

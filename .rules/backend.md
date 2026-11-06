@@ -266,7 +266,11 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   fails on an update without the old row), `flink_server_ids` (MySQL: no other pipeline on the source
   uses the block), `flink_agent_version`, `flink_kubernetes_services` (direct runtimes run `Test`;
   agents send `local_test.flink_cdc`), and `runtime_capacity` counts the whole cluster
-  (`FlinkCapacityCheck`). The helper's `config_error` phase (an image without a connector or driver)
+  (`FlinkNeed`). Preflight uses the capacity the runtime test just returned (`useFreshCapacity`
+  sets it on the runtime and stores it for direct runtimes, so the deploy packs with the same
+  numbers); `capacityCheck` is Unknown without one, blocks over the namespace quota the Kubernetes
+  driver reports (`quota`, `quota_cpu_free`, `quota_memory_free`; the Role reads ResourceQuotas) and
+  compares what a redeploy adds (`runningNeed`). The helper's `config_error` phase (an image without a connector or driver)
   is reported with the helper's own fix.
 - Flink-only destinations (`engine.FlinkOnlySink`: StarRocks, Doris, Fluss) carry `engines:
   ["flink-cdc"]` in their descriptor; `connector-types` adds `available`/`unavailable_reason` and
@@ -290,6 +294,11 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   are refused. Debezium's sizes, row-identity and partitioning checks are skipped
   (`PipelineFacts.FlinkCDC`); the controller's latency target allows the commit interval. iceberg-go
   applies the equality deletes Flink writes, so the Rows view is right.
+- Settings for agents and scripts: `GET …/pipelines/{id}/settings` (`services.PipelineSettings`;
+  limits applied, hidden settings left out, advanced keys without values) is MCP's
+  `list_engine_settings`. Manifest apply results carry `settings_change`, `breaking` and `advanced`
+  (`planEffects`, against the deployed version); the CLI's `diff` exits 3 and `apply --deploy`
+  stops on a breaking change without `--confirm`.
 - Flink CDC for agents and scripts: MCP tools `list_engines`, `list_saved_positions`,
   `restore_saved_position` (destructive, off by default), `engine` on `create_pipeline` /
   `update_pipeline` / `add_debezium_catalog_image` / `get_debezium_catalog`, `from_time` on
@@ -319,11 +328,98 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   (`services.SealVersion`), after which it never changes; deploy points `deployed_version_id` at one.
   A change that must be its own version (a Debezium image move) sets `PipelineEdit.Separate`.
 - `compiler.Compile` is pure: spec + resolved connections → `application.properties`
-  (secrets only as `${ENV}`) + env. Experts may add `advanced` properties except the managed patterns.
+  (secrets only as `${ENV}`) + env. Experts may add `advanced` properties: `compiler.ClassifyAdvanced`
+  is the only judge of a raw key (saving refuses keys it adds or changes, preflight's
+  `advanced_properties` config check refuses the rest, adopt keeps only allowed ones). It refuses
+  every key the compiler set for the pipeline (`Compiled.Managed`), wizard-modelled options,
+  credentials, unsafe options and `${`/control characters in values; extend its tables, never add a
+  second list. Allowed ones need the policy `allow_advanced_properties` (`policy_advanced_properties`)
+  and show as the `advanced_unverified` check.
+- A check BeziSync can't verify has `Status: checks.Unknown` ("unknown"): never blocking, never a
+  pass; `Summarize` reports "Ready · N not verified" and the UI shows it grey.
   Offsets/schema history use Debezium's JDBC store in the state DB (`debezium_state` schema,
   tables `offsets_<id>` / `history_<id>`). `config_hash` is computed with Python's `json.dumps`
   semantics (`pyjson`) so it matches what the Python releases stored: a hash change restarts connectors.
 - Debezium 3.7 keeps its SMTs in `lib_opt/`; workloads always set `ENABLE_DEBEZIUM_SCRIPTING=true`.
+- The settings registry (`engine/settings.go`): every option a pipeline may tune, for both engines,
+  as `engine.Setting` (engine, scope, stage, type and bounds, default, why, the source or destination
+  types it applies to, and its `Impact`: live, restart, first_copy, next_copy, breaks_positions).
+  `SettingsFor`, `SettingOf` and `CheckSetting` are the only way to read and check one; the Flink
+  settings (`flink_conf`) are its engine-scoped Flink CDC entries. `CheckSetting` must keep accepting
+  what it accepted before (the compiler re-checks deployed specs on every reconcile).
+  `spec.tuning` (dumped only when set) holds the other settings: saving checks them with
+  `services.ValidateTuning` (engine, connectors, bounds, canonical value), and the compilers apply
+  them after BeziSync's own keys and before advanced properties (so advanced can't change a tuned
+  key). A registry key BeziSync compiles must be `Derived`; `TestRegistryKeysAreNotCompiledByBeziSync`
+  holds that. Sizes: `domain.ResourcePresets` are the presets in numbers (`ResourceAmount`), and
+  `policies.resources: custom` with `custom_resources` (canonical CPU quarters and 256 MiB memory
+  steps, `ParseCPU`/`ParseMemory`) is a Debezium custom size; `compiler.ResourceFor` is the
+  container's request (heap `domain.HeapMiB`), and limits compare amounts (`Within`). A Flink CDC
+  custom size is `flink_cdc.cluster` (`domain.FlinkCluster`; `decodeSpec` holds custom ⇔ exactly
+  one of the two): `engine.Pack` (pure) packs it for the largest node the drivers report
+  (`node_cpu_max`, `node_memory_max`), and `services.FlinkSizeOf` is the one way to its shape —
+  preset, manual, the `flink_shape` artifact Deploy stores for the spec's hash (I3: a running
+  pipeline's config hash never follows the nodes), or packed now for a draft. Checks and the
+  compiler (`FlinkInput.Cluster`) take that resolved `FlinkSize`; `flink_cluster_fit` lives in
+  the runtime section, so a forced deploy can't skip it. A shape change needs nothing new from the
+  drivers or agents (TaskManager count, CPU and memory are existing `FlinkTopology` fields; slots
+  and parallelism travel in flink-conf); `flink_readers_changed` (config section) refuses another
+  parallelism while a saved position above the Start over floor exists. Shrinking after the copy
+  (`services/shrink.go`): the `flink_shape` artifact holds `size` (copy) and `streaming_size`, and
+  `phase`; `FlinkSizeOf` returns the streaming shape once `phase` is `streaming`, so the config hash
+  changes once and the drivers restart the cluster from its position. `FlinkPhaseStep` (controller,
+  each tick of a running pipeline) shrinks only on evidence (`Streaming`, then a save after
+  `streaming_since`), reverts a streaming shape that failed before saving (`MaxShrinkFailures`, then
+  `shrink_off` and the `cluster_shrink_failed` alert); `GrowBack` runs on Start over with a copy and
+  on restoring a position before `copy_done_save`; Deploy keeps a shrunk shape unless tables were
+  added. Audits a person didn't cause set `AuditEvent.Actor` ("controller"). Project limits count
+  `services.FootprintOf` (the peak: a Flink CDC cluster's copy shape, `PeakSizeOf`), returned on
+  pipeline reads as `footprint` so the Policies preview never packs: `resource_limits`
+  (`policy_resource_limits`) on both engines, and `max_resources` for a custom Flink CDC cluster by
+  the Flink preset's totals (`resourcePolicyChecks`; presets and Debezium sizes stay in
+  `domain.EvaluatePolicies`). `max_resources` is not migrated into numbers: its presets mean other
+  totals on each engine, so any conversion would change which pipelines pass. Placement profiles
+  (`runtimes.placement_profiles`, migration 00009; `runtime.Placement`, `ValidatePlacement`) live
+  outside the schema-driven config, so editing them never needs pipelines paused; a pipeline's
+  `spec.placement` resolves through `services.PlacementOf` (the `placement` artifact Deploy stores
+  for its spec hash, else the runtime's profile now), goes into `Compiled.Placement` (in the config
+  hash only when set) and `Workload.Placement` (the Kubernetes driver's `applyPlacement`; agents
+  advertise `runtime.FeaturePlacement`). Packing sees `RuntimeCapacityFor`: the largest node the
+  profile accepts among the `nodes` the Kubernetes driver reports. Settings checks and
+  recommendations (`services/settingchecks.go`) read only this run's evidence — the image's release
+  (`Setting.Since`/`Until`/`Renamed`), `connectors.ConnectionCounter` (PostgreSQL, MySQL; never
+  through an agent), discovery's size estimates — and are Unknown or absent without it;
+  `PreflightReport.recommendations` carry `evidence_at`. `ValidateTuning` keeps Debezium's batch
+  below its queue (size-derived defaults included). Registry entries are only documented Debezium
+  properties (per connector by `Connectors`; never a key a connection field sets — those are
+  modelled); `DriverPropertyRefusal` refuses `driver.*` on `NoJDBC` sources when saved and in
+  classify. CockroachDB, Vitess, Spanner and SQL Server have no entries of their own yet. Import:
+  `services.Adopt` is the recorded contract (`testdata/contract/services_pure.json`) and stays as
+  it is; `PlanImport` sorts its keys into the five buckets and builds the spec the draft is created
+  from (`plan` in the adopt response). Version changes: `VersionEffects` (C16, C24) in
+  `debezium-images:effects` (pure) and `ChangeImage`, which refuses a pipeline a blocking effect
+  names and moves renamed settings. Setting limits (`services/settinglimits.go`):
+  `ValidateSettingLimits` when Admins save new or changed ones (stored ones decode leniently: P9),
+  `RefuseSettingLimits` on pipeline saves (new or changed values), `policy_setting_limit` in
+  PolicyChecks, `LimitsFor` per engine (P10); pins are applied to the spec preflight checks and
+  written into an unsealed version by `writePins` in CheckDeployable (a sealed one is refused:
+  `pinned_setting`) — never read by the compiler (I2). `setting-limits:impact` counts in keyset pages.
+  Flink CDC raw options: `compiler.ClassifyFlinkAdvanced` (block-prefixed keys; pass-through
+  prefixes only) is the only judge, in compile, saves (`RefuseNewAdvanced(eng, …)`), preflight
+  and classify; values go into the blocks' options and out through the YAML encoder.
+  `Setting.Experimental` adds `setting_experimental` (warn). Steps: `soft_delete` compiles to
+  nothing itself — `compiler.withSoftDelete` makes unwrap steps rewrite deletes (adding one when
+  missing) on Debezium; on Flink CDC it sets the `SOFT_DELETE` converter and projects `__op`
+  (`domain.SoftDeleteField`); the domain preview and findings flag a column of that name.
+  `truncate` is a source option on Debezium (`column.truncate.to.N.chars`, the exact property a
+  raw one was, so a moved pipeline keeps its hash; `domain.TruncateSources`) and `SUBSTR` in the
+  Flink CDC projection; `transform_truncate_type` checks the types; import maps raw truncations. `route` sends tables a glob (`domain.GlobMatch`, mirrored by the frontend's `globMatch`) matches to one destination: `domain.RouteTargets` (first match wins; T10 refuses a table two routes match) is the only source of the name, read by the destinations, the preview, Flink CDC's sink table and Debezium's `bzmerge<N>` RegexRouters after `bzroute`; `transform_route_merge` blocks tables of different shapes sent together, `transform_route_idle` warns. `computed` (Flink CDC only; the Debezium compiler refuses it) is `domain.ComputedFunctions` — a fixed function set with typed argument slots (`KindFits`), mirrored by the frontend's `COMPUTED_FUNCTIONS`/`kindFits` — compiled by `compiler.computedSQL` (identifiers back-quoted, literals quoted, `TRY_CAST` for numbers); masked or left-out inputs are refused at decode, and `transform_computed_input` (from `TransformFindings`, so also the drift alert) blocks a missing or mistyped input. Iceberg's `partition_by` option (Flink CDC only; Debezium's build refuses it) is read by `connectors.IcebergPartitionBy` and compiled into `partition.key` per destination; `iceberg_partition_column` and `iceberg_partition_existing` (the live table's spec via `TablePartitioning`) check it. `domain.SummarizeSettings` is what a deploy changes in them (preflight and the version
+  diff return it as `settings_change`, beside `change`, whose shape is the recorded contract).
+  `GET /engines` lists each engine's settings; `POST …/pipelines/{id}/settings:classify` (pure, at
+  most 200 keys, values never echoed) says what `ClassifyAdvanced` makes of raw keys and returns the
+  typed setting when a key is one, so the wizard never copies the classifier; `POST
+  …/pipelines/{id}/cluster:pack` (pure, `services.PreviewCluster`) packs a custom Flink CDC cluster
+  for the pipeline's runtime the way a deploy would, with the fit check.
 - Transforms (`domain/transforms.go`, `compiler/transforms.go`): `spec.transforms` steps are
   `unwrap`, `filter`, `outbox` (the Python types: fixed four-field dump) and the typed `rename`,
   `add_field`, `flatten`, `custom`; filters are either typed (`operations` + `rules`) or a raw
@@ -419,7 +515,7 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `kind: Pipeline` manifests reference connections and the runtime **by name**. `:apply` is
   all-or-nothing across documents, supports `dry_run` (unified diff + change notes, rolled back) and
   `deploy` (respects approvals). `:adopt` maps an `application.properties` without writing
-  (mapped / kept as advanced / managed / replaced + warnings; never keeps plain passwords).
+  (mapped / kept as advanced / managed / replaced + warnings; keeps only keys `ClassifyAdvanced` allows).
   `/promote` applies the latest version into another project with that project's permissions,
   policies and approvals. Personal API tokens (`/auth/tokens`, `bzt_…`) are hashed, shown once,
   project-scoped, optionally read-only, expiring, and can only be minted from a session.

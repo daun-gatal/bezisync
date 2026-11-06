@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { CheckList, type CheckReport } from '../CheckList';
+import { CheckList, reportBadge, type CheckReport } from '../CheckList';
 
 const report: CheckReport = {
   ok: false,
@@ -30,5 +30,25 @@ describe('CheckList', () => {
     expect(screen.getByText('Signed in.')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Re-check' }));
     expect(onRecheck).toHaveBeenCalled();
+  });
+
+  it('shows what BeziSync can’t verify in grey, never as Ready, and lists it without asking', () => {
+    const unverified: CheckReport = {
+      ok: true,
+      summary: 'Ready · 1 not verified',
+      duration_ms: 5,
+      checked_at: new Date().toISOString(),
+      checks: [
+        { code: 'config_valid', title: 'Configuration', status: 'pass', category: 'destination', message: 'Generated 40 properties.', technical: '', why: '', fix: null, blocking: false, doc: '' },
+        { code: 'advanced_unverified', title: 'Advanced properties', status: 'unknown', category: 'destination', message: 'Passed to Debezium as typed, not verified by BeziSync: debezium.source.poll.interval.ms.', technical: '', why: '', fix: null, blocking: false, doc: '' },
+      ],
+    };
+    render(<CheckList report={unverified} expert={false} subject="orders" />);
+    expect(screen.getByText(/not verified by BeziSync: debezium\.source\.poll\.interval\.ms/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Not verified')).toBeInTheDocument();
+    expect(screen.queryByText('Generated 40 properties.')).toBeNull();
+    const { container } = render(reportBadge(unverified));
+    expect(container).toHaveTextContent('Ready · 1 not verified');
+    expect(container.textContent).not.toBe('Ready');
   });
 });

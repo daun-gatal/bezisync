@@ -1,9 +1,7 @@
 package engine
 
 import (
-	"fmt"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,45 +13,34 @@ import (
 // those keys are not in the catalogue and can never be chosen. Every key here is safe to change
 // on a deployed pipeline: none changes what a saved position holds.
 
-// FlinkSetting is one key of the catalogue.
-type FlinkSetting struct {
-	Key   string `json:"key"`
-	Title string `json:"title"`
-	// Type is "duration" (a number with ms, s or min), "int", "fraction" (0 to 1) or "enum".
-	Type    string   `json:"type"`
-	Default string   `json:"default"`
-	Choices []string `json:"choices,omitempty"`
-	// Min and Max bound durations (as Go durations) and numbers.
-	Min string `json:"min,omitempty"`
-	Max string `json:"max,omitempty"`
-	Why string `json:"why"`
-}
+// FlinkSetting is one key of the Flink settings catalogue (a Setting of the registry).
+type FlinkSetting = Setting
 
 // FlinkSettings is the catalogue, in the order the UI lists it.
 var FlinkSettings = []FlinkSetting{
-	{Key: "execution.checkpointing.timeout", Title: "Save timeout", Type: "duration", Default: "10 min", Min: "1m", Max: "1h",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "execution.checkpointing.timeout", Title: "Save timeout", Type: "duration", Default: "10 min", Min: "1m", Max: "1h",
 		Why: "How long saving the position may take before that attempt is abandoned."},
-	{Key: "execution.checkpointing.tolerable-failed-checkpoints", Title: "Failed saves tolerated", Type: "int", Default: "3", Min: "0", Max: "100",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "execution.checkpointing.tolerable-failed-checkpoints", Title: "Failed saves tolerated", Type: "int", Default: "3", Min: "0", Max: "100",
 		Why: "How many saves in a row may fail before the job restarts."},
-	{Key: "execution.checkpointing.min-pause", Title: "Pause between saves", Type: "duration", Default: "0 ms", Min: "0s", Max: "10m",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "execution.checkpointing.min-pause", Title: "Pause between saves", Type: "duration", Default: "0 ms", Min: "0s", Max: "10m",
 		Why: "The least time between two saves, so a slow destination still gets time to write."},
-	{Key: "restart-strategy.type", Title: "Restart strategy", Type: "enum", Default: "exponential-delay",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "restart-strategy.type", Title: "Restart strategy", Type: "enum", Default: "exponential-delay",
 		Choices: []string{"exponential-delay", "fixed-delay", "failure-rate"}, Why: "How the job restarts after a failure."},
-	{Key: "restart-strategy.exponential-delay.initial-backoff", Title: "First restart delay", Type: "duration", Default: "1 s", Min: "1s", Max: "10m",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "restart-strategy.exponential-delay.initial-backoff", Title: "First restart delay", Type: "duration", Default: "1 s", Min: "1s", Max: "10m",
 		Why: "Exponential delay: the wait before the first restart."},
-	{Key: "restart-strategy.exponential-delay.max-backoff", Title: "Longest restart delay", Type: "duration", Default: "1 min", Min: "10s", Max: "1h",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "restart-strategy.exponential-delay.max-backoff", Title: "Longest restart delay", Type: "duration", Default: "1 min", Min: "10s", Max: "1h",
 		Why: "Exponential delay: the longest wait between restarts."},
-	{Key: "restart-strategy.fixed-delay.attempts", Title: "Restart attempts", Type: "int", Default: "1", Min: "1", Max: "1000",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "restart-strategy.fixed-delay.attempts", Title: "Restart attempts", Type: "int", Default: "1", Min: "1", Max: "1000",
 		Why: "Fixed delay: restarts before the job fails for good."},
-	{Key: "restart-strategy.fixed-delay.delay", Title: "Restart delay", Type: "duration", Default: "1 s", Min: "1s", Max: "1h",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "restart-strategy.fixed-delay.delay", Title: "Restart delay", Type: "duration", Default: "1 s", Min: "1s", Max: "1h",
 		Why: "Fixed delay: the wait between restarts."},
-	{Key: "taskmanager.memory.managed.fraction", Title: "Managed memory", Type: "fraction", Default: "0.05", Min: "0", Max: "0.9",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "taskmanager.memory.managed.fraction", Title: "Managed memory", Type: "fraction", Default: "0.05", Min: "0", Max: "0.9",
 		Why: "The share of TaskManager memory Flink keeps off the heap for RocksDB and batch work. A pipeline keeps its state on the heap, so little is needed."},
-	{Key: "taskmanager.memory.network.fraction", Title: "Network memory", Type: "fraction", Default: "0.1", Min: "0.05", Max: "0.5",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "taskmanager.memory.network.fraction", Title: "Network memory", Type: "fraction", Default: "0.1", Min: "0.05", Max: "0.5",
 		Why: "The share of TaskManager memory for buffers between operators."},
-	{Key: "pekko.ask.timeout", Title: "Internal call timeout", Type: "duration", Default: "10 s", Min: "10s", Max: "10m",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "pekko.ask.timeout", Title: "Internal call timeout", Type: "duration", Default: "10 s", Min: "10s", Max: "10m",
 		Why: "How long the JobManager and TaskManagers wait for each other's answers."},
-	{Key: "heartbeat.timeout", Title: "Heartbeat timeout", Type: "duration", Default: "50 s", Min: "10s", Max: "10m",
+	{Engine: FlinkCDC, Scope: ScopeEngine, Stage: StageEngine, Impact: ImpactRestart, Key: "heartbeat.timeout", Title: "Heartbeat timeout", Type: "duration", Default: "50 s", Min: "10s", Max: "10m",
 		Why: "How long without a heartbeat before a TaskManager counts as lost."},
 }
 
@@ -87,41 +74,11 @@ func FlinkSettingOf(key string) *FlinkSetting {
 
 // CheckFlinkSetting checks one value against its catalogue entry ("" when valid).
 func CheckFlinkSetting(key, value string) string {
-	s := FlinkSettingOf(key)
-	if s == nil {
+	set := FlinkSettingOf(key)
+	if set == nil {
 		return "is not a Flink setting BeziSync lets pipelines change"
 	}
-	switch s.Type {
-	case "duration":
-		d, ok := ParseFlinkDuration(value)
-		if !ok {
-			return "must be a duration such as 30 s, 5 min or 500 ms"
-		}
-		lo, _ := time.ParseDuration(s.Min)
-		hi, _ := time.ParseDuration(s.Max)
-		if d < lo || d > hi {
-			return fmt.Sprintf("must be between %s and %s", s.Min, s.Max)
-		}
-	case "int":
-		n, err := strconv.Atoi(value)
-		lo, _ := strconv.Atoi(s.Min)
-		hi, _ := strconv.Atoi(s.Max)
-		if err != nil || n < lo || n > hi {
-			return fmt.Sprintf("must be a whole number from %s to %s", s.Min, s.Max)
-		}
-	case "fraction":
-		f, err := strconv.ParseFloat(value, 64)
-		lo, _ := strconv.ParseFloat(s.Min, 64)
-		hi, _ := strconv.ParseFloat(s.Max, 64)
-		if err != nil || f < lo || f > hi || strings.ContainsAny(value, "eE") {
-			return fmt.Sprintf("must be a number from %s to %s", s.Min, s.Max)
-		}
-	case "enum":
-		if !slices.Contains(s.Choices, value) {
-			return "must be one of " + strings.Join(s.Choices, ", ")
-		}
-	}
-	return ""
+	return CheckSetting(*set, value)
 }
 
 // CheckFlinkSettings checks a pipeline's Flink settings: key → problem, empty when all are valid.
@@ -151,6 +108,19 @@ type FlinkSize struct {
 	JobManagerCPU, JobManagerMemory   string
 	TaskManagers                      int
 	TaskManagerCPU, TaskManagerMemory string
+	// Slots per TaskManager and Readers (the parallelism) of a custom cluster; 0 for the presets
+	// (FlinkSlots, and TaskManagers × slots). Omitted when 0: the config hash of the presets must
+	// not change.
+	Slots   int `json:",omitempty"`
+	Readers int `json:",omitempty"`
+}
+
+// SlotsPerTaskManager is how many slots each TaskManager has.
+func (s FlinkSize) SlotsPerTaskManager() int {
+	if s.Slots > 0 {
+		return s.Slots
+	}
+	return FlinkSlots
 }
 
 // FlinkSlots is the task slots of each TaskManager.
@@ -158,13 +128,18 @@ const FlinkSlots = 2
 
 // FlinkSizes are the presets, by the spec's policies.resources.
 var FlinkSizes = map[string]FlinkSize{
-	"small":  {"500m", "1Gi", 1, "1", "2Gi"},
-	"medium": {"500m", "1Gi", 2, "1", "2Gi"},
-	"large":  {"1", "1536Mi", 4, "1", "2Gi"},
+	"small":  {JobManagerCPU: "500m", JobManagerMemory: "1Gi", TaskManagers: 1, TaskManagerCPU: "1", TaskManagerMemory: "2Gi"},
+	"medium": {JobManagerCPU: "500m", JobManagerMemory: "1Gi", TaskManagers: 2, TaskManagerCPU: "1", TaskManagerMemory: "2Gi"},
+	"large":  {JobManagerCPU: "1", JobManagerMemory: "1536Mi", TaskManagers: 4, TaskManagerCPU: "1", TaskManagerMemory: "2Gi"},
 }
 
 // Parallelism is how many readers and writers the size runs.
-func (s FlinkSize) Parallelism() int { return s.TaskManagers * FlinkSlots }
+func (s FlinkSize) Parallelism() int {
+	if s.Readers > 0 {
+		return s.Readers
+	}
+	return s.TaskManagers * FlinkSlots
+}
 
 // TotalMemoryMiB is what the whole cluster asks for.
 func (s FlinkSize) TotalMemoryMiB() int {

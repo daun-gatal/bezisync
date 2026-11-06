@@ -361,6 +361,8 @@ type PipelineFacts struct {
 	Options map[string]any
 	// FlinkCDC: the pipeline runs on Flink CDC (Debezium's sizes, keys and partitioning don't apply).
 	FlinkCDC bool
+	// SourceType is the source connector's type (how column types read).
+	SourceType string
 }
 
 // PipelineChecker is implemented by sinks with checks that depend on the pipeline (its tables,

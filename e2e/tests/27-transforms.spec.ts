@@ -319,3 +319,119 @@ test('a long list of steps scrolls inside the Transforms card, level with the ca
   await expect.poll(() => scroller.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
   await api.send('DELETE', url);
 });
+
+test('an editor keeps deleted rows and cuts long text; the preview shows both', async ({ page }) => {
+  test.setTimeout(180_000);
+  const api = await Api.signIn();
+  const tag = unique('tfcut');
+  const { project, base, rt, source, sink } = await setup(api, tag);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: source.id, sink_id: sink.id, runtime_id: rt.id, spec: { source: { tables: { include: ['shop.orders'] } } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+  await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Keep deleted rows/ }).click();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Cut long text/ }).click();
+  const cut = page.getByRole('region', { name: /Cut long text/ });
+  await cut.getByRole('button', { name: 'Add a column' }).click();
+  await choose(cut.getByLabel(/^Column 1:/), 'shop.orders.status');
+  await cut.getByLabel('Column 1 length').fill('3');
+  await cut.getByRole('button', { name: 'Done' }).click();
+  // A delete in the preview keeps the row, marked.
+  const preview = page.getByLabel('Preview event');
+  await page.getByRole('radio', { name: 'Delete' }).click();
+  await expect(preview).toContainText('"__deleted": "true"', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  const saved = await api.get<{ spec: { transforms: { type: string; columns?: unknown[] }[] } }>(url);
+  expect(saved.spec.transforms.map((t) => t.type)).toEqual(expect.arrayContaining(['soft_delete', 'truncate']));
+  expect(saved.spec.transforms.find((t) => t.type === 'truncate')?.columns).toEqual([{ table: 'shop.orders', column: 'status', length: 3 }]);
+  await api.send('DELETE', url);
+});
+
+test('an editor routes tables to one destination; preflight refuses unlike tables, and Debezium delivers to the route', async ({ page }) => {
+  test.setTimeout(600_000);
+  const api = await Api.signIn();
+  const tag = unique('tfroute');
+  const { project, base, rt, source, sink } = await setup(api, tag);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: source.id, sink_id: sink.id, runtime_id: rt.id,
+    spec: { source: { tables: { include: ['shop.orders', 'shop.order_items', 'shop.customers'] } } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  type Pre = { sections: { report: { checks: { code: string; status: string; blocking?: boolean }[] } }[] };
+  const check = (pre: Pre, code: string) => pre.sections.flatMap((s) => s.report.checks).find((c) => c.code === code);
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+  await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Send tables elsewhere/ }).click();
+  const step = page.getByRole('region', { name: /Send tables elsewhere/ });
+  const where = step.getByRole('table', { name: 'Where tables go' });
+  await expect(where.getByRole('row', { name: /shop\.customers/ })).toContainText('its own topic');
+  // A pattern: the step says what it matches and where each table lands, live.
+  await step.getByLabel('Route 1 tables').fill('shop.order*');
+  await step.getByLabel('Route 1 destination').fill(`all-orders-${tag}`);
+  await expect(step.getByText('Matches 2 captured tables.')).toBeVisible();
+  await expect(where.getByRole('row', { name: /shop\.order_items/ })).toContainText(`all-orders-${tag}`);
+  await expect(where.getByRole('row', { name: /shop\.customers/ })).toContainText('its own topic');
+  // A table two routes match is refused before saving.
+  await step.getByRole('button', { name: 'Add a route' }).click();
+  await step.getByLabel('Route 2 tables').fill('shop.orders');
+  await step.getByLabel('Route 2 destination').fill('other');
+  await expect(page.getByText(/shop\.orders matches more than one route/)).toBeVisible();
+  await step.getByRole('button', { name: 'Remove route 2' }).click();
+  await step.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  const saved = await api.get<{ spec: { transforms: { type: string; routes?: unknown[] }[] } }>(url);
+  expect(saved.spec.transforms.find((t) => t.type === 'route')?.routes).toEqual([{ match: 'shop.order*', to: `all-orders-${tag}` }]);
+
+  // Orders and their items differ in shape: one destination can't hold both.
+  const merged = await api.send<Pre>('POST', `${url}/preflight`, {});
+  expect(check(merged, 'transform_route_merge')).toMatchObject({ status: 'fail', blocking: true });
+
+  // Route orders alone (and a pattern that matches nothing, a warning) and deploy.
+  const transforms = saved.spec.transforms.map((t) =>
+    t.type === 'route' ? { ...t, routes: [{ match: 'shop.orders', to: `orders-${tag}` }, { match: 'shop.nothing_*', to: 'nowhere' }] } : t);
+  const cur = await api.get<{ version: number; spec: Record<string, unknown> }>(url);
+  await api.patch(url, { spec: { ...cur.spec, transforms } }, cur.version);
+  const ok = await api.send<Pre>('POST', `${url}/preflight`, {});
+  expect(check(ok, 'transform_route_merge')).toBeUndefined();
+  expect(check(ok, 'transform_route_idle')?.status).toBe('warn');
+  await api.send('POST', `${url}/deploy`, {});
+  await streaming(api, url);
+  await sql(`INSERT INTO shop.orders (customer_id, status, total) VALUES (5, $1, 3.00)`, [`ROUTE-${tag}`]);
+  const events = await waitFor('routed row delivered', async () => {
+    const r = await api.get<Events & { destination?: string }>(`${url}/events?table=shop.orders&limit=500`);
+    return r.records.some((x) => x.value?.status === `ROUTE-${tag}`) ? r : undefined;
+  }, 180_000);
+  expect(events.destination).toBe(`orders-${tag}`);
+  await api.send('DELETE', url);
+});
+
+test('a computed column is offered only on Flink CDC, and says why on Debezium (T16)', async ({ page }) => {
+  const api = await Api.signIn();
+  const tag = unique('tfcc');
+  const { project, base, rt, source, sink } = await setup(api, tag);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: source.id, sink_id: sink.id, runtime_id: rt.id, spec: { source: { tables: { include: ['shop.orders'] } } },
+  }, 201);
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  const card = page.getByRole('button', { name: /^Computed column/ });
+  await expect(card).toBeDisabled();
+  await expect(page.getByText(/Runs only on Flink CDC/)).toBeVisible();
+  // Sent anyway, the deploy is refused before anything runs.
+  const url = `${base}/pipelines/${p.id}`;
+  const cur = await api.get<{ version: number; spec: Record<string, unknown> }>(url);
+  await api.patch(url, { spec: { ...cur.spec, transforms: [{ type: 'computed', id: 'cc01', table: 'shop.orders', name: 'x', function: 'upper', args: [{ column: 'status' }] }] } }, cur.version);
+  const pre = await api.send<{ sections: { report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
+  expect(pre.sections.flatMap((s) => s.report.checks).some((c) => c.status === 'fail' && c.message.includes('runs only on Flink CDC'))).toBe(true);
+  await api.send('DELETE', url);
+});

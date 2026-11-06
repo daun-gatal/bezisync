@@ -34,7 +34,19 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		switch {
 		case t.Type == "unwrap":
 			// The event shape: Flink CDC always writes rows.
-		case t.Type == "rename" || t.Type == "add_field" || (t.Type == "filter" && t.Typed()):
+		case t.Type == "soft_delete":
+			// A delete becomes a row marked with its change type (T4).
+			field := domain.SoftDeleteField["flink-cdc"]
+			for _, table := range spec.Source.Tables.Include {
+				if slices.Contains(columns[table], field) {
+					return nil, problem.New(422, "transform_field_conflict", fmt.Sprintf("Step %d: %s already has a column %s, which the soft delete would overwrite (field name duplication).", i+1, table, field))
+				}
+			}
+			if sink.Converter == "" {
+				sink.Converter = "SOFT_DELETE"
+				sink.Projection = append(sink.Projection, "__data_event_type__ AS `"+field+"`")
+			}
+		case t.Type == "rename" || t.Type == "add_field" || t.Type == "truncate" || t.Type == "route" || t.Type == "computed" || (t.Type == "filter" && t.Typed()):
 		case t.Type == "filter":
 			return nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Step %d: a filter written as a script runs only on Debezium; build it from rules.", i+1))
 		default:
@@ -45,7 +57,8 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 	for _, table := range spec.Source.Tables.Include {
 		rules := spec.Source.Columns[table]
 		renames := map[string]string{}
-		var added []string
+		cut := map[string]int{}
+		var added, addedNames []string
 		var filters []string
 		for _, t := range spec.Transforms {
 			if t.Tables != nil && !slices.Contains(t.Tables, table) {
@@ -56,7 +69,23 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				for _, r := range t.Renames {
 					renames[r.From] = r.To
 				}
+			case "truncate":
+				for _, c := range t.Truncate {
+					if c.Table == table {
+						cut[c.Column] = c.Length
+					}
+				}
+			case "computed":
+				if t.Table != table {
+					continue
+				}
+				if slices.Contains(columns[table], t.Name) && !slices.Contains(rules.Exclude, t.Name) {
+					return nil, problem.New(422, "transform_field_conflict", fmt.Sprintf("%s already has a column %s: name the computed column differently.", table, t.Name))
+				}
+				added = append(added, computedSQL(t)+" AS "+sqlIdent(t.Name))
+				addedNames = append(addedNames, t.Name)
 			case "add_field":
+				addedNames = append(addedNames, t.Name)
 				value := t.Value.Text
 				if t.Value.Kind == "pipeline" {
 					value = c.Name
@@ -72,9 +101,14 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				}
 			}
 		}
+		for i, n := range addedNames {
+			if slices.Contains(addedNames[:i], n) {
+				return nil, problem.New(422, "transform_field_conflict", fmt.Sprintf("%s would get two columns called %s.", table, n))
+			}
+		}
 		// Column by column when anything must be left out or renamed; "*" otherwise, so new
 		// columns reach the destination.
-		explicit := newColumns == "hold" || len(rules.Exclude) > 0 || len(renames) > 0
+		explicit := newColumns == "hold" || len(rules.Exclude) > 0 || len(renames) > 0 || len(cut) > 0
 		var projection []string
 		if explicit {
 			cols, ok := columns[table]
@@ -96,6 +130,8 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 					name = to
 				}
 				switch {
+				case cut[col] > 0:
+					projection = append(projection, fmt.Sprintf("SUBSTR(%s, 1, %d) AS %s", sqlIdent(col), cut[col], sqlIdent(name)))
 				case sink.NoDefaults && slices.Contains(defaults[table], col):
 					// An expression carries no default (a plain or renamed column keeps the source's).
 					projection = append(projection, "CASE WHEN TRUE THEN "+sqlIdent(col)+" END AS "+sqlIdent(name))
@@ -136,6 +172,46 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		out = append(out, rule)
 	}
 	return out, nil
+}
+
+// computedSQL is a computed step's expression: columns back-quoted, literals quoted, numbers
+// as decoded (domain.ComputedFunctions); casts to a number are TRY_CAST.
+func computedSQL(t domain.Transform) string {
+	arg := func(a domain.ComputedArg) string {
+		switch {
+		case a.Column != "":
+			return sqlIdent(a.Column)
+		case a.Text != nil:
+			return sqlString(*a.Text)
+		case a.Number != nil:
+			return fmt.Sprint(*a.Number)
+		}
+		return "NULL"
+	}
+	args := make([]string, len(t.Args))
+	for i, a := range t.Args {
+		args[i] = arg(a)
+		if t.Function == "concat" && a.Column != "" {
+			args[i] = "CAST(" + args[i] + " AS STRING)"
+		}
+	}
+	switch t.Function {
+	case "upper", "lower", "trim":
+		return strings.ToUpper(t.Function) + "(" + args[0] + ")"
+	case "length":
+		return "CHAR_LENGTH(" + args[0] + ")"
+	case "concat":
+		return "CONCAT(" + strings.Join(args, ", ") + ")"
+	case "substr":
+		return "SUBSTR(" + strings.Join(args, ", ") + ")"
+	case "date_format":
+		return "DATE_FORMAT(" + args[0] + ", " + args[1] + ")"
+	case "to_text":
+		return "CAST(" + args[0] + " AS STRING)"
+	case "to_integer":
+		return "TRY_CAST(" + args[0] + " AS BIGINT)"
+	}
+	return "NULL"
 }
 
 func maskedColumns(spec domain.PipelineSpec) []string {
