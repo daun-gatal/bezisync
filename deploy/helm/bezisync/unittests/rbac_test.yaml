@@ -8,3 +8,9 @@ tests:
       - contains:
           path: rules
           content: { apiGroups: [""], resources: [configmaps, secrets, services], verbs: [get, list, create, update, patch, delete] }
+  - it: may read ResourceQuotas in the connector namespace (preflight's quota check)
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - contains:
+          path: rules
+          content: { apiGroups: [""], resources: [resourcequotas], verbs: [get, list] }

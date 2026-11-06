@@ -24,6 +24,9 @@ rules:
     resources: [pods, pods/log]
     verbs: [get, list, watch]
   - apiGroups: [""]
+    resources: [resourcequotas]
+    verbs: [get, list]
+  - apiGroups: [""]
     resources: [pods/proxy]
     verbs: [get]
 ---

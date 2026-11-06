@@ -275,7 +275,7 @@ func TestFlinkPreflight(t *testing.T) {
 		t.Fatal(c)
 	}
 	// The capacity check counts the whole cluster.
-	if c := checkOf(t, pre, "runtime_capacity"); c == nil || !strings.Contains(at(t, c, "message").(string), "a JobManager and 1 TaskManager, 3072 MiB in all") {
+	if c := checkOf(t, pre, "runtime_capacity"); c == nil || !strings.Contains(at(t, c, "message").(string), "this pipeline asks for 1.5 CPU and 3072 MiB (a JobManager and 1 TaskManager)") {
 		t.Fatal(c)
 	}
 }

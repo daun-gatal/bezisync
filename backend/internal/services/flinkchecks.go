@@ -266,7 +266,14 @@ func flinkClusterFitCheck(spec domain.PipelineSpec, packed engine.Packed, capaci
 
 // FlinkCapacityCheck is the runtime capacity check for a Flink CDC cluster's size.
 func FlinkCapacityCheck(capacity map[string]any, size engine.FlinkSize) *checks.Check {
-	need := runtime.QuantityCPU(size.JobManagerCPU) + float64(size.TaskManagers)*runtime.QuantityCPU(size.TaskManagerCPU)
-	return capacityCheck(capacity, need, fmt.Sprintf(" (a JobManager and %d TaskManager%s, %d MiB in all)", size.TaskManagers,
-		plural(size.TaskManagers, "", "s"), size.TotalMemoryMiB()))
+	return capacityCheck(capacity, FlinkNeed(size), Need{}, flinkWhat(size))
+}
+
+// FlinkNeed is what a Flink CDC cluster asks for in all.
+func FlinkNeed(size engine.FlinkSize) Need {
+	return Need{CPU: runtime.QuantityCPU(size.JobManagerCPU) + float64(size.TaskManagers)*runtime.QuantityCPU(size.TaskManagerCPU), MiB: size.TotalMemoryMiB()}
+}
+
+func flinkWhat(size engine.FlinkSize) string {
+	return fmt.Sprintf(" (a JobManager and %d TaskManager%s)", size.TaskManagers, plural(size.TaskManagers, "", "s"))
 }

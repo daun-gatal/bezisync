@@ -266,7 +266,11 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   fails on an update without the old row), `flink_server_ids` (MySQL: no other pipeline on the source
   uses the block), `flink_agent_version`, `flink_kubernetes_services` (direct runtimes run `Test`;
   agents send `local_test.flink_cdc`), and `runtime_capacity` counts the whole cluster
-  (`FlinkCapacityCheck`). The helper's `config_error` phase (an image without a connector or driver)
+  (`FlinkNeed`). Preflight uses the capacity the runtime test just returned (`useFreshCapacity`
+  sets it on the runtime and stores it for direct runtimes, so the deploy packs with the same
+  numbers); `capacityCheck` is Unknown without one, blocks over the namespace quota the Kubernetes
+  driver reports (`quota`, `quota_cpu_free`, `quota_memory_free`; the Role reads ResourceQuotas) and
+  compares what a redeploy adds (`runningNeed`). The helper's `config_error` phase (an image without a connector or driver)
   is reported with the helper's own fix.
 - Flink-only destinations (`engine.FlinkOnlySink`: StarRocks, Doris, Fluss) carry `engines:
   ["flink-cdc"]` in their descriptor; `connector-types` adds `available`/`unavailable_reason` and

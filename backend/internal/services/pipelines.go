@@ -854,35 +854,94 @@ func toFloat(v any) float64 {
 
 // CapacityCheck warns when a runtime has no room for the pipeline's size.
 func CapacityCheck(capacity map[string]any, policies domain.Policies) *checks.Check {
-	return capacityCheck(capacity, cpuOf(compiler.ResourceFor(policies).CPU), "")
+	return capacityCheck(capacity, DebeziumNeed(policies), Need{}, "")
 }
 
-func capacityCheck(capacity map[string]any, need float64, what string) *checks.Check {
+// Need is what a pipeline asks the runtime for: CPUs and MiB.
+type Need struct {
+	CPU float64
+	MiB int
+}
+
+// DebeziumNeed is what a Debezium pipeline's container asks for.
+func DebeziumNeed(policies domain.Policies) Need {
+	r := compiler.ResourceFor(policies)
+	return Need{CPU: cpuOf(r.CPU), MiB: int(runtime.QuantityMem(r.Memory) >> 20)}
+}
+
+// capacityCheck compares what a pipeline asks for (beyond what it already runs, when it is
+// redeployed) with the runtime's capacity as just measured. Unknown, never a pass, without a
+// measurement. Over the namespace's ResourceQuota blocks: Kubernetes would refuse the pods. Over
+// the free CPU or memory warns: the pods may wait for room.
+func capacityCheck(capacity map[string]any, need, running Need, what string) *checks.Check {
+	title := "Runtime capacity"
 	if len(capacity) == 0 || toFloat(capacity["cpu_allocatable"]) == 0 {
-		return nil
+		return &checks.Check{Code: "runtime_capacity", Title: title, Category: checks.CatCapacity, Status: checks.Unknown,
+			Message: "The runtime didn't report its free CPU and memory just now, so BeziSync can't tell whether this pipeline fits."}
 	}
-	free := toFloat(capacity["cpu_allocatable"]) - toFloat(capacity["cpu_requested"])
-	needS := strconv.FormatFloat(need, 'g', -1, 64)
-	if free < need {
-		return &checks.Check{Code: "runtime_capacity", Title: "Runtime capacity", Category: checks.CatCapacity, Status: checks.Warn,
-			Message: fmt.Sprintf("The runtime has %s free CPU; this pipeline asks for %s%s.", domain.FormatFixed(max(free, 0), 1), needS, what),
+	extra := Need{CPU: max(need.CPU-running.CPU, 0), MiB: max(need.MiB-running.MiB, 0)}
+	asks := fmt.Sprintf("this pipeline asks for %s CPU and %d MiB%s", strconv.FormatFloat(need.CPU, 'g', -1, 64), need.MiB, what)
+	if running != (Need{}) {
+		asks += fmt.Sprintf(", %s CPU and %d MiB more than it runs now", strconv.FormatFloat(extra.CPU, 'g', -1, 64), extra.MiB)
+	}
+	if q, _ := capacity["quota"].(bool); q {
+		cpuFree, hasCPU := capacity["quota_cpu_free"]
+		memFree, hasMem := capacity["quota_memory_free"]
+		freeMiB := int(toFloat(memFree) / (1 << 20))
+		if (hasCPU && extra.CPU > toFloat(cpuFree)+1e-9) || (hasMem && extra.MiB > freeMiB) {
+			left := []string{}
+			if hasCPU {
+				left = append(left, domain.FormatFixed(toFloat(cpuFree), 2)+" CPU")
+			}
+			if hasMem {
+				left = append(left, strconv.Itoa(freeMiB)+" MiB")
+			}
+			return &checks.Check{Code: "runtime_capacity", Title: title, Category: checks.CatCapacity, Status: checks.Fail, Blocking: true,
+				Message: fmt.Sprintf("The namespace's ResourceQuota leaves %s; %s. Kubernetes would refuse its pods.", strings.Join(left, " and "), asks),
+				Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota."}}
+		}
+	}
+	freeCPU := toFloat(capacity["cpu_allocatable"]) - toFloat(capacity["cpu_requested"])
+	freeMiB := -1
+	if m := toFloat(capacity["memory_allocatable"]); m > 0 {
+		freeMiB = max(int((m-toFloat(capacity["memory_requested"]))/(1<<20)), 0)
+	}
+	free := domain.FormatFixed(max(freeCPU, 0), 1) + " CPU"
+	if freeMiB >= 0 {
+		free += fmt.Sprintf(" and %d MiB", freeMiB)
+	}
+	if freeCPU < extra.CPU || (freeMiB >= 0 && freeMiB < extra.MiB) {
+		return &checks.Check{Code: "runtime_capacity", Title: title, Category: checks.CatCapacity, Status: checks.Warn,
+			Message: fmt.Sprintf("The runtime has %s free; %s.", free, asks),
 			Why:     "The connector may stay pending until resources free up."}
 	}
-	return &checks.Check{Code: "runtime_capacity", Title: "Runtime capacity", Category: checks.CatCapacity, Status: checks.Pass,
-		Message: fmt.Sprintf("%s CPU free; this pipeline needs %s%s.", domain.FormatFixed(free, 1), needS, what)}
+	msg := fmt.Sprintf("%s free; %s.", free, asks)
+	switch q, known := capacity["quota"].(bool); {
+	case known && !q:
+		msg += " The namespace has no ResourceQuota."
+	case known:
+		msg += " Within the namespace's ResourceQuota."
+	}
+	return &checks.Check{Code: "runtime_capacity", Title: title, Category: checks.CatCapacity, Status: checks.Pass, Message: msg}
 }
 
-func runtimeReport(ctx context.Context, q db.Querier, rt *models.Runtime) checks.Report {
+// runtimeReport tests the runtime, and returns the capacity it reported just now (nil when the
+// test failed or reported none).
+func runtimeReport(ctx context.Context, q db.Querier, rt *models.Runtime) (checks.Report, map[string]any) {
 	started := time.Now()
 	if !rt.Enabled {
 		return checks.Summarize([]checks.Check{{Code: "runtime_disabled", Title: "Runtime " + rt.Name, Category: checks.CatDestination,
 			Status: checks.Fail, Blocking: true, Message: fmt.Sprintf("Runtime %s is disabled, so nothing can be deployed on it.", rt.Name),
-			Why: "An admin disabled (cordoned) this runtime. Pipelines already running there keep running."}}, started)
+			Why: "An admin disabled (cordoned) this runtime. Pipelines already running there keep running."}}, started), nil
 	}
 	var c checks.Check
+	var fresh map[string]any
 	d, err := DriverFor(ctx, q, rt)
 	if err == nil {
 		res := d.Test(ctx)
+		if res.OK && toFloat(res.Details["cpu_allocatable"]) > 0 {
+			fresh = res.Details
+		}
 		status := checks.Fail
 		if res.OK {
 			status = checks.Pass
@@ -891,7 +950,36 @@ func runtimeReport(ctx context.Context, q db.Querier, rt *models.Runtime) checks
 	} else {
 		c = checks.Check{Code: "runtime_ready", Title: "Runtime " + rt.Name, Category: checks.CatDestination, Status: checks.Fail, Blocking: true, Message: err.Error()}
 	}
-	return checks.Summarize([]checks.Check{c}, started)
+	return checks.Summarize([]checks.Check{c}, started), fresh
+}
+
+// useFreshCapacity makes rt's capacity the one measured just now (none when it couldn't be): the
+// checks, the Flink CDC shape and the compile then all see the same numbers. A direct runtime's
+// is stored too (an agent stores its own with each report), so the deploy that follows packs
+// with it.
+func useFreshCapacity(ctx context.Context, q db.Querier, rt *models.Runtime, fresh map[string]any) error {
+	rt.Capacity = fresh
+	if fresh == nil || rt.Mode == "agent" {
+		return nil
+	}
+	_, err := q.Exec(ctx, `UPDATE runtimes SET capacity = $1 WHERE id = $2`, db.Map(fresh), rt.ID)
+	return err
+}
+
+// runningNeed is what p runs on rt now (nothing when it isn't running there): a redeploy needs
+// only what it adds.
+func runningNeed(ctx context.Context, q db.Querier, p *models.Pipeline, rt *models.Runtime) (Need, error) {
+	if p.DeployedVersionID == nil || p.DesiredState != "running" || p.RuntimeID == nil || *p.RuntimeID != rt.ID {
+		return Need{}, nil
+	}
+	deployed, err := SpecOf(ctx, q, p.DeployedVersionID)
+	if err != nil {
+		return Need{}, err
+	}
+	if EngineOf(p) == engine.FlinkCDC {
+		return FlinkNeed(FlinkSizeOf(p, *deployed, rt.Capacity).Size), nil
+	}
+	return DebeziumNeed(deployed.Policies), nil
 }
 
 // checkWhere runs a connection check where the connector will run.
@@ -966,8 +1054,12 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	wg.Add(3)
 	go func() { defer wg.Done(); srcReport, srcAgent, srcErr = checkWhere(ctx, rt, source, "source", tables) }()
 	go func() { defer wg.Done(); sinkReport, sinkAgent, sinkErr = checkWhere(ctx, rt, sink, "sink", nil) }()
-	go func() { defer wg.Done(); rtReport = runtimeReport(ctx, db.MustPool(ctx), rt) }()
+	var freshCapacity map[string]any
+	go func() { defer wg.Done(); rtReport, freshCapacity = runtimeReport(ctx, db.MustPool(ctx), rt) }()
 	wg.Wait()
+	if err := useFreshCapacity(ctx, q, rt, freshCapacity); err != nil {
+		return nil, err
+	}
 	if srcErr != nil {
 		return nil, srcErr
 	}
@@ -985,11 +1077,15 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		{Key: "sink", Title: "Destination · " + sinkConn.Name + agentNote(sinkAgent), Report: sinkReport},
 		{Key: "runtime", Title: "Runtime · " + rt.Name, Report: rtReport},
 	}
-	capacity := CapacityCheck(rt.Capacity, spec.Policies)
+	running, err := runningNeed(ctx, q, p, rt)
+	if err != nil {
+		return nil, err
+	}
+	capacity := capacityCheck(rt.Capacity, DebeziumNeed(spec.Policies), running, "")
 	var fit *checks.Check
 	if EngineOf(p) == engine.FlinkCDC {
 		packed := FlinkSizeOf(p, spec, rt.Capacity)
-		capacity = FlinkCapacityCheck(rt.Capacity, packed.Size)
+		capacity = capacityCheck(rt.Capacity, FlinkNeed(packed.Size), running, flinkWhat(packed.Size))
 		fit = flinkClusterFitCheck(spec, packed, rt.Capacity)
 	}
 	if c := capacity; c != nil {

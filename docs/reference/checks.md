@@ -2097,6 +2097,14 @@ In Tables, choose Mask or Remove for each listed column, or Keep as is when it m
 **Runtime capacity**
 
 - Why: The connector may stay pending until resources free up.
+- Why: Over the namespace's ResourceQuota, Kubernetes refuses the pods, so the deploy is blocked (even forced). A redeploy counts only what it adds to what the pipeline runs now.
+- Why: Measured when preflight runs; when the runtime doesn't report its CPU and memory, the check is unknown, never passed.
+
+Fix:
+
+```
+Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota.
+```
 
 <a id="runtime-disabled"></a>
 ### `runtime_disabled`

@@ -207,6 +207,12 @@ from 512 MiB to 16 GiB in 256 MiB steps (`policies: {resources: custom, custom_r
 "1.5", memory: 2Gi}}`). BeziSync works out the Java heap (70% of memory, leaving the JVM at least
 256 MiB) and takes the batch and queue sizes of the largest preset the memory reaches. A project's
 largest size limits a custom one by its CPU and memory, and a destination's smallest size too.
+Preflight measures the runtime when it runs (`runtime_capacity`): it warns when the CPU or memory
+free right now is short (the pods may wait for room), blocks — even forced — when the Kubernetes
+namespace's ResourceQuota leaves less than the pipeline asks for (Kubernetes would refuse its
+pods), and is *unknown*, never passed, when the runtime doesn't report its capacity. A redeploy
+counts only what it adds to what the pipeline runs now. Two deploys checked at the same moment can
+each fit alone; Kubernetes then refuses the pods of the second, and the pipeline shows why.
 
 **Engine settings** (Review, Expert mode) lists the typed settings BeziSync offers for the pipeline's
 engine, source and destination, grouped by when they matter (snapshot, streaming, delivery,
@@ -522,7 +528,9 @@ and needs no cloud IAM sign-in or kubeconfig in BeziSync.
   `gke-gcloud-auth-plugin` are not available in the image).
 
 The identity needs the Role from the agent chart in the connector namespace: Deployments,
-ConfigMaps, Secrets, Services (Flink CDC pipelines only), pods, logs and `pods/proxy`.
+ConfigMaps, Secrets, Services (Flink CDC pipelines only), pods, logs, `pods/proxy` and reading
+ResourceQuotas (so preflight can tell a deploy the namespace's quota would refuse; both charts grant
+it from 0.2.1).
 
 Around the cluster:
 

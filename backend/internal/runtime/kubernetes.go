@@ -584,9 +584,50 @@ func (k *KubernetesDriver) Capacity(ctx context.Context) map[string]any {
 			}
 		}
 	}
-	return map[string]any{"cpu_allocatable": allocCPU, "memory_allocatable": allocMem, "cpu_requested": reqCPU,
+	out := map[string]any{"cpu_allocatable": allocCPU, "memory_allocatable": allocMem, "cpu_requested": reqCPU,
 		"memory_requested": reqMem, "workloads": len(pods.Items), "architectures": Architectures(archs...),
 		"node_cpu_max": nodeCPU, "node_memory_max": nodeMem}
+	for k, v := range k.quota(ctx) {
+		out[k] = v
+	}
+	return out
+}
+
+// quota is the headroom the namespace's ResourceQuotas leave for requests and limits of CPU and
+// memory (the tightest quota of each), as quota_cpu_free (CPUs) and quota_memory_free (bytes);
+// quota: false when the namespace has none, nothing when they can't be read.
+func (k *KubernetesDriver) quota(ctx context.Context) map[string]any {
+	list, err := k.cs.CoreV1().ResourceQuotas(k.namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil
+	}
+	cpuFree, memFree := -1.0, int64(-1)
+	for _, rq := range list.Items {
+		for _, name := range []corev1.ResourceName{corev1.ResourceRequestsCPU, corev1.ResourceCPU, corev1.ResourceLimitsCPU} {
+			if hard, ok := rq.Status.Hard[name]; ok {
+				used := rq.Status.Used[name]
+				if free := QuantityCPU(hard.String()) - QuantityCPU(used.String()); cpuFree < 0 || free < cpuFree {
+					cpuFree = max(free, 0)
+				}
+			}
+		}
+		for _, name := range []corev1.ResourceName{corev1.ResourceRequestsMemory, corev1.ResourceMemory, corev1.ResourceLimitsMemory} {
+			if hard, ok := rq.Status.Hard[name]; ok {
+				used := rq.Status.Used[name]
+				if free := QuantityMem(hard.String()) - QuantityMem(used.String()); memFree < 0 || free < memFree {
+					memFree = max(free, 0)
+				}
+			}
+		}
+	}
+	out := map[string]any{"quota": cpuFree >= 0 || memFree >= 0}
+	if cpuFree >= 0 {
+		out["quota_cpu_free"] = cpuFree
+	}
+	if memFree >= 0 {
+		out["quota_memory_free"] = memFree
+	}
+	return out
 }
 
 // --- managed-cluster bearer tokens (GKE, EKS) ---

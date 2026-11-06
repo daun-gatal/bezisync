@@ -1851,13 +1851,17 @@
   },
   {
    "code": "runtime_capacity",
-   "fixes": [],
+   "fixes": [
+    "Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota."
+   ],
    "section": "Deploy",
    "titles": [
     "Runtime capacity"
    ],
    "whys": [
-    "The connector may stay pending until resources free up."
+    "The connector may stay pending until resources free up.",
+    "Over the namespace's ResourceQuota, Kubernetes refuses the pods, so the deploy is blocked (even forced). A redeploy counts only what it adds to what the pipeline runs now.",
+    "Measured when preflight runs; when the runtime doesn't report its CPU and memory, the check is unknown, never passed."
    ]
   },
   {

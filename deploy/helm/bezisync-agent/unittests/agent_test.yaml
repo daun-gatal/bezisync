@@ -38,3 +38,11 @@ tests:
       - contains:
           path: rules
           content: { apiGroups: [""], resources: [configmaps, secrets, services], verbs: [get, list, create, update, patch, delete] }
+  - it: may read ResourceQuotas (preflight's quota check)
+    template: templates/rbac.yaml
+    values: [../ci/default-values.yaml]
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - contains:
+          path: rules
+          content: { apiGroups: [""], resources: [resourcequotas], verbs: [get, list] }
