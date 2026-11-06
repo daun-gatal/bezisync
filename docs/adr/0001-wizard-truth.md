@@ -273,7 +273,7 @@ Callers get `ctx` from `useShapeCtx(pipeline)` (`transforms/Impact.tsx`): the de
 
 ### Implementation plan
 
-One branch from `preview`, `fix/wizard-truth`, and one PR with three commits in this order. The loop fix comes first because it stops the request loop. Each commit:
+One branch from `preview`, `fix/wizard-truth`, and one PR with four commits in this order (the fourth was found by a test of the third). The loop fix comes first because it stops the request loop. Each commit:
 - writes its tests first, failing before the change;
 - changes the code, its contracts and its docs together;
 - passes `make verify-quick` and its `make e2e-quick` specs;
@@ -445,9 +445,9 @@ The three changes to `27-transforms.spec.ts`:
 
 **Gate:** `make verify-quick`, then `make e2e-quick SPECS="tests/27-transforms.spec.ts tests/32-flink-cdc.spec.ts tests/04-pipeline-ui.spec.ts tests/33-engine-settings.spec.ts"`.
 
-#### Commit 3a, found by E22: a new keep-events filter saves
+#### Commit 4, found by E22: a new keep-events filter saves
 
-The Flink CDC test for journey 3 found that a newly added "Keep only some rows/events" filter could never be saved, on either engine. `defaultStep('filter')` set `match: 'all'` with no rules, which the decoder refuses ("match needs rules", `backend/internal/domain/transforms.go:334`; the server leaves `match` out when there are no rules, `:755-766`). The default filter now has no `match`, and removing a filter's last rule drops it. Files: `transforms/model.ts`, `transforms/editors.tsx`, a `model.test.ts` case, the `transforms/README.md` invariant and a changelog line. It lands before the Keep deleted rows commit, whose Flink test depends on it.
+The Flink CDC test for journey 3 found that a newly added "Keep only some rows/events" filter could never be saved, on either engine. `defaultStep('filter')` set `match: 'all'` with no rules, which the decoder refuses ("match needs rules", `backend/internal/domain/transforms.go:334`; the server leaves `match` out when there are no rules, `:755-766`). The default filter now has no `match`, and removing a filter's last rule drops it. Files: `transforms/model.ts`, `transforms/editors.tsx`, a `model.test.ts` case, the `transforms/README.md` invariant and a changelog line. It lands as its own commit after the Keep deleted rows commit, together with the Flink CDC test for journey 3 (E22, E31), which needs both.
 
 ### Verification plan
 
@@ -487,7 +487,7 @@ The Flink CDC test for journey 3 found that a newly added "Keep only some rows/e
 | E19 | Debezium envelope + Keep deleted rows | Row under Event shape; locked line; envelope button and menu disabled | 3 | `27` extended |
 | E20 | `unwrap(drop)` + Keep deleted rows | Select disabled "Set by Keep deleted rows"; stored `drop` kept | 3 | `27` extended, `model.test` |
 | E21 | Remove after E20 | Select enabled showing "Drop delete events" | 3 | `27` extended |
-| E22 | Flink: Keep deleted rows, then a filter | `[filter, soft_delete]` under Keep rows; saves | 3 | `model.test`, `32` (new draft-only test) |
+| E22 | Flink: Keep deleted rows, then a filter | `[filter, soft_delete]` under Keep rows; saves | 3 (order), 4 (saves) | `model.test`, `32` (new draft-only test, in commit 4) |
 | E23 | `[soft_delete, filter]` / `[rename, soft_delete]` | Client error, the same as the server | 3 | `model.test` |
 | E24 | `[soft_delete, rename]` saved through the API | No client error | 3 | `model.test` |
 | E25 | Saved `[soft_delete]` and two `soft_delete` steps | Drawn with Remove; zero `PATCH`; version, spec and compiled config equal | 3 | `27` "never re-saved" |
@@ -496,7 +496,7 @@ The Flink CDC test for journey 3 found that a newly added "Keep only some rows/e
 | E28 | JDBC `deletes: delete`, no `soft_delete` | ShapeEditor and summary say tombstone (destination) | 3 | `model.test` |
 | E29 | Adding Keep deleted rows to an envelope pipeline: deploy impact | "Events become the row…" and the soft-delete line; no "Deletes change" | 3 | `model.test` |
 | E30 | Overview of a `[soft_delete]` pipeline | Row + deletes kept | 3 | `overview.test` |
-| E31 | A new keep-events filter with no rules, either engine | Saves (no `match` until there are rules) | 3a | `model.test`, `32` (Keep rows test) |
+| E31 | A new keep-events filter with no rules, either engine | Saves (no `match` until there are rules) | 4 | `model.test`, `32` (Keep rows test) |
 
 ## Consequences
 

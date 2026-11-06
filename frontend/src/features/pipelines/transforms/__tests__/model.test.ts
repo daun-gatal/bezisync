@@ -364,3 +364,12 @@ describe('Keep deleted rows (soft_delete): the server\'s shape boundary, drawing
     expect(texts.filter((t) => t.startsWith('Deleted rows now stay') || t.startsWith('Deletes change'))).toHaveLength(1);
   });
 });
+
+describe('a new keep-events filter', () => {
+  it('has no match until it has rules (the server refuses match without rules)', () => {
+    const f = defaultStep('filter', []);
+    expect(f.match).toBeUndefined();
+    expect(f.operations?.length).toBeGreaterThan(0);
+    expect(stepErrors([f]).size).toBe(0);
+  });
+});

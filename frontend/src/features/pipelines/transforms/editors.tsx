@@ -469,7 +469,12 @@ export function FilterEditor({ step, ctx, onChange }: { step: TransformStep; ctx
                 step={step}
                 ctx={ctx}
                 onChange={(next) => onChange({ ...step, rules: rules.map((x, j) => (j === i ? next : x)) })}
-                onRemove={() => onChange({ ...step, rules: rules.filter((_, j) => j !== i), ...(rules.length <= 2 ? { match: 'all' } : {}) })}
+                onRemove={() => {
+                  const next = rules.filter((_, j) => j !== i);
+                  // One rule needs no all/any; none takes no match at all (the server refuses match without rules).
+                  const { match: _match, ...rest } = step;
+                  onChange(next.length === 0 ? { ...rest, rules: next } : { ...step, rules: next, ...(next.length < 2 ? { match: 'all' } : {}) });
+                }}
               />
             ))}
             <div>

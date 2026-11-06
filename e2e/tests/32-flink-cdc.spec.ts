@@ -356,3 +356,39 @@ test('Flink CDC: an editor adds a computed column and partitions the Iceberg tab
   await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
   await api.send('DELETE', url);
 });
+
+test('Flink CDC: Keep deleted rows sits under Keep rows, and a filter goes before it', async ({ page }) => {
+  test.setTimeout(240_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('flinksd');
+  const { password, ...pg } = SOURCE_PG;
+  const { secret_access_key, ...iceberg } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
+    spec: { source: { tables: { include: ['shop.orders'] } }, snapshot: { mode: 'no_data' }, transforms: [] },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+  await expect(page.getByRole('heading', { name: 'Which rows and columns reach each table?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Keep deleted rows/ }).click();
+  await expect(page.getByRole('region', { name: 'Step 1: Keep deleted rows' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await expect(page.getByRole('button', { name: /^Keep deleted rows/ })).toContainText('Already added: see Keep rows.');
+  await page.getByRole('button', { name: /^Keep only some rows/ }).click();
+  // The filter runs first: the server refuses a filter after the event shape.
+  await expect(page.getByRole('region', { name: 'Step 1: Keep only some rows' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Step 2: Keep deleted rows' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  const saved = await api.get<{ spec: { transforms: { type: string }[] } }>(url);
+  expect(saved.spec.transforms.map((t) => t.type)).toEqual(['filter', 'soft_delete']);
+  await api.send('DELETE', url);
+});

@@ -128,7 +128,8 @@ export function defaultStep(type: TransformType, steps: TransformStep[]): Transf
     case 'unwrap':
       return { type, id, delete_handling: 'rewrite', add_fields: ['op', 'source.ts_ms'], condition: null };
     case 'filter':
-      return { type, id, operations: ['insert', 'update', 'delete', 'snapshot'], match: 'all', rules: [] };
+      // No `match` until there are rules: the server refuses match without rules (domain decodeFilter).
+      return { type, id, operations: ['insert', 'update', 'delete', 'snapshot'], rules: [] };
     case 'rename':
       return { type, id, renames: [{ from: '', to: '' }] };
     case 'add_field':
