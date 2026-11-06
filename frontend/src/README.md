@@ -6,14 +6,15 @@ The web UI's source: a React 19 single-page app that talks only to `/api/v1`. `m
 ## Interface
 - `[main.tsx:queryClient]` — the one `QueryClient`: no retry on 4xx `ApiError`s, at most two retries otherwise, refetch on window focus, `staleTime` 5 s.
 - `[main.tsx:router]` — `makeRouter(queryClient)` from `app/router.tsx`, rendered inside `ErrorBoundary` and `QueryClientProvider` under `StrictMode`.
-- `styles.css` — design tokens (`--bz-*`, each `light-dark(light, dark)`), the Tailwind `@theme` names (`bg-surface`, `text-muted`, …) and the root font-size steps at 1920 px and 2560 px.
+- `styles.css` — design tokens (`--bz-*`, most written as `light-dark(light, dark)`; a few — `--bz-code-ink`, `--bz-nav-ink`, `--bz-nav-muted`, `--bz-nav-mark`, `--bz-scrim` — are one value for both themes), the Tailwind `@theme` names (`bg-surface`, `text-muted`, …) and the root font-size steps at 1920 px and 2560 px.
 - `test/` — vitest setup (`test/setup.ts`), the `renderAt` router test helper (`test/render.tsx`) and `test/source-rules.test.ts`, the source-level layout and UX rules every screen must pass.
 - Subdirectories: [app](./app/README.md) — router, guard, shell and error surfaces; [features](./features/README.md) — product areas (pipelines, connections, alerts, settings, …); [components](./components/README.md) — shared components and the `ui` design system; [lib](./lib/README.md) — API client, session, query hooks and helpers.
 
 ## Invariants
 - The unauthorized handler set in `main.tsx` (`setUnauthorizedHandler`) opens the sign-in dialog (`sessionExpiry.set(true)`) when a session existed (`meKey` is cached) and otherwise navigates to `/login?next=…`, unless already on `/login`.
 - `main.tsx` throws `missing #root` when `index.html` has no `#root` element.
-- Colours come only from the tokens in `styles.css`; `test/source-rules.test.ts` fails on rule breaks (bare `fr` tracks, `min-w-[…px]`, raw `<h1>`, `toast.error`, arbitrary text sizes or padding, native checkboxes/radios/selects, links styled as buttons) in any `.tsx` file outside `components/ui`, `__tests__` and `test/`.
+- Colours come only from the tokens in `styles.css` (a convention; no test checks it).
+- `test/source-rules.test.ts` fails on rule breaks (bare `fr` tracks, `min-w-[…px]`, raw `<h1>`, `toast.error`, arbitrary text sizes or padding, native checkboxes/radios/selects, links styled as buttons) in any `.tsx` file outside `components/ui`, `__tests__` and `test/`.
 
 ## Side Effects
 - Mounts the React tree into `#root` and loads the IBM Plex Sans/Mono font files. Network, storage and event-stream effects belong to `lib/` and `app/` (see their contracts).

@@ -4,7 +4,7 @@
 The BeziSync web UI: a React SPA built with Vite and served by nginx in the `bezisync-web` image. It talks only to `/api/v1` (plus the OAuth discovery documents for MCP agents), which nginx proxies to the API. This directory holds the build and serving configuration; the app is in `src/`, static files in `public/`. The `openapi.json` here is generated from the backend and drives the typed client in `src/lib/api-schema.ts`.
 
 ## Interface
-- `[vite.config.ts:defineConfig]` — Vite + React + Tailwind v4 plugins, the `@` alias to `src/`, the dev proxy of `/api` and `/.well-known/oauth-` to `http://localhost:8000`, source maps, and the vitest config (jsdom, `src/test/setup.ts`).
+- `[vite.config.ts:defineConfig]` — Vite + React + Tailwind v4 plugins, the `@` alias to `src/`, the dev proxy of `/api` and `/.well-known/oauth-` to `http://localhost:8000`, source maps, and the vitest config (jsdom, `src/test/setup.ts`, CSS off, a 15 s per-test timeout).
 - `index.html` — the page shell: loads `/theme.js` before the app, then `/src/main.tsx` into `#root`.
 - `nginx.conf.template` — the image's server on port 8080: proxies `/api/`, `/healthz` and `/.well-known/oauth-` to `${BEZISYNC_API_UPSTREAM}`, serves `/assets/` immutable for a year and every other path as `index.html` (SPA fallback).
 - `Dockerfile` — builds the assets with `oven/bun` (`bun install --frozen-lockfile`, then `vite build` without the type check) and copies them and the template into `nginxinc/nginx-unprivileged:stable-alpine`, running as user 101.
@@ -18,6 +18,7 @@ The BeziSync web UI: a React SPA built with Vite and served by nginx in the `bez
 - `index.html` is served `no-cache` and `/assets/` `immutable`, so a deploy takes effect on the next page load.
 - `openapi.json` and `src/lib/api-schema.ts` are generated: change the backend and run `make openapi`; `bun run check:api` (and `make openapi-check`) fail on drift.
 - The image runs as the unprivileged user 101 and upgrades Alpine packages at build time (`Dockerfile`).
+- `.dockerignore` keeps `__tests__`, `src/test`, `openapi.json` and every `README.md` out of the image build context, so editing a contract or a test never changes the image.
 
 ## Side Effects
 - None at runtime from this directory's files beyond nginx serving and proxying; the image reads `BEZISYNC_API_UPSTREAM` (default `http://bezisync-api:8000`) when nginx renders the template.

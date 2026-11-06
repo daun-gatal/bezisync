@@ -6,7 +6,10 @@ The Go module (`github.com/daun-gatal/bezisync/backend`) behind the `bezisync` i
 distroless binary with the roles `api`, `controller`, `agent` and `migrate`, the `remote` CLI and the
 Flink CDC helper. Built from this directory by `Dockerfile`; `.dockerignore` keeps tests,
 `testdata/` and these contracts out of the image. `testdata/contract/` holds the corpus recorded
-from the Python implementation (JSON fixtures read through `internal/contract`).
+from the Python implementation (JSON fixtures read through `internal/contract`);
+`testdata/compile_matrix.json` is the compiler's golden matrix (`UPDATE_GOLDEN=1` rewrites it) and
+`testdata/flink_settings.json` the recorded Flink CDC engine-setting choices, bounds and reasons
+that `internal/engine` tests compare against.
 
 Verification: `make verify-quick GO_PKGS=…` with the packages you changed, `make verify` for all
 (here: golangci-lint, vet and `go test -race ./...`, whose tests include the schema, corpus and
