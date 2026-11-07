@@ -30,6 +30,7 @@ type fakeDocker struct {
 	stopped  []string                  // container names in stop order, with "?t=" timeouts
 	exit     int                       // exit code /wait reports
 	stopErr  map[string]bool           // containers whose stop fails
+	wait     time.Duration             // how long /wait takes to answer
 }
 
 type fakeContainer struct {
@@ -97,6 +98,12 @@ func (f *fakeDocker) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/networks") || strings.HasPrefix(path, "/volumes"):
 		f.resources(w, r, path)
 	case strings.HasPrefix(path, "/containers/"):
+		if strings.HasSuffix(path, "/wait") {
+			f.mu.Lock()
+			delay := f.wait
+			f.mu.Unlock()
+			time.Sleep(delay)
+		}
 		parts := strings.Split(strings.TrimPrefix(path, "/containers/"), "/")
 		f.mu.Lock()
 		defer f.mu.Unlock()
