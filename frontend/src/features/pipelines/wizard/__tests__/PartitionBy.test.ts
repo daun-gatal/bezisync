@@ -99,13 +99,19 @@ describe('written columns and keys', () => {
     const later = writtenByTable(['shop.orders'], [orders], spec({ transforms: [{ type: 'rename', renames: [{ from: 'id', to: 'order_id' }] }] }), 'flink-cdc', 'postgresql', 'upsert');
     expect(partitionError({ 'shop.orders': [{ n: 8, column: 'id', transform: 'bucket' }] }, later)).toMatch(/id is no longer a column/);
   });
-  it('says what an unlisted Debezium table gets', () => {
-    expect(automaticSummary('debezium', { partitions: { 'shop.orders': 'id' }, buckets: '64' }, 'shop.orders', false)).toBe('Automatic: 64 buckets of id');
-    expect(automaticSummary('debezium', { partitions: { 'shop.orders': '' } }, 'shop.orders', false)).toBe('Automatic: by the day of the change');
-    expect(automaticSummary('debezium', { write_mode: 'append' }, 'shop.orders', false)).toBe('Automatic: by the day of the change');
-    expect(automaticSummary('debezium', { partitioning: 'none', partitions: { 'shop.orders': 'id' } }, 'shop.orders', false)).toBe('Not partitioned');
-    expect(automaticSummary('debezium', { partitions: { 'shop.orders': 'id' } }, 'shop.orders', true)).toBe('Not partitioned');
-    expect(automaticSummary('flink-cdc', {}, 'shop.orders', false)).toBeNull();
+  it('says what an unlisted Debezium table gets, routed tables sharing their destination', () => {
+    const none = new Map<string, string>();
+    const one = ['shop.orders'];
+    expect(automaticSummary('debezium', { partitions: { 'shop.orders': 'id' }, buckets: '64' }, 'shop.orders', one, none, {})).toBe('Automatic: 64 buckets of id');
+    expect(automaticSummary('debezium', { partitions: { 'shop.orders': '' } }, 'shop.orders', one, none, {})).toBe('Automatic: by the day of the change');
+    expect(automaticSummary('debezium', { write_mode: 'append' }, 'shop.orders', one, none, {})).toBe('Automatic: by the day of the change');
+    expect(automaticSummary('debezium', { partitioning: 'none', partitions: { 'shop.orders': 'id' } }, 'shop.orders', one, none, {})).toBe('Not partitioned');
+    expect(automaticSummary('flink-cdc', {}, 'shop.orders', one, none, {})).toBeNull();
+    const two = ['shop.orders', 'shop.archive'];
+    const merged = new Map([['shop.orders', 'all'], ['shop.archive', 'all']]);
+    expect(automaticSummary('debezium', { partitions: { 'shop.orders': 'id', 'shop.archive': 'id' } }, 'shop.orders', two, merged, {})).toBe('Automatic: 16 buckets of id');
+    expect(automaticSummary('debezium', { partitions: { 'shop.orders': 'id', 'shop.archive': '' } }, 'shop.orders', two, merged, {})).toBe('Not partitioned (the tables routed together differ)');
+    expect(automaticSummary('debezium', { partitions: { 'shop.orders': 'id' } }, 'shop.orders', two, merged, { 'shop.archive': [{ n: 8, column: 'id', transform: 'bucket' }] })).toBe('Partitioned as shop.archive (routed together)');
   });
   it('X10: switching to Flink CDC drops the time of the change', () => {
     const by = { 'shop.orders': [{ n: 0, column: '__source_ts_ms', transform: 'day' as const }], 'shop.items': [{ n: 8, column: 'id', transform: 'bucket' as const }] };

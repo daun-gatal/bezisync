@@ -145,16 +145,27 @@ export function writtenColumns(found: Discovered, spec: SpecParts, engine: Engin
   return [...out].map(([name, kind]) => ({ name, kind, key: keys.includes(name) }));
 }
 
-/** What a Debezium table Partition by doesn't list gets (iceberg_partition.go debeziumAutomatic),
- *  in words; null on Flink CDC. */
-export function automaticSummary(engine: EngineId, options: Record<string, unknown>, table: string, routed: boolean): string | null {
-  if (engine === 'flink-cdc') return null;
-  if (options.partitioning === 'none' || routed) return 'Not partitioned';
-  if (options.write_mode === 'append') return 'Automatic: by the day of the change';
+function automaticOf(options: Record<string, unknown>, table: string): string | null {
+  if (options.partitioning === 'none') return null;
+  if (options.write_mode === 'append') return 'by the day of the change';
   const recorded = (options.partitions as Record<string, string> | undefined)?.[table];
-  if (recorded === undefined) return 'Not partitioned';
-  if (recorded === '') return 'Automatic: by the day of the change';
-  return `Automatic: ${String(options.buckets ?? '16')} buckets of ${recorded}`;
+  if (recorded === undefined) return null;
+  if (recorded === '') return 'by the day of the change';
+  return `${String(options.buckets ?? '16')} buckets of ${recorded}`;
+}
+
+/** What a Debezium table Partition by doesn't list gets (iceberg.go debeziumDestinationFields), in
+ *  words; null on Flink CDC. Tables routed to one destination share it: a listed one's fields, or
+ *  the automatic default when they all agree. */
+export function automaticSummary(engine: EngineId, options: Record<string, unknown>, table: string, tables: string[], routed: Map<string, string>, listed: PartitionBy): string | null {
+  if (engine === 'flink-cdc') return null;
+  const dest = (t: string) => routed.get(t) ?? `table:${t}`;
+  const together = tables.filter((t) => t !== table && dest(t) === dest(table));
+  const lister = together.find((t) => listed[t]?.length);
+  if (lister) return `Partitioned as ${lister} (routed together)`;
+  const mine = automaticOf(options, table);
+  if (together.some((t) => automaticOf(options, t) !== mine)) return 'Not partitioned (the tables routed together differ)';
+  return mine ? `Automatic: ${mine}` : 'Not partitioned';
 }
 
 /** Why a column can't be picked for a field (null when it can): upserts delete by the key only
@@ -256,7 +267,7 @@ export function PartitionByEditor({ value, onChange, tables, discovered, spec, e
         const cols = w?.columns ?? [];
         const keys = w?.keys ?? [];
         const kindOf = (name: string) => cols.find((c) => c.name === name)?.kind ?? '';
-        const automatic = automaticSummary(engine, options, table, routed.has(table));
+        const automatic = automaticSummary(engine, options, table, tables, routed, value);
         return (
           <div key={table} role="group" aria-label={`Partition ${table}`} className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">

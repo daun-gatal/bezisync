@@ -220,41 +220,63 @@ func (s *icebergSink) DeliveryDelay(options map[string]any) time.Duration {
 var icebergColumnRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 // icebergPartitions is the build's per-table partition-by (ADR 0005 R1, R2), keyed by the event's
-// destination: a table Partition by lists gets its fields, keyed after routes (tables routed
-// together must list the same); any other table the automatic default (debeziumAutomatic), keyed
-// by its naming-template topic exactly as it always compiled — for a routed table that key never
-// matches, so it stays unpartitioned (Known issues). The build reads the value as a list: the
+// destination after routes (debeziumDestinationFields). The build reads the value as a list: the
 // comma inside bucket(…) and truncate(…) is escaped.
 func icebergPartitions(c CompileContext, opts map[string]any) (map[string]string, error) {
-	listed, err := IcebergPartitionBy(c.Spec, opts)
+	byTopic, _, err := debeziumDestinationFields(c, opts)
 	if err != nil {
 		return nil, err
 	}
-	routed := domain.RouteTargets(c.Spec)
-	out := map[string]string{}
-	topics := map[string]string{}
-	for _, t := range c.Spec.Source.Tables.Include {
-		schema, name, _ := strings.Cut(t, ".")
-		if fields, ok := listed[t]; ok {
-			topic := c.Destination(schema, name)
-			if to, isRouted := routed[t]; isRouted {
-				topic = to
-			}
-			expr := debeziumPartitionBy(fields)
-			if prev, seen := topics[topic]; seen && out[topic] != expr {
-				return nil, problem.New(422, "engine_settings", fmt.Sprintf("%s and %s are routed to %s with different partitioning: give them the same.", prev, t, topic))
-			}
-			out[topic], topics[topic] = expr, t
-			continue
-		}
-		if fields := debeziumAutomatic(opts, t); len(fields) > 0 {
-			topic := c.Destination(schema, name)
-			if _, taken := topics[topic]; !taken {
-				out[topic] = debeziumPartitionBy(fields)
-			}
-		}
+	out := make(map[string]string, len(byTopic))
+	for topic, fields := range byTopic {
+		out[topic] = debeziumPartitionBy(fields)
 	}
 	return out, nil
+}
+
+// debeziumDestinationFields is how Debezium partitions each destination (the event's topic after
+// routes), and which topic each captured table goes to. A destination a table Partition by lists
+// goes to gets its fields (tables routed together must list the same: 422 otherwise); any other
+// gets the automatic default of the tables sent there (debeziumAutomatic) when they agree, and
+// stays unpartitioned when they don't.
+func debeziumDestinationFields(c CompileContext, opts map[string]any) (map[string][]PartitionField, map[string]string, error) {
+	listed, err := IcebergPartitionBy(c.Spec, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	routed := domain.RouteTargets(c.Spec)
+	topicOf := map[string]string{}
+	listedBy, autoBy := map[string]string{}, map[string][]string{}
+	out := map[string][]PartitionField{}
+	auto := map[string][]PartitionField{}
+	for _, t := range c.Spec.Source.Tables.Include {
+		schema, name, _ := strings.Cut(t, ".")
+		topic := c.Destination(schema, name)
+		if to, ok := routed[t]; ok {
+			topic = to
+		}
+		topicOf[t] = topic
+		if fields, ok := listed[t]; ok {
+			if prev, seen := listedBy[topic]; seen && debeziumPartitionBy(out[topic]) != debeziumPartitionBy(fields) {
+				return nil, nil, problem.New(422, "engine_settings", fmt.Sprintf("%s and %s are routed to %s with different partitioning: give them the same.", prev, t, topic))
+			}
+			out[topic], listedBy[topic] = fields, t
+			continue
+		}
+		fields := debeziumAutomatic(opts, t)
+		if _, seen := autoBy[topic]; !seen {
+			auto[topic] = fields
+		} else if debeziumPartitionBy(auto[topic]) != debeziumPartitionBy(fields) {
+			auto[topic] = nil // tables that disagree: none of them applies
+		}
+		autoBy[topic] = append(autoBy[topic], t)
+	}
+	for topic, fields := range auto {
+		if _, taken := listedBy[topic]; !taken && len(fields) > 0 {
+			out[topic] = fields
+		}
+	}
+	return out, topicOf, nil
 }
 
 // debeziumPartitionBy writes fields as the build's partition-by list: a column, year(c), month(c),

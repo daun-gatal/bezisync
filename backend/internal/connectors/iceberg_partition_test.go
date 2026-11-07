@@ -394,9 +394,12 @@ func TestIcebergPartitionKey(t *testing.T) {
 		"a renamed key on Flink CDC": {flink: true, info: orders, opts: by(field("order_id", "bucket", 8)), mutate: func(s *domain.PipelineSpec) {
 			s.Transforms = []domain.Transform{{Type: "rename", Renames: []domain.Rename{{From: "id", To: "order_id"}}}}
 		}, cat: missing, want: ""},
-		"E17 a routed table's automatic default": {info: orders, opts: recorded(""), mutate: func(s *domain.PipelineSpec) {
+		"E17 a routed table's automatic default applies": {info: orders, opts: recorded(""), mutate: func(s *domain.PipelineSpec) {
 			s.Transforms = []domain.Transform{{Type: "route", Routes: []domain.Route{{Match: "shop.orders", To: "all"}}}}
-		}, cat: missing, want: "-"},
+		}, cat: missing, want: "day(__source_ts_ms) (its key: id)"},
+		"a routed table bucketed by its key": {info: orders, opts: recorded("id"), mutate: func(s *domain.PipelineSpec) {
+			s.Transforms = []domain.Transform{{Type: "route", Routes: []domain.Route{{Match: "shop.orders", To: "all"}}}}
+		}, cat: missing, want: ""},
 		"E18 MongoDB":                              {info: orders, opts: recorded(""), source: "mongodb", cat: missing, want: "-"},
 		"E10 live table off its identity":          {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: "may already hold duplicate rows"},
 		"E14 live Flink table off its identity":    {flink: true, info: orders, opts: by(field("created_at", "day", 0)), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: "identity id"},

@@ -181,27 +181,33 @@ func TestCompileIcebergRefuses(t *testing.T) {
 	}
 }
 
-// A routed table's automatic partitioning is keyed by its pre-route topic, as it has always
-// compiled (ADR 0005, Known issues: the build looks it up after the route, so the table is
-// unpartitioned). Changing the key would change running pipelines' hashes.
-func TestCompileIcebergRoutedAutomaticKeyUnchanged(t *testing.T) {
+// A routed table's automatic partitioning is keyed by its destination after the route, where the
+// build looks it up (ADR 0005); tables merged into one destination share it when they agree, and
+// leave it unpartitioned when they don't. (Before, it was keyed by the pre-route topic and never
+// applied: such pipelines restart once on upgrade.)
+func TestCompileIcebergRoutedAutomaticKey(t *testing.T) {
 	sink := icebergSink(map[string]any{"catalog_type": "rest", "uri": "https://catalog.example.com/api/catalog", "warehouse": "lake"}, map[string]any{})
-	got, err := compilePipeline(t, "pg", sink, func(s *domain.PipelineSpec) {
-		s.Sink.Options = map[string]any{"partitions": map[string]any{"shop.orders": "id", "shop.events": "id"}}
-		s.Transforms = []domain.Transform{{Type: "route", ID: "rt01", Routes: []domain.Route{{Match: "shop.*", To: "all_rows"}}}}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var keys []string
-	for k, v := range got.Properties {
-		if strings.HasPrefix(k, "debezium.sink.iceberg.partition-by") {
-			keys = append(keys, k+"="+v)
+	keys := func(partitions map[string]any) []string {
+		got, err := compilePipeline(t, "pg", sink, func(s *domain.PipelineSpec) {
+			s.Sink.Options = map[string]any{"partitions": partitions}
+			s.Transforms = []domain.Transform{{Type: "route", ID: "rt01", Routes: []domain.Route{{Match: "shop.*", To: "all_rows"}}}}
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
+		var out []string
+		for k, v := range got.Properties {
+			if strings.HasPrefix(k, "debezium.sink.iceberg.partition-by") {
+				out = append(out, k+"="+v)
+			}
+		}
+		slices.Sort(out)
+		return out
 	}
-	slices.Sort(keys)
-	want := []string{`debezium.sink.iceberg.partition-by.shop_events=bucket(id\,16)`, `debezium.sink.iceberg.partition-by.shop_orders=bucket(id\,16)`}
-	if !slices.Equal(keys, want) {
-		t.Errorf("partition keys: %v, want %v", keys, want)
+	if got, want := keys(map[string]any{"shop.orders": "id", "shop.events": "id"}), []string{`debezium.sink.iceberg.partition-by.all_rows=bucket(id\,16)`}; !slices.Equal(got, want) {
+		t.Errorf("agreeing tables: %v, want %v", got, want)
+	}
+	if got := keys(map[string]any{"shop.orders": "id", "shop.events": ""}); len(got) != 0 {
+		t.Errorf("tables that disagree: %v, want none", got)
 	}
 }

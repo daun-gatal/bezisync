@@ -442,8 +442,8 @@ func renamedTo(spec domain.PipelineSpec, table, name, engine string) string {
 // partitionKeyChecks is iceberg_partition_key (ADR 0005 R5): equality deletes reach only data
 // files in the same partition, so on an upserted table every partition column must be one the
 // upsert deletes by; otherwise an update that changes it leaves the old row behind. A table the
-// pipeline will create is checked against the fields it would get (Partition by, else Debezium's
-// automatic partitioning); a table that exists, against its own partitioning and identifier
+// pipeline will create is checked against the fields its destination would get (Partition by,
+// else Debezium's automatic partitioning, after routes); a table that exists, against its own partitioning and identifier
 // fields, which are what the writer uses (fixed when the table was created).
 func partitionKeyChecks(ctx context.Context, cat icebergTables, cfg icebergConfig, c CompileContext, facts PipelineFacts) []checks.Check {
 	if facts.SourceType == "mongodb" {
@@ -457,16 +457,13 @@ func partitionKeyChecks(ctx context.Context, cat icebergTables, cfg icebergConfi
 	if facts.FlinkCDC {
 		engine = "flink-cdc"
 	}
-	routed := domain.RouteTargets(c.Spec)
-	fieldsOf := func(table string) []PartitionField {
-		if f, ok := byTable[table]; ok {
-			return f
+	// What each table's destination is partitioned by: Partition by on Flink CDC; on Debezium the
+	// destination's fields after routes (Partition by, else the agreeing automatic default).
+	fieldsOf := func(table string) []PartitionField { return byTable[table] }
+	if engine != "flink-cdc" {
+		if byTopic, topicOf, err := debeziumDestinationFields(c, facts.Options); err == nil {
+			fieldsOf = func(table string) []PartitionField { return byTopic[topicOf[table]] }
 		}
-		if _, isRouted := routed[table]; engine == "flink-cdc" || isRouted {
-			// A routed table's automatic partitioning never applies (Known issues).
-			return nil
-		}
-		return debeziumAutomatic(facts.Options, table)
 	}
 	if facts.Tables == nil {
 		for _, t := range c.Spec.Source.Tables.Include {
