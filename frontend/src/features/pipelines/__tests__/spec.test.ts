@@ -1,5 +1,5 @@
 import { DEFAULT_SINK_CAPS, type SinkCaps } from '@/lib/connections';
-import { deriveSinkOptions, destinationFor, flinkSinkOptions, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
+import { deriveSinkOptions, destinationFor, FLINK_NO_APPEND, inServerOrder, keepPartitionBy, flinkSinkOptions, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
 
 describe('pipeline spec helpers', () => {
   it('fills defaults that mirror the backend', () => {
@@ -20,7 +20,11 @@ describe('pipeline spec helpers', () => {
     expect(optionsSchemaFor(schema, 'debezium')).toBe(schema);
     const flink = optionsSchemaFor(schema, 'flink-cdc');
     expect(Object.keys(flink?.properties ?? {})).toEqual(['write_mode']);
-    expect(flink?.properties?.write_mode?.enum).toEqual(['upsert_keep_deletes', 'upsert']);
+    // P-11: the change log stays in the list, unavailable with the reason; Debezium only when offered.
+    expect(flink?.properties?.write_mode?.enum).toEqual(['upsert_keep_deletes', 'upsert', 'append']);
+    expect(flink?.properties?.write_mode?.ui?.unavailable).toEqual({ append: FLINK_NO_APPEND });
+    expect(optionsSchemaFor(schema, 'flink-cdc', { debeziumOffered: true })?.properties?.write_mode?.ui?.unavailable?.append).toBe(FLINK_NO_APPEND + ' Choose Debezium above for a change log.');
+    expect(optionsSchemaFor(schema, 'debezium')?.properties?.write_mode?.ui).not.toHaveProperty('unavailable');
     expect(flink?.properties?.write_mode?.ui?.labels).toEqual({ upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'", upsert: 'Latest row; deletes removed' });
   });
   it('previews destinations', () => {
@@ -175,5 +179,43 @@ describe('flinkSinkOptions', () => {
     const out = flinkSinkOptions(schema, { write_mode: 'upsert', format_version: '2', partitions: { 'shop.orders': 'id' }, partition_by: by });
     expect(JSON.stringify(out)).toBe(JSON.stringify({ write_mode: 'upsert', partition_by: by, format_version: '2' }));
     expect(flinkSinkOptions(schema, { write_mode: 'upsert', partition_by: {} })).toEqual({ write_mode: 'upsert' });
+  });
+});
+
+describe('the Destination step carries Partition by through (ADR 0007 P2)', () => {
+  const stored = { 'shop.orders': [{ n: 8, column: 'id', transform: 'bucket' }] };
+  it('P-4: keeps the stored value byte for byte, whatever the form sends', () => {
+    const out = keepPartitionBy({ write_mode: 'upsert', partition_by: { 'shop.orders': [] }, format_version: '2' }, stored, true);
+    expect(JSON.stringify(out)).toBe(JSON.stringify({ write_mode: 'upsert', partition_by: stored, format_version: '2' }));
+    expect(keepPartitionBy({ write_mode: 'upsert' }, undefined, true)).toEqual({ write_mode: 'upsert' });
+    expect(keepPartitionBy({ write_mode: 'upsert' }, {}, true)).toEqual({ write_mode: 'upsert' });
+  });
+  it('P-5: drops it once the destination is not Iceberg', () => {
+    expect(keepPartitionBy({ write_mode: 'upsert', partition_by: stored }, stored, false)).toEqual({ write_mode: 'upsert' });
+  });
+});
+
+describe('steps compare equal with the server when nothing changed (ADR 0007 review)', () => {
+  it('records table keys in the JSONB order the server returns', () => {
+    const schema = { type: 'object', properties: { partitions: { type: 'object', ui: { from: 'table_keys' } } } } as never;
+    const out = deriveSinkOptions({}, schema, ['public.orders', 'public.customers'], {}, [
+      { schema: 'public', name: 'orders', primary_key: ['id'] },
+      { schema: 'public', name: 'customers', primary_key: ['cid'] },
+    ]);
+    expect(Object.keys(out.partitions as object)).toEqual(['public.orders', 'public.customers']);
+  });
+  it('puts the optional top-level keys where the server dumps them', () => {
+    const s = { ...fullSpec({ source: { tables: { include: ['a.b'] } } } as never), flink_cdc: { commit_seconds: 30 }, placement: 'zone-a' } as never;
+    const withKeys = inServerOrder({ ...(s as object), keys: { 'a.b': ['id'] }, values: { decimals: 'double' } } as never);
+    const keys = Object.keys(withKeys);
+    expect(keys.slice(-4)).toEqual(['values', 'keys', 'flink_cdc', 'placement']);
+    expect(keys.indexOf('sink')).toBeLessThan(keys.indexOf('values'));
+  });
+  it('P-17: a table no longer captured leaves Partition by and the recorded keys', () => {
+    const spec = fullSpec({ source: { tables: { include: ['shop.a', 'shop.b'] } } } as never);
+    spec.sink.options = { partitions: { 'shop.a': 'id', 'shop.b': 'id' }, write_mode: 'upsert', partition_by: { 'shop.b': [{ n: 0, column: 'id', transform: 'identity' }] } };
+    const pruned = pruneToTables(spec, ['shop.a']);
+    expect(pruned.sink.options).toEqual({ partitions: { 'shop.a': 'id' }, write_mode: 'upsert' });
+    expect(pruneToTables(spec, ['shop.a', 'shop.b']).sink).toBe(spec.sink);
   });
 });

@@ -134,7 +134,7 @@ export function stageOf(t: TransformStep): number {
 
 /** Keeps only references to captured tables: scoped steps lose removed tables (a step left
  *  with none is dropped), and key columns of removed tables go. */
-export function pruneToTables(spec: FullSpec, include: string[]): Pick<FullSpec, 'transforms' | 'keys'> {
+export function pruneToTables(spec: FullSpec, include: string[]): Pick<FullSpec, 'transforms' | 'keys' | 'sink'> {
   const keep = new Set(include);
   const transforms = spec.transforms.flatMap((t) => {
     if (!t.tables) return [t];
@@ -142,7 +142,33 @@ export function pruneToTables(spec: FullSpec, include: string[]): Pick<FullSpec,
     return tables.length ? [{ ...t, tables }] : [];
   });
   const keys = spec.keys ? Object.fromEntries(Object.entries(spec.keys).filter(([t]) => keep.has(t))) : undefined;
-  return { transforms, ...(keys && Object.keys(keys).length ? { keys } : { keys: undefined }) };
+  // Iceberg's per-table options (Partition by, the recorded keys) only for captured tables: the
+  // server refuses a table it doesn't capture. The same object when nothing changes.
+  let options = spec.sink.options;
+  for (const name of ['partition_by', 'partitions']) {
+    const map = options[name];
+    if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
+    const kept = Object.fromEntries(Object.entries(map as Record<string, unknown>).filter(([t]) => keep.has(t)));
+    if (Object.keys(kept).length === Object.keys(map).length) continue;
+    const { [name]: _drop, ...rest } = options;
+    void _drop;
+    options = name === 'partition_by' && !Object.keys(kept).length ? rest : { ...rest, [name]: kept };
+    options = jsonbSorted(options);
+  }
+  const sink = options === spec.sink.options ? spec.sink : { ...spec.sink, options };
+  return { transforms, sink, ...(keys && Object.keys(keys).length ? { keys } : { keys: undefined }) };
+}
+
+/** The spec's top-level keys in the order the server dumps them (domain.PipelineSpec.Dump):
+ *  values, keys, flink_cdc, flink_cdc_image, tuning, placement come last, in that order, so a
+ *  step that rebuilds the spec compares equal with the server's copy when nothing changed. */
+export function inServerOrder(spec: FullSpec): FullSpec {
+  const tail = ['values', 'keys', 'flink_cdc', 'flink_cdc_image', 'tuning', 'placement'];
+  const rec = spec as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(rec)) if (!tail.includes(k)) out[k] = rec[k];
+  for (const k of tail) if (k in rec && rec[k] !== undefined) out[k] = rec[k];
+  return out as unknown as FullSpec;
 }
 
 /** Puts (or removes, with null) the event-shape step without breaking the stage order: an
@@ -296,7 +322,8 @@ export function deriveSinkOptions(
       if (!found && !keys[t]) continue;
       map[t] = keys[t]?.[0] ?? found?.primary_key?.[0] ?? '';
     }
-    out = { ...out, [name]: map };
+    // In the JSONB order the server returns it, so an unchanged step compares equal.
+    out = { ...out, [name]: jsonbSorted(map) };
   }
   return out;
 }
@@ -313,7 +340,12 @@ export function flinkSinkOptions(schema: JsonSchema, options: Record<string, unk
   return by && typeof by === 'object' && Object.keys(by).length ? jsonbSorted({ ...out, partition_by: by }) : out;
 }
 
-export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: EngineId): JsonSchema | null {
+/** Why Flink CDC can't write an Iceberg change log (ADR 0007 P4): its writer always upserts by key. */
+export const FLINK_NO_APPEND = "Flink CDC's Iceberg writer always writes rows by the table's key, so it can't keep every change as its own row.";
+
+/** The destination options an engine has. On Flink CDC, Iceberg's change log is shown unavailable
+ *  with the reason, naming Debezium when it is a real choice (`debeziumOffered`). */
+export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: EngineId, opts: { debeziumOffered?: boolean } = {}): JsonSchema | null {
   if (!schema) return null;
   if (engine !== 'flink-cdc' || !schema.properties) return schema;
   const properties: NonNullable<JsonSchema['properties']> = {};
@@ -323,11 +355,25 @@ export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: 
       name === 'write_mode' && prop.enum
         ? {
             ...prop,
-            enum: prop.enum.filter((v) => v !== 'append'),
-            // Flink CDC marks a kept delete with its change type, not Debezium's __deleted.
-            ui: prop.ui && { ...prop.ui, labels: { ...prop.ui.labels, upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'" } },
+            // Flink CDC marks a kept delete with its change type, not Debezium's __deleted; a change log
+            // is shown, unavailable, with the reason.
+            ui: {
+              ...prop.ui,
+              labels: { ...prop.ui?.labels, upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'" },
+              ...(prop.enum.includes('append')
+                ? { unavailable: { append: FLINK_NO_APPEND + (opts.debeziumOffered ? ' Choose Debezium above for a change log.' : '') } }
+                : {}),
+            },
           }
         : prop;
   }
   return Object.keys(properties).length ? { ...schema, properties } : null;
+}
+
+/** The Destination step's options with the stored Partition by carried over unchanged (ADR 0007
+ *  P2: the Transform step writes it), or without it once the destination isn't Iceberg. */
+export function keepPartitionBy(options: Record<string, unknown>, stored: unknown, iceberg: boolean): Record<string, unknown> {
+  const { partition_by: _pb, ...rest } = options;
+  void _pb;
+  return iceberg && stored && typeof stored === 'object' && Object.keys(stored).length ? jsonbSorted({ ...rest, partition_by: stored }) : rest;
 }

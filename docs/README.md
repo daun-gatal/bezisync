@@ -295,7 +295,8 @@ through the same catalogs.
 - **Commits** at least every minute by default (5 or 15 minutes for fewer, larger files; "as soon as
   possible" commits every batch). Health counts that interval as expected delay, not lag.
 - **Partitioning** (both engines): **Partition by**
-  in the Destination step gives a table up to four fields: a column and each value, the year,
+  in the Transform step (its own row, after the key, so the key, renames and computed columns chosen on
+  the same screen are offered as they change) gives a table up to four fields: a column and each value, the year,
   month, day or hour of a date or timestamp (one per column), buckets of a hash (`bucket[N]`, N
   from 1 to 1024) or the leading part (`truncate[N]`, N up to 1,000,000). The columns offered are
   the ones the table writes (after renames, added and computed columns) and the transforms the
@@ -335,7 +336,9 @@ through the same catalogs.
 - **On Flink CDC** (chosen in the wizard when a Flink CDC image is registered; Debezium stays the
   default): the same connections and tables, written by Flink CDC's Iceberg sink. Rows are upserted
   by key (deleted rows are removed, or kept and marked `__op = '-D'`; *every change appended* is
-  Debezium only) and new columns are added. Tables are unpartitioned unless **Partition by** (see
+  shown unavailable with the reason: Flink CDC's Iceberg writer always writes rows by the table's key, and
+  an Iceberg table created beforehand without a key is refused, `iceberg_flink_keyless_table`, because
+  Flink CDC 3.7.0 would write deletes into it as rows) and new columns are added. Tables are unpartitioned unless **Partition by** (see
   *Partitioning*) lists them, compiled into Flink CDC's `partition.key`; there is no automatic
   partitioning and no time of the change (`__source_ts_ms`).
   The namespace must be one level of letters, digits and underscores, and a Glue catalog signs in

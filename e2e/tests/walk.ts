@@ -38,6 +38,19 @@ export async function walkWizard(page: Page, api: Api, opts: { projectId: string
       const server = await api.get<{ spec: unknown }>(`/api/v1/projects/${opts.projectId}/pipelines/${opts.pipelineId}`);
       expect(server.spec, 'the last autosave differs from what the server stored').toEqual(last.spec);
     }
+    // Clicking Continue through every step of a settled pipeline saves nothing: each step's draft
+    // equals the server's copy (key order included) when nothing changed (ADR 0007).
+    if (!opts.steps) {
+      const before = saves.length;
+      await page.goto(`/p/${opts.slug}/pipelines/new?draft=${opts.pipelineId}&step=tables`);
+      for (const next of ['sink', 'transform', 'review']) {
+        await page.waitForLoadState('networkidle');
+        await page.getByRole('button', { name: /^Continue/ }).click();
+        await expect(page).toHaveURL(new RegExp(`step=${next}`));
+      }
+      await page.waitForLoadState('networkidle');
+      expect(saves.slice(before).map((s) => JSON.stringify(s.spec ?? s).slice(0, 400)), 'a step saved an unchanged pipeline').toEqual([]);
+    }
   } finally {
     page.off('request', onRequest);
   }

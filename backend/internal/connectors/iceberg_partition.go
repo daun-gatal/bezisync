@@ -160,7 +160,7 @@ func partitionChecks(ctx context.Context, cat icebergTables, cfg icebergConfig, 
 		// The build takes a collection's columns from its first document: there are none to name.
 		return []checks.Check{{Code: "iceberg_partition_column", Title: "Partitioning", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
 			Message: "Partition by isn't available for MongoDB: a collection has no fixed columns, and its table takes them from the first document.",
-			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Remove Partition by in the Destination step (the tables keep the automatic partitioning)."}}}
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Remove Partition by in the Transform step (the tables keep the automatic partitioning)."}}}
 	case facts.Tables == nil:
 		out = append(out, checks.Check{Code: "iceberg_partition_column", Title: "Partitioning", Status: checks.Warn, Category: checks.CatDestination,
 			Message: "Couldn't check the partition columns: the source's tables couldn't be read.",
@@ -192,7 +192,7 @@ func partitionChecks(ctx context.Context, cat icebergTables, cfg icebergConfig, 
 		if len(bad) > 0 {
 			out = append(out, checks.Check{Code: "iceberg_partition_column", Title: "Partitioning", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
 				Message: "Partitioning that can't be applied: " + strings.Join(bad, "; ") + ".",
-				Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Change Partition by in the Destination step."}})
+				Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Change Partition by in the Transform step."}})
 		} else {
 			out = append(out, checks.Check{Code: "iceberg_partition_column", Title: "Partitioning", Status: checks.Pass, Category: checks.CatDestination,
 				Message: "Every partition column is one the tables write, of a kind its transform takes."})
@@ -515,7 +515,7 @@ func partitionKeyChecks(ctx context.Context, cat icebergTables, cfg icebergConfi
 	if len(unsafe) > 0 {
 		out = append(out, checks.Check{Code: "iceberg_partition_key", Title: "Partitioning", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
 			Message: "Rows are upserted by key, and a delete only reaches rows in its own partition: partitioning by a column outside the key leaves the old row behind whenever an update changes it. Partitioned outside the key: " + strings.Join(unsafe, "; ") + ".",
-			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "In the Destination step, partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned."}})
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "In the Transform step (Partition by), partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned."}})
 	}
 	if len(atRisk) > 0 {
 		out = append(out, checks.Check{Code: "iceberg_partition_key", Title: "Partitioning", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,

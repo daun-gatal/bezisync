@@ -1521,7 +1521,7 @@ Choose key columns for them in the Transform step (Message key).
 Fix:
 
 ```
-Change Partition by in the Destination step.
+Change Partition by in the Transform step.
 ```
 
 Fix:
@@ -1559,7 +1559,7 @@ Check the catalog connection's access to the namespace, then run preflight again
 Fix:
 
 ```
-In the Destination step, partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned.
+In the Transform step (Partition by), partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned.
 ```
 
 Fix:
@@ -1604,6 +1604,12 @@ Fix:
 
 ```
 Choose "Every change appended" in the Destination step.
+```
+
+Fix:
+
+```
+Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Tables for this pipeline, or run it on Debezium with "Every change appended".
 ```
 
 <a id="iceberg-write"></a>

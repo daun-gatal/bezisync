@@ -2522,7 +2522,7 @@
     "The engine fails creating a table partitioned by a column its rows don't carry, or by a transform the column's written type can't take (Iceberg hashes no true/false or floating-point value; truncate takes text, numbers and bytes; the time transforms a date or a timestamp). On Debezium the failure stops the pipeline when the table's first change arrives."
    ],
    "fixes": [
-    "Change Partition by in the Destination step.",
+    "Change Partition by in the Transform step.",
     "Run preflight again once the source is reachable."
    ],
    "section": "Apache Iceberg"
@@ -2536,7 +2536,7 @@
     "Both engines upsert by writing equality deletes on the table's key, and Iceberg applies a delete only to rows in its own partition. On a table partitioned by a column outside its key, an update that changes that column writes the new row in another partition and never deletes the old one, so readers see both. For a table that already exists, its own identifier fields and partitioning are what count: they were fixed when it was created. A table the catalog can't read is left unchecked (a warning)."
    ],
    "fixes": [
-    "In the Destination step, partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned.",
+    "In the Transform step (Partition by), partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned.",
     "Drop and recreate them (Positions → Start over, dropping destinations). Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates (SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1).",
     "Check the catalog connection's access to the namespace, then run preflight again.",
     "Run preflight again once the source is reachable."
@@ -2599,7 +2599,8 @@
   {
    "code": "iceberg_rustfs_upsert",
    "fixes": [
-    "Choose \"Every change appended\" in the Destination step."
+    "Choose \"Every change appended\" in the Destination step.",
+    "Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Tables for this pipeline, or run it on Debezium with \"Every change appended\"."
    ],
    "section": "Apache Iceberg",
    "titles": [
