@@ -20,3 +20,23 @@ export function useTransformPreview(projectId: string, pipelineId: string, body:
       ),
   });
 }
+
+export type ExpressionCheck = Schemas['ExpressionCheck'];
+export type ExpressionCheckRequest = Schemas['ExpressionCheckRequest'];
+
+/** Checks a Flink CDC expression as typed (ADR 0008): its canonical text and kind, or why it is
+ *  refused and where. Pure on the server; refetched as the text changes (the caller debounces). */
+export function useExpressionCheck(projectId: string, pipelineId: string, body: ExpressionCheckRequest | null) {
+  return useQuery({
+    queryKey: ['expression-check', projectId, pipelineId, body],
+    enabled: Boolean(body?.expression.trim()),
+    staleTime: 5 * 60_000,
+    queryFn: () =>
+      unwrap(
+        client.POST('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/expressions:check', {
+          params: { path: { project_id: projectId, pipeline_id: pipelineId } },
+          body: body!,
+        }),
+      ),
+  });
+}

@@ -70,6 +70,7 @@ func parsePreviewRequest(v *val.V, o *val.Object) previewRequest {
 }
 
 func transformRoutes(r chi.Router) {
+	expressionRoutes(r)
 	// A pure computation over a sample row built from the columns the client already read
 	// through discovery: it never touches the source or the destination.
 	r.Post("/projects/{project_id}/pipelines/{pipeline_id}/transforms:preview", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
