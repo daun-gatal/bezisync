@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/daun-gatal/bezisync/backend/internal/expr"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
@@ -24,6 +25,10 @@ type ComputedArg struct {
 	Column string  `json:"column,omitempty"`
 	Text   *string `json:"text,omitempty"`
 	Number *int    `json:"number,omitempty"`
+	// Added with ADR 0008 (dumped only when set): a whole number 0–18 (digits, scale), and a number
+	// as canonical text (arithmetic).
+	Integer *int    `json:"integer,omitempty"`
+	Decimal *string `json:"decimal,omitempty"`
 }
 
 // Argument slots of a function.
@@ -34,6 +39,12 @@ const (
 	ArgTextLit = "any|lit" // a column of any scalar kind, or a text literal
 	ArgNumber  = "number"  // a whole number 1..65535
 	ArgPattern = "pattern" // one of DatePatterns
+	// Added with ADR 0008.
+	ArgLit         = "lit"          // a text literal
+	ArgNum         = "num"          // a number column (whole, decimal or floating-point)
+	ArgDigits      = "digits"       // a whole number 0..18
+	ArgNumLit      = "num|lit"      // a number column, or a number
+	ArgDatePattern = "date_pattern" // one of ParseDatePatterns
 )
 
 // ComputedFunction is one function a computed column can use.
@@ -43,25 +54,57 @@ type ComputedFunction struct {
 	Min   int      // fewest arguments (variadic only)
 	Max   int      // most arguments (variadic only)
 	Out   string   // the kind of the result
+	Group string   // the picker's group (ADR 0008)
 }
 
 // ComputedFunctions are the functions offered, by key.
 var ComputedFunctions = map[string]ComputedFunction{
-	"upper":       {Title: "Upper case", Args: []string{ArgText}, Out: "text"},
-	"lower":       {Title: "Lower case", Args: []string{ArgText}, Out: "text"},
-	"trim":        {Title: "Trim spaces", Args: []string{ArgText}, Out: "text"},
-	"length":      {Title: "Length", Args: []string{ArgText}, Out: "int"},
-	"concat":      {Title: "Join", Args: []string{ArgTextLit}, Min: 2, Max: 5, Out: "text"},
-	"substr":      {Title: "Part of text", Args: []string{ArgText, ArgNumber, ArgNumber}, Out: "text"},
-	"date_format": {Title: "Date as text", Args: []string{ArgTime, ArgPattern}, Out: "text"},
-	"to_text":     {Title: "As text", Args: []string{ArgAny}, Out: "text"},
-	"to_integer":  {Title: "As a whole number", Args: []string{ArgText}, Out: "int"},
+	"upper":       {Title: "Upper case", Args: []string{ArgText}, Out: "text", Group: "Text"},
+	"lower":       {Title: "Lower case", Args: []string{ArgText}, Out: "text", Group: "Text"},
+	"trim":        {Title: "Trim spaces", Args: []string{ArgText}, Out: "text", Group: "Text"},
+	"length":      {Title: "Length", Args: []string{ArgText}, Out: "int", Group: "Text"},
+	"concat":      {Title: "Join", Args: []string{ArgTextLit}, Min: 2, Max: 5, Out: "text", Group: "Text"},
+	"substr":      {Title: "Part of text", Args: []string{ArgText, ArgNumber, ArgNumber}, Out: "text", Group: "Text"},
+	"date_format": {Title: "Date as text", Args: []string{ArgTime, ArgPattern}, Out: "text", Group: "Dates"},
+	"to_text":     {Title: "As text", Args: []string{ArgAny}, Out: "text", Group: "Conversions"},
+	"to_integer":  {Title: "As a whole number", Args: []string{ArgText}, Out: "int", Group: "Conversions"},
+	// Added with ADR 0008. Every function compiles through internal/expr (ComputedTree).
+	"replace":      {Title: "Replace text", Args: []string{ArgText, ArgLit, ArgLit}, Out: "text", Group: "Text"},
+	"left":         {Title: "First characters", Args: []string{ArgText, ArgNumber}, Out: "text", Group: "Text"},
+	"right":        {Title: "Last characters", Args: []string{ArgText, ArgNumber}, Out: "text", Group: "Text"},
+	"pad_left":     {Title: "Pad on the left", Args: []string{ArgText, ArgNumber, ArgLit}, Out: "text", Group: "Text"},
+	"pad_right":    {Title: "Pad on the right", Args: []string{ArgText, ArgNumber, ArgLit}, Out: "text", Group: "Text"},
+	"join_with":    {Title: "Join with a separator", Args: []string{ArgLit, ArgTextLit}, Min: 3, Max: 6, Out: "text", Group: "Text"},
+	"first_set":    {Title: "First that isn't empty", Args: []string{ArgAny}, Min: 2, Max: 5, Group: "Empty values"},
+	"abs":          {Title: "Absolute value", Args: []string{ArgNum}, Group: "Numbers"},
+	"ceil":         {Title: "Round up", Args: []string{ArgNum}, Group: "Numbers"},
+	"floor":        {Title: "Round down", Args: []string{ArgNum}, Group: "Numbers"},
+	"round":        {Title: "Round", Args: []string{ArgNum, ArgDigits}, Group: "Numbers"},
+	"add":          {Title: "Add", Args: []string{ArgNum, ArgNumLit}, Out: "float", Group: "Numbers"},
+	"subtract":     {Title: "Subtract", Args: []string{ArgNum, ArgNumLit}, Out: "float", Group: "Numbers"},
+	"multiply":     {Title: "Multiply", Args: []string{ArgNum, ArgNumLit}, Out: "float", Group: "Numbers"},
+	"divide":       {Title: "Divide", Args: []string{ArgNum, ArgNumLit}, Out: "float", Group: "Numbers"},
+	"year":         {Title: "Year", Args: []string{ArgTime}, Out: "int", Group: "Dates"},
+	"month":        {Title: "Month", Args: []string{ArgTime}, Out: "int", Group: "Dates"},
+	"day":          {Title: "Day of the month", Args: []string{ArgTime}, Out: "int", Group: "Dates"},
+	"hour":         {Title: "Hour", Args: []string{ArgTime}, Out: "int", Group: "Dates"},
+	"parse_date":   {Title: "Date from text", Args: []string{ArgText, ArgDatePattern}, Out: "date", Group: "Dates"},
+	"days_between": {Title: "Days between", Args: []string{ArgTime, ArgTime}, Out: "int", Group: "Dates"},
+	"to_decimal":   {Title: "As a decimal number", Args: []string{ArgAny, ArgDigits}, Out: "decimal", Group: "Conversions"},
+	"to_float":     {Title: "As a floating-point number", Args: []string{ArgAny}, Out: "float", Group: "Conversions"},
 }
+
+// ParseDatePatterns are the patterns "Date from text" reads.
+var ParseDatePatterns = []string{"yyyy-MM-dd", "yyyyMMdd", "dd/MM/yyyy", "MM/dd/yyyy"}
 
 // DatePatterns are the formats date_format offers (Java SimpleDateFormat).
 var DatePatterns = []string{"yyyy", "yyyy-MM", "yyyy-MM-dd", "yyyy-MM-dd HH", "yyyy-MM-dd HH:mm:ss"}
 
 const maxComputedText = 200
+
+// decimalRe is a number argument as canonical text: no leading zeros, at most 18 digits before the
+// point and 9 after.
+const decimalRe = `^-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,9})?$`
 
 // argSlot is the slot of argument i of f.
 func argSlot(f ComputedFunction, i int) string {
@@ -77,7 +120,9 @@ func KindFits(slot, kind string) bool {
 	case ArgText:
 		return kind == "text"
 	case ArgTime:
-		return kind == "timestamp" || kind == "date"
+		return kind == "timestamp" || kind == "date" || kind == "timestamptz"
+	case ArgNum, ArgNumLit:
+		return kind == "int" || kind == "decimal" || kind == "float"
 	case ArgAny, ArgTextLit:
 		return !slices.Contains([]string{"binary", "document", "list", "json", "unknown"}, kind)
 	}
@@ -90,6 +135,14 @@ func decodeComputed(v *val.V, o *val.Object, out *Transform) {
 	}
 	if f := o.Get("name"); f.Required() {
 		out.Name, _ = v.Constrained(f.Loc, f.Raw, val.StrRules{Pattern: newNameRe})
+	}
+	// An expression (ADR 0008) instead of a function with arguments.
+	if f := o.Get("expression"); f.Present && !f.IsNull() {
+		out.Expression = decodeExpression(v, f, expr.UseColumn)
+		if o.Has("function") || o.Has("args") {
+			v.ValueError(f.Loc, "a computed column is either an expression or a function with arguments")
+		}
+		return
 	}
 	keys := make([]string, 0, len(ComputedFunctions))
 	for k := range ComputedFunctions {
@@ -125,7 +178,7 @@ func decodeComputed(v *val.V, o *val.Object, out *Transform) {
 		slot := argSlot(fn, i)
 		col, text, num := ao.Get("column"), ao.Get("text"), ao.Get("number")
 		switch slot {
-		case ArgText, ArgAny, ArgTime:
+		case ArgText, ArgAny, ArgTime, ArgNum:
 			if col.Required() {
 				a.Column, _ = v.Constrained(col.Loc, col.Raw, val.StrRules{Pattern: fieldRe})
 			}
@@ -151,6 +204,36 @@ func decodeComputed(v *val.V, o *val.Object, out *Transform) {
 				if s, ok := v.Literal(text.Loc, text.Raw, DatePatterns...); ok {
 					a.Text = &s
 				}
+			}
+		case ArgDatePattern:
+			if text.Required() {
+				if s, ok := v.Literal(text.Loc, text.Raw, ParseDatePatterns...); ok {
+					a.Text = &s
+				}
+			}
+		case ArgLit:
+			if text.Required() {
+				if s, ok := v.Constrained(text.Loc, text.Raw, val.StrRules{Max: maxComputedText}); ok && computedText(v, text.Loc, s) {
+					a.Text = &s
+				}
+			}
+		case ArgDigits:
+			if f := ao.Get("integer"); f.Required() {
+				if n, ok := v.IntIn(f.Loc, f.Raw, val.Num{GE: val.F(0), LE: val.F(18)}); ok {
+					a.Integer = &n
+				}
+			}
+		case ArgNumLit:
+			dec := ao.Get("decimal")
+			switch {
+			case col.Present && !dec.Present:
+				a.Column, _ = v.Constrained(col.Loc, col.Raw, val.StrRules{Pattern: fieldRe})
+			case dec.Present && !col.Present:
+				if s, ok := v.Constrained(dec.Loc, dec.Raw, val.StrRules{Pattern: decimalRe}); ok {
+					a.Decimal = &s
+				}
+			default:
+				v.ValueError(at, "a column or a number, one of them")
 			}
 		}
 		ao.Forbid()
@@ -179,6 +262,14 @@ func validateComputed(v *val.V, at val.Loc, spec PipelineSpec, t Transform) {
 		v.ValueError(at.Add("table"), t.Table+" is not captured by this pipeline")
 		return
 	}
+	if t.Expression != "" {
+		if n, err := ExpressionOf(t); err == nil {
+			if _, err := expr.Check(n, expr.Env{Hidden: expressionHidden(spec, t.Table)}, expr.UseColumn); err != nil {
+				v.ValueError(at.Add("expression"), t.Table+": "+expressionMessage(t.Expression, err))
+			}
+		}
+		return
+	}
 	rules := spec.Source.Columns[t.Table]
 	for j, a := range t.Args {
 		switch {
@@ -192,6 +283,10 @@ func validateComputed(v *val.V, at val.Loc, spec PipelineSpec, t Transform) {
 }
 
 func dumpComputed(m *om.Map, t Transform) {
+	if t.Expression != "" {
+		m.Set("table", t.Table).Set("name", t.Name).Set("expression", t.Expression)
+		return
+	}
 	args := make([]any, len(t.Args))
 	for i, a := range t.Args {
 		x := om.New()
@@ -202,6 +297,10 @@ func dumpComputed(m *om.Map, t Transform) {
 			x.Set("text", *a.Text)
 		case a.Number != nil:
 			x.Set("number", *a.Number)
+		case a.Integer != nil:
+			x.Set("integer", *a.Integer)
+		case a.Decimal != nil:
+			x.Set("decimal", *a.Decimal)
 		}
 		args[i] = x
 	}
@@ -218,6 +317,14 @@ func cloneArgs(l []ComputedArg) []ComputedArg {
 		if a.Number != nil {
 			n := *a.Number
 			a.Number = &n
+		}
+		if a.Integer != nil {
+			n := *a.Integer
+			a.Integer = &n
+		}
+		if a.Decimal != nil {
+			s := *a.Decimal
+			a.Decimal = &s
 		}
 		out[i] = a
 	}
@@ -241,7 +348,7 @@ func ComputedInputs(t Transform) []string {
 func computedFindings(sourceType, table string, info TableColumns, spec PipelineSpec) []TransformFinding {
 	var out []TransformFinding
 	for i, t := range spec.Transforms {
-		if t.Type != "computed" || t.Table != table {
+		if t.Type != "computed" || t.Table != table || t.Expression != "" {
 			continue
 		}
 		label := StepLabel(i, t)

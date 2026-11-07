@@ -2382,6 +2382,19 @@ Fix:
 Use a Debezium image that ships the class (Settings → Debezium versions), or remove the step.
 ```
 
+<a id="transform-expression"></a>
+### `transform_expression`
+
+**Transforms: expressions**
+
+- Why: Flink CDC only. A computed column or filter written as an expression (or a computed function) reads a column the table doesn't have or can't share (masked or left out), takes a value of a kind its function doesn't, mixes kinds Flink CDC can't mix, or reads a column whose name Flink CDC compiles as one of its time functions (NOW, DATE_FORMAT, …). Each would stop the job when it starts or on the first row.
+
+Fix:
+
+```
+Under Transform, change the step as the message says (pick another column, or CAST the value to the kind the function takes), or remove it.
+```
+
 <a id="transform-field-conflict"></a>
 ### `transform_field_conflict`
 

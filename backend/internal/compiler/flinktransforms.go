@@ -8,6 +8,7 @@ import (
 
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/expr"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 )
 
@@ -82,7 +83,14 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				if slices.Contains(columns[table], t.Name) && !slices.Contains(rules.Exclude, t.Name) {
 					return nil, problem.New(422, "transform_field_conflict", fmt.Sprintf("%s already has a column %s: name the computed column differently.", table, t.Name))
 				}
-				added = append(added, computedSQL(t)+" AS "+sqlIdent(t.Name))
+				if err := janinoColumns(t, table); err != nil {
+					return nil, err
+				}
+				sql, err := domain.ComputedSQL(t)
+				if err != nil {
+					return nil, problem.New(422, "transform_expression", fmt.Sprintf("%s, step %s: %v", table, t.Name, err))
+				}
+				added = append(added, sql+" AS "+sqlIdent(t.Name))
 				addedNames = append(addedNames, t.Name)
 			case "add_field":
 				addedNames = append(addedNames, t.Name)
@@ -93,6 +101,9 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				added = append(added, sqlString(value)+" AS "+sqlIdent(t.Name))
 			case "filter":
 				if t.Type == "filter" && t.Typed() {
+					if err := janinoColumns(t, table); err != nil {
+						return nil, err
+					}
 					f, err := flinkFilter(t)
 					if err != nil {
 						return nil, err
@@ -174,46 +185,6 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 	return out, nil
 }
 
-// computedSQL is a computed step's expression: columns back-quoted, literals quoted, numbers
-// as decoded (domain.ComputedFunctions); casts to a number are TRY_CAST.
-func computedSQL(t domain.Transform) string {
-	arg := func(a domain.ComputedArg) string {
-		switch {
-		case a.Column != "":
-			return sqlIdent(a.Column)
-		case a.Text != nil:
-			return sqlString(*a.Text)
-		case a.Number != nil:
-			return fmt.Sprint(*a.Number)
-		}
-		return "NULL"
-	}
-	args := make([]string, len(t.Args))
-	for i, a := range t.Args {
-		args[i] = arg(a)
-		if t.Function == "concat" && a.Column != "" {
-			args[i] = "CAST(" + args[i] + " AS STRING)"
-		}
-	}
-	switch t.Function {
-	case "upper", "lower", "trim":
-		return strings.ToUpper(t.Function) + "(" + args[0] + ")"
-	case "length":
-		return "CHAR_LENGTH(" + args[0] + ")"
-	case "concat":
-		return "CONCAT(" + strings.Join(args, ", ") + ")"
-	case "substr":
-		return "SUBSTR(" + strings.Join(args, ", ") + ")"
-	case "date_format":
-		return "DATE_FORMAT(" + args[0] + ", " + args[1] + ")"
-	case "to_text":
-		return "CAST(" + args[0] + " AS STRING)"
-	case "to_integer":
-		return "TRY_CAST(" + args[0] + " AS BIGINT)"
-	}
-	return "NULL"
-}
-
 func maskedColumns(spec domain.PipelineSpec) []string {
 	var out []string
 	for _, t := range domain.ColumnKeys(spec.Source.Columns) {
@@ -231,6 +202,16 @@ func transformTitle(typ string) string {
 // flinkFilter is a typed filter as a Flink CDC filter expression. NULL never equals anything, as
 // in Debezium: "not equal" and "not in" keep a row whose value is null.
 func flinkFilter(t domain.Transform) (string, error) {
+	if t.Expression != "" {
+		n, err := domain.ExpressionOf(t)
+		if err == nil {
+			var s string
+			if s, err = expr.FlinkChecked(n); err == nil {
+				return s, nil
+			}
+		}
+		return "", problem.New(422, "transform_expression", "A filter expression can't be compiled: "+err.Error())
+	}
 	var parts []string
 	if len(t.Operations) > 0 {
 		types := map[string]bool{}
@@ -278,8 +259,17 @@ func flinkRule(r domain.FilterRule) (string, error) {
 			return "", err
 		}
 		op := map[string]string{"eq": "=", "ne": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}[r.Op]
+		// Flink CDC's "=" is Java equals: 5 never equals a BIGINT 5, nor 2.5 a DECIMAL 2.50. Equality
+		// with a number compares both sides as DOUBLE (ADR 0008); "<" and ">" compare numbers already.
+		left := col
+		if numericValue(r.Value) && (r.Op == "eq" || r.Op == "ne") {
+			left, lit = "TRY_CAST("+col+" AS DOUBLE)", "TRY_CAST("+lit+" AS DOUBLE)"
+		}
 		if r.Op == "ne" {
-			return "(" + col + " IS NULL OR " + col + " <> " + lit + ")", nil
+			return "(" + col + " IS NULL OR " + left + " <> " + lit + ")", nil
+		}
+		if left != col {
+			return "(" + left + " " + op + " " + lit + ")", nil
 		}
 		return "(" + col + " " + op + " " + lit + ")", nil
 	case "in", "not_in":
@@ -290,6 +280,22 @@ func flinkRule(r domain.FilterRule) (string, error) {
 				return "", err
 			}
 			lits[i] = lit
+		}
+		// A list with a number compares each value, numbers as DOUBLE (see eq above).
+		if slices.ContainsFunc(r.Values, numericValue) {
+			eqs := make([]string, len(r.Values))
+			for i, v := range r.Values {
+				if numericValue(v) {
+					eqs[i] = "TRY_CAST(" + col + " AS DOUBLE) = TRY_CAST(" + lits[i] + " AS DOUBLE)"
+				} else {
+					eqs[i] = col + " = " + lits[i]
+				}
+			}
+			either := "(" + strings.Join(eqs, " OR ") + ")"
+			if r.Op == "not_in" {
+				return "(" + col + " IS NULL OR NOT " + either + ")", nil
+			}
+			return either, nil
 		}
 		if r.Op == "not_in" {
 			return "(" + col + " IS NULL OR " + col + " NOT IN (" + strings.Join(lits, ", ") + "))", nil
@@ -389,4 +395,35 @@ func yamlScalar(s string) string {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(s)
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// numericValue reports a rule value that is a number.
+func numericValue(v any) bool {
+	switch v.(type) {
+	case json.Number, float64, int, int64:
+		return true
+	}
+	return false
+}
+
+// janinoColumns refuses a step that reads a column Flink CDC 3.7.0 would compile as one of its
+// time functions inside an expression (ADR 0008): the job would fail to start.
+func janinoColumns(t domain.Transform, table string) error {
+	var cols []string
+	switch {
+	case t.Type == "computed" && t.Expression == "":
+		cols = domain.ComputedInputs(t)
+	case t.Type == "filter":
+		for _, r := range t.Rules {
+			cols = append(cols, r.Field)
+		}
+	}
+	for _, c := range cols {
+		if expr.JaninoName(c) {
+			return problem.New(422, "transform_expression", fmt.Sprintf(
+				"%s: Flink CDC reads a column named %s as its %s function inside an expression, so a step can't use it. Leave the step out, or run this pipeline on Debezium.",
+				table, c, strings.ToUpper(c)))
+		}
+	}
+	return nil
 }
