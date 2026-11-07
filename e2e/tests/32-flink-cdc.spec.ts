@@ -1,8 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { Api, choose, defaultProject, signIn, unique } from './helpers';
-import { ICEBERG_REST, SOURCE_PG } from './fixtures';
-import { ownerSql, waitFor } from './data';
+import { ICEBERG_REST, ORACLE, ORACLE_XE, SOURCE_PG } from './fixtures';
+import { oracleSQL, ownerSql, waitFor } from './data';
 import { layoutProblems } from './layout';
 import { walkWizard } from './walk';
 
@@ -405,5 +405,128 @@ test('Flink CDC: Keep deleted rows sits under Keep rows, and a filter goes befor
   await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
   const saved = await api.get<{ spec: { transforms: { type: string }[] } }>(url);
   expect(saved.spec.transforms.map((t) => t.type)).toEqual(['filter', 'soft_delete']);
+  await api.send('DELETE', url);
+});
+
+type Check = { code: string; status: string; blocking?: boolean; message: string };
+type Pre = { ok: boolean; sections: { key: string; report: { checks: Check[] } }[] };
+const checkIn = (pre: Pre, code: string) => {
+  for (const s of pre.sections) {
+    const c = s.report.checks.find((x) => x.code === code);
+    if (c) return { section: s.key, ...c };
+  }
+  return undefined;
+};
+
+/*
+ * Oracle on Flink CDC (ADR 0006): Oracle XE 21c → Iceberg. Preflight names what the reader needs,
+ * Prepare creates the flush table in the CDB root, the first copy and a streamed row arrive, every
+ * wizard step round-trips, and a version that adds a table is blocked while a saved position would
+ * be restored (even when forced).
+ */
+test('Flink CDC: Oracle → Iceberg copies, streams, and blocks added tables', async ({ page }) => {
+  test.setTimeout(1_500_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const engines = await api.get<{ id: string; sources: string[] | null }[]>('/api/v1/engines');
+  expect(engines.find((e) => e.id === 'flink-cdc')?.sources).toContain('oracle');
+
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('flinko');
+  const upper = tag.replace(/-/g, '_').toUpperCase();
+  const table = `SHOP.FLINK_${upper}`;
+  const added = `SHOP.FLINK_${upper}_B`;
+  for (const t of [table, added]) {
+    oracleSQL(`CREATE TABLE ${t} (ID NUMBER(10) PRIMARY KEY, STATUS VARCHAR2(40), TOTAL NUMBER(10,2));
+ALTER TABLE ${t} ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+INSERT INTO ${t} VALUES (1, 'BEFORE-${upper}', 1);`, 'source-oracle-xe');
+  }
+  const { password, ...ora } = ORACLE_XE;
+  const { secret_access_key, ...iceberg } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'oracle', name: `ora-${tag}`, config: ora, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  const p = await api.send<{ id: string; engine: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
+    spec: { source: { tables: { include: [table] } }, sink: { naming: `fo_${tag.replace(/-/g, '_')}_{table}` } },
+  }, 201);
+  expect(p.engine).toBe('flink-cdc');
+  const url = `${base}/pipelines/${p.id}`;
+
+  // Every wizard step on an Oracle Flink CDC pipeline.
+  await signIn(page);
+  await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+
+  const pre = await api.send<Pre>('POST', `${url}/preflight`, {});
+  const version = checkIn(pre, 'flink_oracle_version');
+  expect(version?.status, JSON.stringify(version)).toBe('pass');
+  expect(version?.section).toBe('config');
+  // This deploy copies: the statistics ANALYZE replaces are named before it runs.
+  expect(checkIn(pre, 'flink_oracle_analyze')?.status).toBe('warn');
+  expect(checkIn(pre, 'flink_oracle_flush_table')?.status).toBe('pass');
+  expect(checkIn(pre, 'ora_managed_tables'), 'a Debezium-only check on a Flink pipeline').toBeUndefined();
+
+  await api.send('POST', `${url}/deploy`, {});
+  await waitFor('Oracle Flink CDC pipeline streaming', async () => {
+    const cur = await api.get<{ lifecycle: string; status: unknown }>(url);
+    if (cur.lifecycle === 'failed') throw new Error(JSON.stringify(cur.status));
+    return cur.lifecycle === 'streaming';
+  }, 900_000);
+  await waitFor('copied row readable in Iceberg', async () => {
+    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
+    return e.records.some((r) => r.value.STATUS === `BEFORE-${upper}`);
+  }, 420_000);
+  const marker = `AFTER-${upper}`;
+  oracleSQL(`INSERT INTO ${table} VALUES (2, '${marker}', 2);`, 'source-oracle-xe');
+  await waitFor('streamed row readable in Iceberg', async () => {
+    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
+    return e.records.some((r) => r.value.STATUS === marker);
+  }, 420_000);
+
+  // A version that adds a table can't restore the saved position: blocked, even when forced.
+  await waitFor('a saved position', async () => {
+    const sp = await api.get<{ positions: unknown[] }>(`${url}/positions`);
+    return sp.positions.length > 0;
+  }, 300_000);
+  const cur = await api.get<{ version: number; spec: Record<string, unknown> }>(url);
+  await api.patch(url, { spec: { ...cur.spec, source: { tables: { include: [table, added] } } } }, cur.version);
+  const pre2 = await api.send<Pre>('POST', `${url}/preflight`, {});
+  const blocked = checkIn(pre2, 'flink_tables_added');
+  expect(blocked?.status, JSON.stringify(blocked)).toBe('fail');
+  expect(blocked?.section).toBe('config');
+  expect(blocked?.message).toContain(added);
+  const forced = await api.raw('POST', `${url}/deploy`, { force_reason: 'e2e: a forced deploy must not skip flink_tables_added' });
+  expect(forced.status(), await forced.text()).toBeGreaterThanOrEqual(400);
+
+  await api.send('DELETE', `${url}?drop_destinations=true`);
+  await waitFor('Oracle Flink CDC pipeline deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
+  for (const t of [table, added]) oracleSQL(`DROP TABLE ${t} PURGE;`, 'source-oracle-xe');
+});
+
+// E24: Oracle Database Free (here the 26ai build) can't be read by Flink CDC's Oracle reader, and
+// preflight says so where a forced deploy can't skip it.
+test('Flink CDC: an Oracle release its reader can\'t read is refused before deploy', async () => {
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('flinkof');
+  const { password, ...ora } = ORACLE;
+  const { secret_access_key, ...iceberg } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'oracle', name: `oraf-${tag}`, config: ora, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
+    spec: { source: { tables: { include: ['SHOP.ORDERS'] } }, sink: { naming: `fof_${tag.replace(/-/g, '_')}_{table}` } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  const pre = await api.send<Pre>('POST', `${url}/preflight`, {});
+  const version = checkIn(pre, 'flink_oracle_version');
+  expect(version?.status, JSON.stringify(version)).toBe('fail');
+  expect(version?.blocking).toBe(true);
+  expect(version?.section).toBe('config');
+  expect(version?.message).toMatch(/Free|26ai/);
   await api.send('DELETE', url);
 });

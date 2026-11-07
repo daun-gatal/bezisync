@@ -739,6 +739,9 @@ func DriverPropertyRefusal(sourceType, key string) string {
 	if strings.HasPrefix(key, "debezium.source.driver.") && slices.Contains(NoJDBC, sourceType) {
 		return "this source has no JDBC driver, so driver.* properties do nothing"
 	}
+	if option, ok := strings.CutPrefix(key, "source."); ok {
+		return connectors.FlinkSourceIgnores(sourceType, option)
+	}
 	return ""
 }
 
@@ -769,10 +772,17 @@ func refuseDriverProps(ctx context.Context, q db.Querier, sourceID uuid.UUID, pr
 // advancedCheck blocks a deploy whose advanced properties BeziSync can't pass on, including ones
 // that would change what it compiled for this pipeline. It is a configuration check, so a forced
 // deploy can't skip it.
-func advancedCheck(spec domain.PipelineSpec, managed map[string]bool, flink bool) *checks.Check {
+func advancedCheck(spec domain.PipelineSpec, managed map[string]bool, flink bool, sourceType string) *checks.Check {
 	refused := compiler.AdvancedRefusals(spec.Advanced, managed)
 	if flink {
 		refused = compiler.FlinkAdvancedRefusals(spec.Advanced, managed)
+		for _, k := range sortedStrings(spec.Advanced) {
+			if block, option, _ := strings.Cut(k, "."); block == "source" && !slices.ContainsFunc(refused, func(v compiler.AdvancedVerdict) bool { return v.Key == k }) {
+				if why := connectors.FlinkSourceIgnores(sourceType, option); why != "" {
+					refused = append(refused, compiler.AdvancedVerdict{Key: k, Class: compiler.AdvancedInvalid, Message: why})
+				}
+			}
+		}
 	}
 	if len(refused) == 0 {
 		return nil
@@ -1210,6 +1220,12 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	if srcErr != nil {
 		return nil, srcErr
 	}
+	if drop := connectors.FlinkDebeziumOnlyChecks(sourceConn.Type); len(drop) > 0 && EngineOf(p) == engine.FlinkCDC {
+		kept := slices.DeleteFunc(slices.Clone(srcReport.Checks), func(c checks.Check) bool { return slices.Contains(drop, c.Code) })
+		if len(kept) != len(srcReport.Checks) {
+			srcReport = checks.Summarize(kept, started)
+		}
+	}
 	if sinkErr != nil {
 		return nil, sinkErr
 	}
@@ -1279,7 +1295,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 			if c, err := CompileFor(ctx, q, p, clean, ""); err == nil {
 				managed = c.Managed
 			}
-			if c := advancedCheck(spec, managed, EngineOf(p) == engine.FlinkCDC); c != nil {
+			if c := advancedCheck(spec, managed, EngineOf(p) == engine.FlinkCDC, sourceConn.Type); c != nil {
 				cfgCheck = *c
 			}
 		}
@@ -1288,7 +1304,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	}
 	configChecks := []checks.Check{cfgCheck}
 	if compiled != nil {
-		if c := advancedCheck(spec, compiled.Managed, compiled.Flink != nil); c != nil {
+		if c := advancedCheck(spec, compiled.Managed, compiled.Flink != nil, sourceConn.Type); c != nil {
 			configChecks = append(configChecks, *c)
 		} else if c := unverifiedCheck(spec); c != nil {
 			configChecks = append(configChecks, *c)
@@ -1334,10 +1350,14 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	if c := MinimumDebeziumCheck(image, srcDesc); c != nil && !flink {
 		configChecks = append(configChecks, *c)
 	}
-	if spec.Policies.DeliveryCanary && !(srcDesc != nil && srcDesc.SupportsCanary && sinkDesc != nil && sinkDesc.Canary) {
+	if spec.Policies.DeliveryCanary && !CanaryRuns(EngineOf(p), srcDesc, sinkDesc) {
+		msg := "The delivery canary needs a source BeziSync can write a canary row to (" +
+			connectors.CanarySources() + ") and a destination where BeziSync can find it again (not SQS or HTTP); it stays off for this pipeline."
+		if flink {
+			msg = "Flink CDC pipelines have no delivery canary: they capture only the pipeline's tables, so a canary row would never arrive. It stays off; health comes from the job and its saved positions."
+		}
 		configChecks = append(configChecks, checks.Check{Code: "delivery_canary_unavailable", Title: "Delivery canary", Status: checks.Warn,
-			Category: checks.CatResilience, Message: "The delivery canary needs a source BeziSync can write a canary row to (" +
-				connectors.CanarySources() + ") and a destination where BeziSync can find it again (not SQS or HTTP); it stays off for this pipeline."})
+			Category: checks.CatResilience, Message: msg})
 	}
 	if srcDesc != nil && !srcDesc.Capture.Incremental && p.DeployedVersionID != nil {
 		deployed, err := SpecOf(ctx, q, p.DeployedVersionID)
@@ -1357,6 +1377,11 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 			return nil, err
 		}
 		if c != nil {
+			configChecks = append(configChecks, *c)
+		}
+		if c, err = flinkTablesAddedCheck(ctx, q, p, spec, sourceConn.Type); err != nil {
+			return nil, err
+		} else if c != nil {
 			configChecks = append(configChecks, *c)
 		}
 	}
@@ -1394,12 +1419,23 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		cctx := connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec}
 		configChecks = append(configChecks, sinkChecks(ctx, sink, sinkDesc, cctx, compiled.Destinations, discover, flink)...)
 	}
-	sections = append(sections, PreflightSection{Key: "config", Title: "Configuration", Report: checks.Summarize(configChecks, started)})
+	var engineChecks []checks.Check
 	if flink {
-		engineChecks, err := FlinkChecks(ctx, q, p, spec, rt, sourceConn, discover, srcReport)
-		if err != nil {
+		if engineChecks, err = FlinkChecks(ctx, q, p, spec, rt, sourceConn, discover, srcReport); err != nil {
 			return nil, err
 		}
+		// A check whose failure the job can't survive goes where a forced deploy can't skip it.
+		for i := 0; i < len(engineChecks); {
+			if slices.Contains(flinkConfigChecks, engineChecks[i].Code) {
+				configChecks = append(configChecks, engineChecks[i])
+				engineChecks = slices.Delete(engineChecks, i, i+1)
+				continue
+			}
+			i++
+		}
+	}
+	sections = append(sections, PreflightSection{Key: "config", Title: "Configuration", Report: checks.Summarize(configChecks, started)})
+	if flink {
 		sections = append(sections, PreflightSection{Key: "engine", Title: "Flink CDC", Report: checks.Summarize(engineChecks, started)})
 	}
 	policy, err := PolicyChecks(ctx, q, p, spec)
@@ -1566,7 +1602,18 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 		return nil, nil, err
 	}
 	// Tables added to a running pipeline are copied while it streams, where the source can. Only
-	// Debezium needs a snapshot signal for that; Flink CDC copies added tables itself (AddTables).
+	// Debezium needs a snapshot signal for that; Flink CDC copies added tables itself where its
+	// reader can (AddTables). Where it can't (Oracle), preflight let this deploy through only with
+	// nothing left to restore; the positions saved before it must never be restored (ADR 0006).
+	if previous != nil && *previous != v.ID && len(report.Change.TablesAdded) > 0 {
+		src, err := GetConnection(ctx, q, p.SourceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := recordTablesFloor(ctx, q, p, src.Type, report.Change.TablesAdded); err != nil {
+			return nil, nil, err
+		}
+	}
 	if previous != nil && *previous != v.ID && len(report.Change.TablesAdded) > 0 && capture.Incremental &&
 		engine.CapsFor(EngineOf(p), "").RecopyTable {
 		tables := make([]any, len(report.Change.TablesAdded))
@@ -1879,4 +1926,14 @@ func writePins(ctx context.Context, q db.Querier, p *models.Pipeline, v *models.
 	v.Spec, v.SpecHash = db.Map(m), domain.SpecHash(pinned)
 	_, err = q.Exec(ctx, `UPDATE pipeline_versions SET spec = $1, spec_hash = $2 WHERE id = $3`, v.Spec, v.SpecHash, v.ID)
 	return err
+}
+
+// flinkConfigChecks are Flink CDC checks a forced deploy can't skip: the job could only fail.
+var flinkConfigChecks = []string{"flink_oracle_version"}
+
+// CanaryRuns reports whether the delivery canary can run for a pipeline: a source BeziSync writes a
+// canary row to, a destination it reads it back from, and Debezium (Flink CDC captures only the
+// spec's tables, so the canary row never reaches the destination).
+func CanaryRuns(id engine.ID, srcDesc, sinkDesc *connectors.Descriptor) bool {
+	return id != engine.FlinkCDC && srcDesc != nil && srcDesc.SupportsCanary && sinkDesc != nil && sinkDesc.Canary
 }

@@ -54,9 +54,14 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   kubeconfig and the repo's `deploy/` directory, so tests install agents as users would.
 - `E2E_GREP="pattern" scripts/e2e.sh` runs a subset while iterating; commit only after a full run.
 - Flink CDC journeys (`32-flink-cdc.spec.ts`) need an image BeziSync doesn't publish: build the
-  reference Dockerfile into the Docker daemon and run with `E2E_FLINK_IMAGE=<image>` (imported into
-  k3s, registered by the spec; skipped without it). Postgres sources on Flink CDC need
-  `REPLICA IDENTITY FULL`, so Flink specs create their own tables with `ownerSql`.
+  reference Dockerfile (with the `oracle` connector) into the Docker daemon and run with
+  `E2E_FLINK_IMAGE=<image>` (imported into k3s, registered by the spec; skipped without it).
+  Postgres sources on Flink CDC need `REPLICA IDENTITY FULL`, so Flink specs create their own tables
+  with `ownerSql`. Flink CDC's Oracle reader can't read Oracle Database Free (the Debezium fixture
+  `15-source-oracle.yaml`), so its journey uses Oracle XE 21c (`15-source-oracle-xe.yaml`, CDB `XE`,
+  PDB `XEPDB1`, `ANALYZE ANY` granted, no flush table pre-created) and checks that the Free fixture
+  is refused by `flink_oracle_version`. Its live Go tests run with
+  `BEZISYNC_TEST_ORACLE_FLINK=host:port` against a database prepared like that fixture.
 - `walkWizard` (`e2e/tests/walk.ts`) opens every wizard step of a pipeline and fails on a save
   error, on Review not settling on "All changes saved", on a save after it settled (an autosave
   loop) or on the last save's spec differing from the server's. Use it whenever a change touches a

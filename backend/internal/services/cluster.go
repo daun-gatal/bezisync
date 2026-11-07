@@ -3,12 +3,14 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
+	"github.com/daun-gatal/bezisync/backend/internal/problem"
 )
 
 // ArtifactFlinkShape is the shape a custom Flink CDC cluster was packed into at deploy, with the
@@ -241,4 +243,76 @@ func PreviewCluster(ctx context.Context, q db.Querier, p *models.Pipeline, c *do
 		out.Streaming = &s
 	}
 	return out, nil
+}
+
+// ArtifactTablesFloor is the newest saved position when a deploy added tables to a pipeline whose
+// source can't copy added tables (Flink CDC on Oracle): a position at or below it was saved before
+// those tables were captured, so restoring it would never copy them (ADR 0006).
+const ArtifactTablesFloor = "flink_tables_floor"
+
+// flinkTablesAddedCheck blocks a deploy that adds tables to a running Flink CDC pipeline whose
+// source can't copy added tables while it would restore a saved position. In the config section,
+// so a forced deploy can't skip it.
+func flinkTablesAddedCheck(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec, sourceType string) (*checks.Check, error) {
+	if p.DeployedVersionID == nil || engine.CapsFor(engine.FlinkCDC, sourceType).AddTables {
+		return nil, nil
+	}
+	deployed, err := SpecOf(ctx, q, p.DeployedVersionID)
+	if err != nil || deployed == nil {
+		return nil, err
+	}
+	added := domain.SummarizeChange(deployed, spec).TablesAdded
+	if len(added) == 0 {
+		return nil, nil
+	}
+	left, known := positionLeft(ctx, p)
+	return tablesAddedCheck(added, left, known, engine.CapsFor(engine.FlinkCDC, sourceType).Why["add_tables"]), nil
+}
+
+func tablesAddedCheck(added []string, left, known bool, why string) *checks.Check {
+	tables := strings.Join(added, ", ")
+	if known && !left {
+		return &checks.Check{Code: "flink_tables_added", Title: "Added tables", Category: checks.CatTables, Status: checks.Pass,
+			Message: fmt.Sprintf("%s: no saved position is left to restore, so the pipeline starts as Start over chose (copying every table, or reading from now).", tables)}
+	}
+	c := &checks.Check{Code: "flink_tables_added", Title: "Added tables", Category: checks.CatTables, Status: checks.Fail, Blocking: true,
+		Message: fmt.Sprintf("This version adds %s, and the pipeline would restore its saved position, which never copies tables added after it: their existing rows would be missing.", tables),
+		Why:     why,
+		Fix: &checks.Fix{Kind: "text", Who: "you",
+			Code: "Pause the pipeline and use Positions → Start over (it copies every table again), then deploy. Or capture the new tables in a second pipeline."}}
+	if !known {
+		c.Message += " BeziSync couldn't read the saved positions to see whether one is left."
+	}
+	return c
+}
+
+// restoreBelowFloor refuses restoring a saved position from before tables were added (see
+// ArtifactTablesFloor).
+func restoreBelowFloor(p *models.Pipeline, id int64) error {
+	floor := int64(toFloat(p.Artifacts[ArtifactTablesFloor]))
+	if floor > 0 && id <= floor {
+		return problem.Conflict("position_before_tables",
+			fmt.Sprintf("Saved position #%d was saved before this version's added tables were captured: restoring it would never copy them. Restore a later one, or Start over.", id), nil)
+	}
+	return nil
+}
+
+// recordTablesFloor marks the saved positions a deploy that added tables makes unsafe to restore.
+func recordTablesFloor(ctx context.Context, q db.Querier, p *models.Pipeline, sourceType string, added []string) error {
+	if len(added) == 0 || EngineOf(p) != engine.FlinkCDC || engine.CapsFor(engine.FlinkCDC, sourceType).AddTables {
+		return nil
+	}
+	conn, err := stateConn(ctx)
+	if err != nil {
+		return err
+	}
+	latest, err := latestSavedID(ctx, conn, p.ShortID())
+	_ = conn.Close(ctx)
+	if err != nil {
+		return err
+	}
+	artifacts := cloneArtifacts(p)
+	artifacts[ArtifactTablesFloor] = latest
+	p.Artifacts = artifacts
+	return SavePipeline(ctx, q, p)
 }

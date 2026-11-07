@@ -856,6 +856,18 @@ func (s *oracleSource) Prepare(ctx context.Context, conn Resolved, c CompileCont
 	if err != nil {
 		return nil, err
 	}
+	if c.Engine == "flink-cdc" {
+		// No signal or canary table (Flink CDC reads neither); on a multitenant database the flush
+		// table its Debezium 1.9 needs in the CDB root (ADR 0006).
+		if cfg.PDB == "" {
+			return nil, nil
+		}
+		r, err := s.prepareFlush(ctx, conn, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return []ArtifactResult{r}, nil
+	}
 	db, done, err := oraConnect(ctx, conn, cfg.tableService(), 6*time.Second)
 	if err != nil {
 		return nil, err
@@ -880,6 +892,11 @@ func (s *oracleSource) Cleanup(ctx context.Context, conn Resolved, c CompileCont
 	cfg, _, err := oraCfg(conn)
 	if err != nil {
 		return nil, err
+	}
+	if c.Engine == "flink-cdc" {
+		// It created no table of its own; the flush table is the connector user's, shared by every
+		// pipeline (either engine) that mines as that user.
+		return nil, nil
 	}
 	db, done, err := oraConnect(ctx, conn, cfg.tableService(), 6*time.Second)
 	if err != nil {
@@ -990,6 +1007,9 @@ func (s *oracleSource) Probe(ctx context.Context, conn Resolved, c CompileContex
 		}
 	}
 	fix := "Keep archived logs longer (RMAN deletion policy, recovery area size; on RDS 'archivelog retention hours')."
+	if scn == nil && c.Engine == "flink-cdc" {
+		return oraFlinkImpact(kept), nil
+	}
 	if scn == nil {
 		return TimeWindowImpact(nil, kept, "the archive", fix), nil
 	}
@@ -1019,4 +1039,16 @@ func (s *oracleSource) Probe(ctx context.Context, conn Resolved, c CompileContex
 		impact.RiskFix = "Reset the pipeline's position and copy the tables again. " + fix
 	}
 	return impact, nil
+}
+
+// oraFlinkImpact: a Flink CDC pipeline's SCN is inside its encrypted saved state, so how much redo
+// it still needs isn't measured; only the archive's window is (ADR 0006).
+func oraFlinkImpact(kept *int64) *SourceImpact {
+	impact := &SourceImpact{RetentionSeconds: kept}
+	window := "how long the archive keeps changes is unknown"
+	if kept != nil {
+		window = "the archive keeps changes for " + HumanSeconds(*kept)
+	}
+	impact.Summary = "Flink CDC keeps its position in its saved state, so how much redo it still needs isn't measured; " + window + "."
+	return impact
 }

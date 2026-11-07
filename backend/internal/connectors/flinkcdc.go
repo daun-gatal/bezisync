@@ -99,6 +99,15 @@ func FlinkTableNames(tables []string) error {
 	return nil
 }
 
+// FlinkSourceIgnores is why a raw source option does nothing on this source's Flink CDC reader
+// ("" when it is passed on): Oracle's never hands jdbc.properties.* to its driver.
+func FlinkSourceIgnores(sourceType, option string) string {
+	if sourceType == "oracle" && strings.HasPrefix(option, "jdbc.properties.") {
+		return "Flink CDC's Oracle reader doesn't pass jdbc.properties.* to its driver, so they would do nothing."
+	}
+	return ""
+}
+
 // MyServerIDRange is the MySQL server ids a Flink CDC pipeline's readers use (one each), in
 // blocks of 8 so two Flink CDC pipelines either share a block (a hash collision preflight
 // reports) or never overlap. Flink CDC reads server ids as signed 32-bit numbers: the blocks end

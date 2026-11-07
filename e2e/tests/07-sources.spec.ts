@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
 import mysql from 'mysql2/promise';
 import mssql from 'mssql';
@@ -6,7 +5,7 @@ import { MongoClient } from 'mongodb';
 import pg from 'pg';
 import { Api, defaultProject, signIn, unique } from './helpers';
 import { COCKROACHDB, COCKROACHDB_FROM_RUNNER, KAFKA, MONGO, MONGO_FROM_RUNNER, MSSQL, MSSQL_FROM_RUNNER, MYSQL, MYSQL_FROM_RUNNER, ORACLE, VITESS, VITESS_FROM_RUNNER } from './fixtures';
-import { waitFor } from './data';
+import { oracleSQL, waitFor } from './data';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -152,18 +151,12 @@ test('MongoDB → Kafka', async () => {
     });
 });
 
-/** Runs SQL as the Oracle fixture's application user, inside its pod. */
-function oracleSQL(sql: string): void {
-  execFileSync('kubectl', ['-n', process.env.DATA_NS ?? 'bezisync-e2e-data', 'exec', '-i', 'deploy/source-oracle', '--',
-    'sqlplus', '-s', 'shop/shop-pw@//localhost/FREEPDB1'], { input: `WHENEVER SQLERROR EXIT FAILURE\n${sql}\nCOMMIT;\nEXIT\n`, timeout: 60_000 });
-}
-
 test('Oracle → Kafka with a masked column, a re-copy and the delivery canary', async ({ page }: { page: Page }) => {
   test.setTimeout(1_200_000);
   const { password, ...config } = ORACLE;
   const records = await streamThrough('oracle', { type: 'oracle', config, password }, 'SHOP.ORDERS',
     { columns: { 'SHOP.ORDERS': { mask: ['EMAIL'], exclude: [] } } },
-    async (marker) => oracleSQL(`INSERT INTO shop.orders (status, email, total) VALUES ('${marker}', 'secret@example.com', 3);`),
+    async (marker) => { oracleSQL(`INSERT INTO shop.orders (status, email, total) VALUES ('${marker}', 'secret@example.com', 3);`); },
     (recs, marker) => recs.some((r) => r.value.STATUS === marker),
     async ({ api, url, path }) => {
       // Re-copy while streaming: the rows come again as reads.

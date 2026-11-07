@@ -210,6 +210,10 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 			refused = append(refused, map[string]any{"loc": []string{"advanced", k}, "message": v.Message})
 			continue
 		}
+		if why := connectors.FlinkSourceIgnores(source.Type, option); block == "source" && why != "" {
+			refused = append(refused, map[string]any{"loc": []string{"advanced", k}, "message": why})
+			continue
+		}
 		target.Set(option, spec.Advanced[k])
 	}
 	if len(refused) > 0 {

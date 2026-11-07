@@ -48,7 +48,25 @@ func FlinkChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec dom
 		}
 		out = append(out, c)
 	}
+	if src, err := connectors.GetSource(sourceConn.Type); err == nil {
+		if checker, ok := src.(connectors.FlinkSourceChecker); ok {
+			out = append(out, checker.FlinkChecks(ctx, discover.src, flinkCheckFacts(ctx, p, spec))...)
+		}
+	}
 	return out, nil
+}
+
+// flinkCheckFacts: whether the pipeline copies when it starts without a saved position (Start
+// over's choice until the next deploy, else its snapshot mode) and whether this deploy will.
+func flinkCheckFacts(ctx context.Context, p *models.Pipeline, spec domain.PipelineSpec) connectors.FlinkCheckFacts {
+	copies := spec.Snapshot.Mode != "no_data"
+	if startup, _ := p.Artifacts[ArtifactStartup].(map[string]any); startup != nil {
+		if m, _ := startup["mode"].(string); m != "" {
+			copies = m == "initial"
+		}
+	}
+	left, known := positionLeft(ctx, p)
+	return connectors.FlinkCheckFacts{Tables: spec.Source.Tables.Include, Copies: copies, CopyNow: copies && (!left || !known)}
 }
 
 // flinkAgentCheck: an agent from before Flink CDC would never get the workload.

@@ -177,10 +177,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
 ## Pipelines, compiler, runtimes, controller
 - Engines (`internal/engine`): a pipeline runs on Debezium Server or Flink CDC. `engine.Supports`
   and `engine.Choices` say which engines can run a source/destination pair (Flink CDC: MySQL/MariaDB,
-  PostgreSQL and SQL Server into Iceberg, StarRocks, Doris and Fluss; StarRocks, Doris and Fluss are
+  PostgreSQL, SQL Server and Oracle into Iceberg, StarRocks, Doris and Fluss — only sources with a
+  Flink CDC *pipeline* source; MongoDB, Vitess and TiDB have none, ADR 0006; StarRocks, Doris and Fluss are
   Flink CDC only); `engine.Default` is Debezium wherever it can run. `engine.CapsFor` is what an
   engine can do (edit offsets, copy a table again, saved positions, event formats…), with `Why` for
-  every unavailable action. Capabilities always come from the engine, never from the destination
+  every unavailable action. Capabilities come from the engine and, on Flink CDC, the source type
+  (Oracle: no start from a time, no adding tables without Start over), never from the destination
   type; a source's own `capture` limits still apply on top.
 - A pipeline's engine is stored on its row (`pipelines.engine`, `services.ChooseEngine`): chosen with
   the destination (the requested one, else the current one while it still runs the pair, else the
@@ -258,6 +260,19 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   events `database.schema.table`; options a source lacks are never set (Flink CDC rejects unknown
   options: `heartbeat.interval` is MySQL's and PostgreSQL's). Table names are letters, digits and `_`
   only (Flink CDC splits names at dots and reads them as regular expressions).
+- Oracle on Flink CDC (ADR 0006, `connectors/oracle_flink.go`): Flink CDC 3.7 embeds Debezium
+  **1.9.8**, so raw `source.debezium.*` keys follow 1.9's names (`ClassifyFlinkAdvanced` also refuses
+  1.9's class-loading and connection keys on every Flink source). `jdbc.url` points at the PDB
+  service (the reader lists tables over its own connection), `database` is the CDB and
+  `debezium.database.pdb.name` the PDB; every URL part is checked (`oraFlinkURL`). Prepare keeps
+  `LOG_MINING_FLUSH` with one row in the CDB root (Debezium 1.9 creates it in the PDB but writes it
+  from the root); Cleanup leaves it. Preflight: `flink_oracle_version` (Debezium 1.9.8's banner rule,
+  config section), `flink_oracle_analyze` (the first copy runs `ANALYZE TABLE`),
+  `flink_oracle_flush_table`, and `flink_tables_added` for any source whose `AddTables` is false;
+  `artifacts.flink_tables_floor` keeps restores from skipping added tables. A source with checks of its
+  own for Flink CDC implements `connectors.FlinkSourceChecker`.
+- The delivery canary runs only on Debezium (`services.CanaryRuns`): Flink CDC captures only the
+  spec's tables.
 - Flink CDC in the controller (`controller/flinkcdc.go`): evidence comes from the helper, `/q/health`
   (UP once the job runs on every TaskManager) and `/bz/status`, mapped onto `domain.Metrics`
   (connected while the job runs; copying until the source's log split, `binlog-split` or

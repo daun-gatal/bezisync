@@ -1,11 +1,13 @@
 package compiler_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -187,6 +189,35 @@ var matrixFlinkInput = func() compiler.FlinkInput {
 	return in
 }()
 
+// Oracle stores unquoted names in upper case, and Flink CDC's Oracle reader takes only those
+// (ADR 0006): its rows name the same tables and columns as an Oracle schema would.
+var (
+	oracleTable  = regexp.MustCompile(`"shop\.[a-z_]+"`)
+	oracleColumn = regexp.MustCompile(`"column":"[a-z_]+"`)
+)
+
+func oracleCase(t *testing.T, raw map[string]any) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = oracleTable.ReplaceAllFunc(b, bytes.ToUpper)
+	b = oracleColumn.ReplaceAllFunc(b, func(m []byte) []byte { return append([]byte(`"column":`), bytes.ToUpper(m[len(`"column":`):])...) })
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+var oracleFlinkInput = func() compiler.FlinkInput {
+	in := secrets
+	in.Columns = map[string][]string{"SHOP.ORDERS": {"ID", "TOTAL", "CREATED_AT"}, "SHOP.CUSTOMERS": {"ID", "EMAIL"}}
+	in.Defaults = map[string][]string{}
+	return in
+}()
+
 // flinkOnly are destinations only Flink CDC writes to.
 var flinkOnly = map[string]bool{"starrocks": true, "doris": true, "fluss": true}
 
@@ -286,7 +317,7 @@ func TestCompileMatrixUnchanged(t *testing.T) {
 					got[key] = outcome(compiler.Compile(ctx(spec), matrixConn(t, src), matrixConn(t, snk), ""))
 				}
 			}
-			if !slices.Contains([]string{"mysql", "postgresql", "sqlserver"}, src.Type) || !slices.Contains([]string{"iceberg", "starrocks", "doris", "fluss"}, snk.Type) {
+			if !slices.Contains([]string{"mysql", "postgresql", "sqlserver", "oracle"}, src.Type) || !slices.Contains([]string{"iceberg", "starrocks", "doris", "fluss"}, snk.Type) {
 				continue
 			}
 			flinkSpecs := flinkMatrixSpecs
@@ -301,12 +332,16 @@ func TestCompileMatrixUnchanged(t *testing.T) {
 			}
 			for name, raw := range flinkSpecs {
 				key := "flink-cdc/" + src.Type + "/" + snk.Type + "/" + name
+				input := matrixFlinkInput
+				if src.Type == "oracle" {
+					raw, input = oracleCase(t, raw), oracleFlinkInput
+				}
 				spec, err := matrixSpec(t, raw)
 				if err != nil {
 					got[key] = err.Error()
 					continue
 				}
-				f, err := compiler.CompileFlink(ctx(spec), matrixConn(t, src), matrixConn(t, snk), "flink-cdc:3.7.0-2.2.1", matrixFlinkInput)
+				f, err := compiler.CompileFlink(ctx(spec), matrixConn(t, src), matrixConn(t, snk), "flink-cdc:3.7.0-2.2.1", input)
 				if err != nil {
 					got[key] = outcome(nil, err)
 					continue

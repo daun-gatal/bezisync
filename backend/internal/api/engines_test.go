@@ -28,7 +28,7 @@ func TestFlinkCDCOffUntilAnImageIsRegistered(t *testing.T) {
 		t.Fatal(string(engines.Raw))
 	}
 	// What each engine runs, and Flink CDC's settings and sizes, for the wizard.
-	if at(t, l[0], "sources") != nil || at(t, l[0], "except_sinks").([]any)[0] != "starrocks" || len(at(t, l[1], "sources").([]any)) != 3 ||
+	if at(t, l[0], "sources") != nil || at(t, l[0], "except_sinks").([]any)[0] != "starrocks" || len(at(t, l[1], "sources").([]any)) != 4 ||
 		len(at(t, l[1], "sinks").([]any)) != 4 || len(at(t, l[1], "settings").([]any)) == 0 || at(t, l[1], "sizes", "medium", "parallelism") != float64(4) ||
 		len(at(t, l[0], "settings").([]any)) == 0 || at(t, l[0], "settings").([]any)[0].(map[string]any)["engine"] != "debezium" {
 		t.Fatal(string(engines.Raw))

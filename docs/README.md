@@ -127,6 +127,7 @@ GRANT script for whatever the user lacks (`rdsadmin` procedures on RDS).
 - Checks warn when the archived logs reach back less than a day (on RDS: `archivelog retention
   hours`) and when the first copy may outlast `UNDO_RETENTION` (ORA-01555).
 - The connection is plain TCP; use Oracle Native Network Encryption on the server to encrypt it.
+- Oracle can also run on Flink CDC (Iceberg, StarRocks, Doris, Fluss), with narrower support and more grants: see [Oracle on Flink CDC](#flink-cdc-engine-optional).
 
 ### CockroachDB
 
@@ -509,7 +510,9 @@ hold the rest.
   minutes ago, X s end to end" and firing "Delivery not verified" when a canary does not arrive in
   time (`BEZISYNC_CANARY_INTERVAL_SECONDS`, `BEZISYNC_CANARY_TIMEOUT_SECONDS`). Needs a PostgreSQL,
   MySQL, Oracle (`BZ_CANARY_<id>` in the connector user's schema) or CockroachDB source and a destination BeziSync can read back (every one but HTTP and SQS); it adds
-  one small canary topic, stream or table named like the others.
+  one small canary topic, stream or table named like the others. Flink CDC pipelines have none:
+  they capture only the pipeline's tables, so a canary row would never arrive (preflight says so);
+  their health comes from the job and its saved positions.
 - **Schema** — BeziSync compares the columns of captured tables every few minutes
   (`BEZISYNC_SCHEMA_CHECK_SECONDS`) and lists each change. Dropped columns, type changes and
   missing tables are *breaking* and fire the "Breaking schema change" alert until someone marks
@@ -650,7 +653,7 @@ it, a renamed one moves to its new key, and raw properties are listed as not che
 
 Every pipeline runs on an engine. **Debezium** runs every pipeline unless you choose otherwise and
 is always available. **Flink CDC** keeps database tables in sync in analytics and lakehouse stores:
-it reads MySQL/MariaDB, PostgreSQL and SQL Server and writes Iceberg, StarRocks, Doris and Fluss
+it reads MySQL/MariaDB, PostgreSQL, SQL Server and Oracle and writes Iceberg, StarRocks, Doris and Fluss
 (StarRocks, Doris and Fluss only through Flink CDC). It copies large tables in parallel chunks and
 applies schema changes to the destination tables. Each pipeline runs its own small Flink cluster (a
 JobManager and TaskManagers), so it needs more memory than a Debezium pipeline.
@@ -665,7 +668,7 @@ StarRocks, Doris and Fluss as unavailable with the reason, and Iceberg pipelines
 |---|---|
 | `/opt/flink` | Flink 2.2.1 (the base image); add `flink-shaded-guava-31.1-jre-17.0.jar` to `/opt/flink/lib` (Flink CDC on Flink 2.2 needs it) |
 | `/opt/flink-cdc/lib/flink-cdc-dist-3.7.0-2.2.jar` | Flink CDC's runtime, from the Flink CDC 3.7.0 release |
-| `/opt/flink-cdc/connectors/<name>.jar` | Flink CDC's pipeline connectors (`flink-cdc-pipeline-connector-*-3.7.0-2.2.jar`), renamed: `mysql`, `postgresql`, `sqlserver`, `iceberg`, `starrocks`, `doris`, `fluss`; for Iceberg also `iceberg-aws` (`iceberg-aws-bundle` 1.10.1), `hadoop-client-api` and `hadoop-client-runtime` (3.3.6) and `commons-logging` (1.3.5) |
+| `/opt/flink-cdc/connectors/<name>.jar` | Flink CDC's pipeline connectors (`flink-cdc-pipeline-connector-*-3.7.0-2.2.jar`), renamed: `mysql`, `postgresql`, `sqlserver`, `oracle`, `iceberg`, `starrocks`, `doris`, `fluss`; for Iceberg also `iceberg-aws` (`iceberg-aws-bundle` 1.10.1), `hadoop-client-api` and `hadoop-client-runtime` (3.3.6) and `commons-logging` (1.3.5) |
 | `/opt/flink-cdc/drivers/` | JDBC drivers the connectors leave out (see below) |
 
 Only the connectors your pipelines use have to be there: a pipeline whose connector is missing
@@ -695,7 +698,7 @@ first deploy; after that, create a new pipeline. On Flink CDC:
 - **Tables** need a primary key, or key columns picked in the Tables step (`flink_primary_key`);
   PostgreSQL tables need `REPLICA IDENTITY FULL` (`flink_replica_identity`, with the SQL to run).
   MySQL readers get a block of server ids no other pipeline on that source uses
-  (`flink_server_ids`).
+  (`flink_server_ids`). Oracle has its own list (see *Oracle on Flink CDC* below).
 - **Columns** can be removed or kept, not masked (Flink CDC has no hash function). Filters built
   from rules, renames and added fields work; script filters, outbox, flattening and custom steps are
   Debezium only, and so are value formats (decimals, timestamps, binary): each column keeps its own
@@ -746,6 +749,51 @@ first deploy; after that, create a new pipeline. On Flink CDC:
   deploy that would run out part-way. Kubernetes runtimes need the Role to allow Services
   (`flink_kubernetes_services`; both charts grant it from 0.2.0), and agent runtimes an agent of this
   BeziSync version (`flink_agent_version`).
+
+**Oracle on Flink CDC.** Flink CDC 3.7 reads Oracle through its own copy of Debezium (1.9), so it
+asks more of the database than Debezium Server does, and reads less:
+
+- **Releases:** Enterprise, Standard or Express Edition, multitenant or not, up to 23ai. Oracle
+  Database **Free** (every release) and **Oracle AI Database 26ai** can't be read: preflight blocks
+  them (`flink_oracle_version`, even when forced). Run those pipelines on Debezium. A database that
+  moves to 26ai later stops its Flink pipeline at the next restart, and health says why. Measured end
+  to end on Express Edition 21c; Enterprise Edition passes the same version rule.
+- **Grants:** what Debezium needs (the checks give the script), plus **`ANALYZE ANY`** in the PDB:
+  each first copy runs `ANALYZE TABLE … COMPUTE STATISTICS` on every table before it splits the
+  copy into chunks. That reads the table in full and **replaces its optimizer statistics**, so query
+  plans may change. Preflight warns before every deploy that copies, blocks when the right is
+  missing (`flink_oracle_analyze`, with the `GRANT` to run in the PDB) and blocks tables whose
+  statistics are locked (ORA-38029).
+- **Multitenant:** BeziSync keeps `LOG_MINING_FLUSH` (one row) in the connector user's schema of
+  the **CDB root**, where LogMiner runs, the table Debezium Server's Oracle connector also creates
+  there. The user needs `CREATE TABLE` and a quota in the root, or a DBA creates it
+  (`flink_oracle_flush_table` gives the SQL). It is kept when pipelines are deleted, because every
+  pipeline mining as that user shares it; drop it with `DROP TABLE <user>.LOG_MINING_FLUSH` once
+  none remain. Debezium 1.9 also leaves an empty copy in the PDB. Managed services that allow no
+  objects in the root can't run Oracle on Flink CDC.
+- **Tables:** names must be upper case (Oracle's unquoted names); quoted lower- or mixed-case names
+  are refused (`flink_table_name`). There is no signal or canary table on Flink CDC.
+- **Schema changes:** added columns reach the destination. **Renaming or dropping a column stops
+  the pipeline**: LogMiner can no longer rebuild the changes made before it ("Oracle failed to
+  re-construct redo SQL"), and health says so (`oracle_schema_change`). Pause it and use Positions →
+  Start over. Choose Debezium for tables whose columns get renamed.
+- **Types:** a bare `NUMBER` is written as `DECIMAL(38,19)` (more than 19 digits before the decimal
+  point don't fit; more after it are rounded); `NUMBER(p,0)` up to 18 digits as `BIGINT`, `DATE` as a
+  timestamp.
+- **Positions:** Start over copies every table again or reads from now; there is no start from a
+  time. **Adding tables** to a deployed pipeline needs a Start over first: the reader never copies a
+  table added to a pipeline that restores a saved position, so preflight blocks that deploy
+  (`flink_tables_added`, even when forced) and a position saved before tables were added can no
+  longer be restored. Capture new tables in a second pipeline to avoid the full copy.
+- **Source protection:** the Overview shows how long the archive keeps redo, but not how far behind
+  a Flink pipeline is: its position is inside its encrypted saved state.
+- `source.jdbc.properties.*` are refused (the reader ignores them); `source.debezium.*` take
+  Debezium 1.9's names.
+
+**Other sources.** Flink CDC 3.7 has pipeline sources only for MySQL, PostgreSQL, SQL Server and
+Oracle. MongoDB, Vitess and TiDB have none (only Flink SQL readers, which can't apply schema changes
+or routes), and its OceanBase connector writes rather than reads, so these stay on Debezium (TiDB and
+OceanBase have no BeziSync connection type).
 
 **Operating it.** The Overview shows the cluster: the job, its JobManager and TaskManagers, the
 last saved position and where the pipeline started from. Health comes from the job itself and is

@@ -443,6 +443,12 @@ func TestJobManagerStopsOnFailuresThatDontHeal(t *testing.T) {
 		"org.apache.paimon.catalog.Catalog$TableNotExistException: Table shop.orders does": "destination_missing",
 		"java.lang.NullPointerException: Before data is null for UPDATE/DELETE event.":     "replica_identity",
 		"TransformException: No match found for function signature MD5(<CHARACTER>)":       "transform_failed",
+		// Flink CDC's Oracle reader, as the sandbox logged them (ADR 0006, E21).
+		"java.lang.RuntimeException: Failed to resolve Oracle database version":                                                                                 "oracle_version",
+		"io.debezium.DebeziumException: Oracle failed to re-construct redo SQL 'insert into \"SHOP\".\"ORDERS\"(\"COL 1\")'":                                    "oracle_schema_change",
+		"java.lang.RuntimeException: Fail to analyze table in chunk splitter.\nCaused by: java.sql.SQLSyntaxErrorException: ORA-01031: insufficient privileges": "oracle_analyze",
+		"io.debezium.DebeziumException: Failed to flush Oracle LogWriter (LGWR) buffers to disk":                                                                "oracle_flush_table",
+		"java.lang.IllegalArgumentException: Cannot find any table by the option 'tables' = SHOP.ORDERS":                                                        "tables_missing",
 	}
 	for trace, code := range cases {
 		t.Run(code, func(t *testing.T) {

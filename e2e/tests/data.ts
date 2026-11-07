@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { SOURCE_PG_FROM_RUNNER } from './fixtures';
 
@@ -36,4 +37,12 @@ export async function ownerSql(query: string): Promise<void> {
   } finally {
     await client.end();
   }
+}
+
+/** Runs SQL with sqlplus as an Oracle fixture's application user, inside its pod (no Oracle client
+ *  in the runner): `source-oracle` (Free, PDB FREEPDB1) or `source-oracle-xe` (XE, PDB XEPDB1). */
+export function oracleSQL(sql: string, fixture: 'source-oracle' | 'source-oracle-xe' = 'source-oracle'): string {
+  const pdb = fixture === 'source-oracle' ? 'FREEPDB1' : 'XEPDB1';
+  return execFileSync('kubectl', ['-n', process.env.DATA_NS ?? 'bezisync-e2e-data', 'exec', '-i', `deploy/${fixture}`, '--',
+    'sqlplus', '-s', `shop/shop-pw@//localhost/${pdb}`], { input: `WHENEVER SQLERROR EXIT FAILURE\n${sql}\nCOMMIT;\nEXIT\n`, timeout: 60_000 }).toString();
 }
