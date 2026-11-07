@@ -41,8 +41,10 @@ Two constraints shape the fix:
 
 1. **One dial function for connectors:** `connectors.DialContext` goes through `ssrf.DialContext`,
    which resolves, refuses if any answer is blocked, and dials one of the checked IPs (so DNS can't
-   change in between). The only exception is the local end of a tunnel this process opened:
-   `Tunnel` registers its listener address and removes it when closed. Every driver gets it:
+   change in between). The only exception is the local end of a connection's own SSH forward:
+   `Tunnel` returns, with the address, the dialer that connection's driver must use, which reaches
+   that one listener directly and sends everything else through the guard. No connection can reach
+   another's tunnel (a process-wide allow-list of tunnel ports would let one). Every driver gets it:
    - pgx (`DialFunc`: PostgreSQL, CockroachDB, JDBC PostgreSQL), go-sql-driver/mysql
      (`Config.DialFunc`: MySQL, Vitess, StarRocks/Doris, JDBC MySQL), go-mssqldb
      (`Connector.Dialer`: SQL Server, JDBC SQL Server), go-ora (`NewConnector` + `Dialer`, instead
@@ -52,7 +54,11 @@ Two constraints shape the fix:
    - Pub/Sub and Spanner emulator hosts: `grpc.WithContextDialer`. Google's own endpoints are fixed
      and public, so they keep the library's dialer.
 2. **HTTP clients:** the HTTP sink check, alert webhooks (`postJSON`) and Vault use
-   `ssrf.HTTPClient`, whose every dial, redirects and proxies included, goes through the guard.
+   `ssrf.HTTPClient`, whose every dial, redirects included, goes through the guard. An egress proxy
+   the operator configured (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`) is used, as these calls used it
+   before: the target host is checked before the request goes to the proxy, and the proxy, the
+   operator's own address, is dialled as configured. The proxy then resolves the target itself, so
+   its own egress policy covers that lookup.
    Vault and the HTTP sink don't follow redirects (Vault's token header would go with one). Vault
    and Google Secret Manager answers are read up to 4 MiB.
 3. **AWS: guard the service calls, not the credential chain.** `LoadDefaultConfig` runs with the
@@ -88,7 +94,9 @@ this ADR, and the removal of Known issue 1.
 | S1 | Every driver path (PostgreSQL, CockroachDB, MySQL, Vitess, SQL Server, Oracle, MongoDB, Kafka plain/TLS, Redis plain/TLS, NATS, JDBC ×3, StarRocks/Doris) pointed at a loopback listener | Refused with the guard's message; the listener accepts nothing | `connectors` `TestEveryDriverDialsThroughTheGuard` (fails on the old code: 28 connections) |
 | S2 | Pub/Sub and Spanner emulators, Kinesis and SQS custom endpoints on loopback | No connection reaches the listener | same |
 | S3 | Event Hubs endpoint on loopback | Refused before a client is made | same |
-| S4 | A tunnel's own listener | Dialled; once the tunnel closes, refused again | `TestTunnelEndsAreTheOnlyLoopbackException` |
+| S4 | A tunnelled connection's dialer; another connection | Reaches its own forward only, not another loopback listener; other connections can't reach it; an untunnelled connection gets the plain guard | `TestTunnelEndIsOnlyForItsOwnConnection` |
+| S4b | Kafka/Redis over TLS | The guarded connection completes a verified TLS handshake for the dialled host; no TLS configuration is plain TCP | `TestTLSDialerHandshakes` |
+| S4c | An operator's egress proxy | A public target goes through it; a metadata target is refused before the proxy sees it | `ssrf` `TestHTTPClientUsesTheOperatorsProxy` |
 | S5 | Vault redirect; a 5 MiB Vault answer | Not followed (the other server sees nothing); refused as too large | `secrets` `TestVaultRefusesRedirectsAndHugeAnswers` |
 | S6 | SSH-tunnelled sources and every connector against real fixtures | Unchanged | e2e (`20-ssh-tunnel`, `07-sources`, `08-sinks`, the full suite) |
 | S7 | Existing guard tests | Unchanged | `ssrf`, `secrets`, `api` |
@@ -110,8 +118,10 @@ this ADR, and the removal of Known issue 1.
   open loopback to the whole connection; the registry allows only BeziSync's own listener.
 - **Dial through the SSH client instead of a local listener.** Not every driver can take a dialer
   per connection the same way, and the listener is already shared by the drivers.
-- **Refuse emulator hosts unless allow-listed.** They can be guarded through gRPC; refusing them
-  would break existing installs and the e2e fixtures.
+- **Refuse emulator hosts unless allow-listed.** They can be guarded through gRPC like any host:
+  an emulator on a private address keeps working, and one on loopback (`localhost:8085`) needs
+  `BEZISYNC_SSRF_ALLOW_CIDRS`, as its connection check already did. A separate refuse rule would
+  only add a setting.
 - **`awsconfig.WithHTTPClient(ssrf.HTTPClient)`.** Sends the credential chain through the guard and
   refuses role-based credentials.
 - **A lint or grep for raw dials.** Blind to a driver left on its default dialer (the main gap) and

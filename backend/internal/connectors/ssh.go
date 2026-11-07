@@ -144,15 +144,16 @@ func forward(l net.Listener, client *ssh.Client, host string, port int) {
 	}
 }
 
-// Tunnel returns the (host, port) to connect to: the database itself, or the local end of
-// an SSH forward; close releases it.
-func Tunnel(ctx context.Context, config, secrets map[string]any, host string, port int) (string, int, func(), error) {
+// Tunnel returns the (host, port) to connect to (the database itself, or the local end of an
+// SSH forward), the dialer this connection's driver must use (the SSRF guard, which lets this
+// connection, and only it, reach its own forward: ADR 0004), and close, which releases it.
+func Tunnel(ctx context.Context, config, secrets map[string]any, host string, port int) (string, int, DialFunc, func(), error) {
 	cfg, key, err := SSHOf(config, secrets)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, nil, err
 	}
 	if cfg == nil {
-		return host, port, func() {}, nil
+		return host, port, DialContext, func() {}, nil
 	}
 	dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -160,23 +161,20 @@ func Tunnel(ctx context.Context, config, secrets map[string]any, host string, po
 	// resolved by the bastion ("localhost" there is a normal setup), so it can't be checked here.
 	client, err := dialSSH(dctx, cfg, key, ssrf.DialContext)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, nil, err
 	}
 	var lc net.ListenConfig
 	l, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		_ = client.Close()
-		return "", 0, nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: %v", cfg.Host, cfg.Port, err)}
+		return "", 0, nil, nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: %v", cfg.Host, cfg.Port, err)}
 	}
-	local := l.Addr().String()
-	tunnels.Store(local, struct{}{})
 	go forward(l, client, host, port)
 	closer := func() {
-		tunnels.Delete(local)
 		_ = l.Close()
 		_ = client.Close()
 	}
-	return "127.0.0.1", l.Addr().(*net.TCPAddr).Port, closer, nil
+	return "127.0.0.1", l.Addr().(*net.TCPAddr).Port, tunnelDialer(l.Addr().String()), closer, nil
 }
 
 // Serve keeps a forward open forever, reconnecting with backoff (the connector sidecar).
@@ -235,7 +233,7 @@ func SSHChecks(ctx context.Context, run *checks.Run, config, secrets map[string]
 	if !NetworkCheck(ctx, run, cfg.Host, cfg.Port, code+"_ssh", "the SSH bastion", 0) {
 		return false
 	}
-	_, _, closer, err := Tunnel(ctx, config, secrets, host, port)
+	_, _, _, closer, err := Tunnel(ctx, config, secrets, host, port)
 	if err != nil {
 		var te *TunnelError
 		msg := err.Error()

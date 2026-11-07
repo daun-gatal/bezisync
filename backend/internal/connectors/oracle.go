@@ -126,7 +126,7 @@ func oraConnect(ctx context.Context, conn Resolved, service string, timeout time
 	if err != nil {
 		return nil, nil, err
 	}
-	host, port, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
+	host, port, dial, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,7 +140,7 @@ func oraConnect(ctx context.Context, conn Resolved, service string, timeout time
 		closeTunnel()
 		return nil, nil, fmt.Errorf("unexpected Oracle connector")
 	}
-	connector.Dialer(guardedDialer{}) // the SSRF guard (ADR 0004)
+	connector.Dialer(guardedDialer{dial: dial}) // the SSRF guard, or this connection's own tunnel (ADR 0004)
 	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(1)
 	cctx, cancel := context.WithTimeout(ctx, timeout+5*time.Second)

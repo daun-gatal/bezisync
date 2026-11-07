@@ -547,8 +547,15 @@ func (g *gcpStore) get(ctx context.Context, path string) (map[string]any, error)
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		return nil, errf("Google Secret Manager answered HTTP %d.", resp.StatusCode)
 	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxStoreResponse+1))
+	if err != nil {
+		return nil, errf("Cannot read Google Secret Manager's answer: %v", err)
+	}
+	if len(raw) > maxStoreResponse {
+		return nil, errf("Google Secret Manager's answer is larger than %d MiB.", maxStoreResponse>>20)
+	}
 	var body map[string]any
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxStoreResponse)).Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
 	return body, nil

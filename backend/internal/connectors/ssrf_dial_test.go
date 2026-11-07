@@ -2,8 +2,12 @@ package connectors
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -196,31 +200,78 @@ func TestEveryDriverDialsThroughTheGuard(t *testing.T) {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
-// The local end of a tunnel this process opened is BeziSync's own listener: dialled directly.
-// Any other loopback address stays refused (ADR 0004).
-func TestTunnelEndsAreTheOnlyLoopbackException(t *testing.T) {
+// A tunnelled connection may reach the local end of its own forward and nothing else on
+// loopback: not another connection's tunnel, and no other connection may reach this one's
+// (ADR 0004).
+func TestTunnelEndIsOnlyForItsOwnConnection(t *testing.T) {
 	guardOn(t)
 	host, port, accepted := trap(t)
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	_, otherPort, otherAccepted := trap(t)
+	own := net.JoinHostPort(host, strconv.Itoa(port))
+	other := net.JoinHostPort(host, strconv.Itoa(otherPort))
 	ctx := context.Background()
-	if _, err := DialContext(ctx, "tcp", addr); err == nil {
-		t.Fatal("loopback allowed before it was a tunnel")
-	}
-	tunnels.Store(addr, struct{}{})
-	c, err := DialContext(ctx, "tcp", addr)
+	dial := tunnelDialer(own)
+	c, err := dial(ctx, "tcp", own)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = c.Close()
-	tunnels.Delete(addr)
-	if _, err := DialContext(ctx, "tcp", addr); err == nil {
-		t.Fatal("loopback allowed after the tunnel closed")
+	if _, err := dial(ctx, "tcp", other); err == nil {
+		t.Fatal("a tunnel's dialer reached another loopback listener")
+	}
+	if _, err := DialContext(ctx, "tcp", own); err == nil {
+		t.Fatal("another connection reached this tunnel's listener")
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for accepted.Load() != 1 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if n := accepted.Load(); n != 1 {
-		t.Fatalf("accepted %d, want 1", n)
+	if accepted.Load() != 1 || otherAccepted.Load() != 0 {
+		t.Fatalf("own %d, other %d", accepted.Load(), otherAccepted.Load())
+	}
+	// Without SSH, Tunnel hands back the plain guard.
+	if _, _, d, done, err := Tunnel(ctx, map[string]any{}, map[string]any{}, host, port); err != nil {
+		t.Fatal(err)
+	} else if done(); d == nil {
+		t.Fatal("no dialer")
+	} else if _, err := d(ctx, "tcp", own); err == nil {
+		t.Fatal("an untunnelled connection reached loopback")
+	}
+}
+
+// tlsDialer speaks TLS over the guarded connection with the driver's configuration and the
+// server's name (SNI) when the configuration has none (Kafka and Redis over TLS).
+func TestTLSDialerHandshakes(t *testing.T) {
+	s, err := config.Load(func(k string) (string, bool) {
+		if k == "BEZISYNC_SSRF_ALLOW_CIDRS" {
+			return `["127.0.0.0/8"]`, true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Set(s)
+	t.Cleanup(config.Reset)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	addr := strings.TrimPrefix(srv.URL, "https://") // 127.0.0.1:port, a name the certificate holds
+	c, err := tlsDialer(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})(context.Background(), "tcp", addr)
+	if err != nil {
+		t.Fatal(err) // verification uses the dialled host: it fails if ServerName isn't filled in
+	}
+	defer func() { _ = c.Close() }()
+	tc, ok := c.(*tls.Conn)
+	if !ok || !tc.ConnectionState().HandshakeComplete || len(tc.ConnectionState().VerifiedChains) == 0 {
+		t.Fatalf("tls %v %+v", ok, tc.ConnectionState())
+	}
+	if raw, err := tlsDialer(nil)(context.Background(), "tcp", addr); err != nil {
+		t.Fatal(err)
+	} else if _, isTLS := raw.(*tls.Conn); isTLS {
+		t.Fatal("no TLS configuration must be plain TCP")
+	} else {
+		_ = raw.Close()
 	}
 }

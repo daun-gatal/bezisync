@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -17,25 +16,38 @@ import (
 // DialContext (ADR 0004). Probing first is never enough: a driver resolves DNS again and follows
 // what the server tells it.
 
-// tunnels are the local ends of SSH forwards this process opened (Tunnel): BeziSync's own
-// listeners on loopback, which the guard would otherwise refuse.
-var tunnels sync.Map // "127.0.0.1:port" → struct{}
+// DialFunc opens a connection (the shape pgx, the MySQL driver and franz-go take).
+type DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error)
 
-// DialContext opens a connection for a connector: through the SSRF guard, or directly to the
-// local end of a tunnel this process opened.
+// DialContext opens a connection for a connector through the SSRF guard.
 func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	if _, ok := tunnels.Load(addr); ok {
-		var d net.Dialer
-		return d.DialContext(ctx, network, addr)
-	}
 	return ssrf.DialContext(ctx, network, addr)
 }
 
-// guardedDialer is DialContext as the dialer interface drivers take (SQL Server, Oracle,
-// MongoDB, NATS).
-type guardedDialer struct{ timeout time.Duration }
+// tunnelDialer is the dialer of one tunnelled connection: the local end of its own SSH forward
+// (BeziSync's listener on loopback, which the guard would refuse) is dialled directly; any
+// other address, another tunnel's included, goes through the guard.
+func tunnelDialer(local string) DialFunc {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if addr == local {
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		}
+		return DialContext(ctx, network, addr)
+	}
+}
 
-func (guardedDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+// guardedDialer is a DialFunc (DialContext when nil) as the dialer interface drivers take (SQL
+// Server, Oracle, MongoDB, NATS).
+type guardedDialer struct {
+	dial    DialFunc
+	timeout time.Duration
+}
+
+func (g guardedDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if g.dial != nil {
+		return g.dial(ctx, network, addr)
+	}
 	return DialContext(ctx, network, addr)
 }
 
@@ -47,7 +59,7 @@ func (g guardedDialer) Dial(network, addr string) (net.Conn, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return DialContext(ctx, network, addr)
+	return g.DialContext(ctx, network, addr)
 }
 
 // tlsDialer dials through the guard, then speaks TLS (for drivers that skip their own TLS

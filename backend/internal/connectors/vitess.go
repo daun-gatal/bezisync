@@ -60,7 +60,7 @@ func vtConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 	if err != nil {
 		return nil, nil, err
 	}
-	host, port, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.MySQLPort)
+	host, port, dial, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.MySQLPort)
 	if err != nil {
 		return nil, nil, &MyOperationalError{err} // the tunnel to the MySQL port (the gRPC one is checked first)
 	}
@@ -79,7 +79,7 @@ func vtConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 	mc.AllowCleartextPasswords = true // VTGate's static auth may only offer mysql_clear_password
 	mc.InterpolateParams = true
 	mc.TLSConfig = "preferred"
-	mc.DialFunc = DialContext // the SSRF guard (ADR 0004)
+	mc.DialFunc = dial // the SSRF guard, or this connection's own tunnel (ADR 0004)
 	connector, err := mysql.NewConnector(mc)
 	if err != nil {
 		closeTunnel()

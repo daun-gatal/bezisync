@@ -69,7 +69,7 @@ func myConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 	if err != nil {
 		return nil, nil, err
 	}
-	host, port, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
+	host, port, dial, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -96,7 +96,7 @@ func myConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 	default:
 		mc.TLSConfig = "false"
 	}
-	mc.DialFunc = DialContext // the SSRF guard (ADR 0004)
+	mc.DialFunc = dial // the SSRF guard, or this connection's own tunnel (ADR 0004)
 	connector, err := mysql.NewConnector(mc)
 	if err != nil {
 		closeTunnel()

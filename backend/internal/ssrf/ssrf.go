@@ -11,10 +11,13 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/net/http/httpproxy"
 
 	"github.com/daun-gatal/bezisync/backend/internal/config"
 )
@@ -175,9 +178,65 @@ func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 // HTTPClient is an HTTP client whose every dial (redirects and proxies included) passes the
 // guard: connector checks and previews use it for user-supplied endpoints (catalogs, object
 // stores, cloud APIs with an endpoint override).
+//
+// An egress proxy the operator configured (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) is used: the target
+// host is checked before each request goes to the proxy, and the proxy itself, the operator's own
+// address, is dialled as configured. The proxy then resolves the target itself; its own egress
+// policy covers that lookup (ADR 0004).
 func HTTPClient(timeout time.Duration) *http.Client {
+	env := httpproxy.FromEnvironment()
+	proxyOf := env.ProxyFunc()
+	proxies := map[string]bool{}
+	for _, raw := range []string{env.HTTPProxy, env.HTTPSProxy} {
+		if u := proxyURL(raw); u != nil {
+			proxies[canonicalAddr(u)] = true
+		}
+	}
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.Proxy = nil
-	t.DialContext = DialContext
+	t.Proxy = func(r *http.Request) (*url.URL, error) {
+		u, err := proxyOf(r.URL)
+		if err != nil || u == nil {
+			return nil, err
+		}
+		if _, err := ResolveChecked(r.Context(), r.URL.Hostname(), portOf(r.URL)); err != nil {
+			return nil, err
+		}
+		return u, nil
+	}
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if proxies[addr] {
+			d := net.Dialer{Timeout: 30 * time.Second}
+			return d.DialContext(ctx, network, addr)
+		}
+		return DialContext(ctx, network, addr)
+	}
 	return &http.Client{Timeout: timeout, Transport: t}
+}
+
+// proxyURL parses a proxy setting the way net/http does (a bare host means http://host).
+func proxyURL(raw string) *url.URL {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		if u, err = url.Parse("http://" + raw); err != nil || u.Host == "" {
+			return nil
+		}
+	}
+	return u
+}
+
+func portOf(u *url.URL) int {
+	if p, err := strconv.Atoi(u.Port()); err == nil {
+		return p
+	}
+	if u.Scheme == "https" {
+		return 443
+	}
+	return 80
+}
+
+func canonicalAddr(u *url.URL) string {
+	return net.JoinHostPort(u.Hostname(), strconv.Itoa(portOf(u)))
 }

@@ -85,7 +85,7 @@ func pgConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*pgx.
 	if err != nil {
 		return nil, nil, err
 	}
-	host, port, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
+	host, port, dial, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -116,7 +116,7 @@ func pgConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*pgx.
 		done()
 		return nil, nil, err
 	}
-	pc.DialFunc = DialContext // the SSRF guard (ADR 0004)
+	pc.DialFunc = dial // the SSRF guard, or this connection's own tunnel (ADR 0004)
 	pc.RuntimeParams["options"] = "-c statement_timeout=10000"
 	cctx, cancel := context.WithTimeout(ctx, timeout+5*time.Second)
 	defer cancel()
