@@ -127,7 +127,7 @@ GRANT script for whatever the user lacks (`rdsadmin` procedures on RDS).
 - Checks warn when the archived logs reach back less than a day (on RDS: `archivelog retention
   hours`) and when the first copy may outlast `UNDO_RETENTION` (ORA-01555).
 - The connection is plain TCP; use Oracle Native Network Encryption on the server to encrypt it.
-- Oracle can also run on Flink CDC (Iceberg, StarRocks, Doris, Fluss), with narrower support and more grants: see [Oracle on Flink CDC](#flink-cdc-engine-optional).
+- Oracle can also run on Flink CDC (Iceberg, Kafka, StarRocks, Doris, Fluss, Elasticsearch, Paimon, OceanBase), with narrower support and more grants: see [Oracle on Flink CDC](#flink-cdc-engine-optional).
 
 ### CockroachDB
 
@@ -445,7 +445,7 @@ Debezium retries, rather than being lost.
 
 ### Elasticsearch
 
-**Flink CDC only.** One index per source table (the naming pattern, lower-cased), one document per row
+**Flink CDC only.** One index per source table (the naming pattern, dots as `_`, lower-cased), one document per row
 whose id is the primary key: an update replaces it and a delete removes it. Indexes are created by
 their first document with dynamic mappings (decimals arrive as text, NULL fields are left out); create
 an index template beforehand for other mappings. The connection takes the hosts (`http(s)://host:port`),
@@ -460,7 +460,9 @@ reads documents, and deleting a pipeline with "drop destinations" deletes its in
 **Flink CDC only.** One primary-key Paimon table per source table in a filesystem catalog on S3 or an
 S3-compatible store (MinIO, RustFS, Ceph): the warehouse (`s3://bucket/path`), the database, the endpoint
 and path-style access for S3-compatible stores, and an access key (or the runtime's own credentials).
-Rows are written on each Flink checkpoint. Preflight writes and deletes a test object under the warehouse.
+Rows are written on each Flink checkpoint. Preflight writes and deletes a test object under the warehouse,
+and blocks a destination that already exists without a primary key (`paimon_keyless_table`: an append
+table can't take updates and deletes).
 BeziSync has no Paimon reader: the Events tab has nothing to show and health stays Unknown (read the
 tables with Flink SQL, Spark or Trino), and deleting a pipeline leaves its tables in place (the report says
 how to drop them). Tables are not partitioned.
@@ -470,7 +472,8 @@ how to drop them). Tables are not partitioned.
 **Flink CDC only.** One table per source table in a database of a MySQL tenant, created by Flink CDC over
 JDBC with OceanBase Connector/J (in the reference image; no MySQL driver needed). The connection takes the
 host and port (2881, or 2883 through OBProxy), the database (created if missing), the user as
-`user@tenant` (`#cluster` through OBProxy) and its password. Times are written in UTC. Only new and renamed
+`user@tenant` (`#cluster` through OBProxy) and its password. The connection is not encrypted (no TLS
+options): keep OceanBase and the runtime on a private network. Times are written in UTC. Only new and renamed
 columns are applied as schema changes; others stop the pipeline. Preflight signs in and creates and drops a
 test table; the Events tab reads rows; "drop destinations" drops the tables.
 
@@ -481,7 +484,9 @@ pattern gives, created at deploy with the connection's partitions and replicatio
 by the primary key (`{"TableId": …, "id": …}`) and spread by it, and the value is Flink CDC's
 Debezium-style JSON: `before`, `after` and `op`, with a short `source` and no schema or `ts_ms`. Consumers
 written for Debezium's records need to accept that shape; switching a pipeline's engine changes it.
-Only JSON without the schema is available on Flink CDC.
+Only JSON without the schema is available on Flink CDC, and the Transform step's event shape (Row after
+change, delete handling, added fields) doesn't apply there: it is hidden on Flink CDC, and records are
+always the change envelope above.
 
 ## Databases behind a bastion (SSH)
 

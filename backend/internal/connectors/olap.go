@@ -54,11 +54,21 @@ func (o olapSink) cfg(conn Resolved) (olapConfig, error) {
 	}
 	c := olapConfig{Host: Str(cfg, "host"), QueryPort: Int(cfg, "query_port"), HTTP: Int(cfg, "http_port"), Database: Str(cfg, "database"),
 		User: Str(cfg, "user"), Replicas: Int(cfg, "replicas"), Password: Str(sec, "password"), BENodes: Str(cfg, "be_nodes")}
+	if !olapHost(c.Host) {
+		// The host goes into JDBC and load URLs: a '/', '?' or '&' would add driver options.
+		return c, problem.New(422, o.typ+"_config", "The host is a host name or an IP address.").
+			WithErrors([]map[string]any{{"loc": []string{"config", "host"}, "message": "Use a host name or an IP address, without a scheme, port or path."}})
+	}
 	if !flinkName.MatchString(c.Database) {
 		return c, problem.New(422, o.typ+"_config", "The database name may only use letters, digits and underscores.").
 			WithErrors([]map[string]any{{"loc": []string{"config", "database"}, "message": "Use letters, digits and '_'."}})
 	}
 	return c, nil
+}
+
+// olapHost: a host name, an IPv4 address, or an IPv6 address (bracketed by net.JoinHostPort).
+func olapHost(h string) bool {
+	return oraHost.MatchString(h) || (net.ParseIP(h) != nil && strings.Contains(h, ":"))
 }
 
 func (c olapConfig) open(ctx context.Context, timeout time.Duration) (*sql.Conn, func(), error) {

@@ -3523,7 +3523,8 @@
     "The sink writes with the client of the version set on the connection (6, 7 or 8); a different server major version refuses its requests."
    ],
    "fixes": [
-    "Set the connection's version to {major}."
+    "Set the connection's version to {major}.",
+    "Point the connection at an Elasticsearch 6, 7 or 8 cluster."
    ]
   },
   {
@@ -3536,7 +3537,8 @@
     "Flink CDC's sink writes into indexes created by their first document (it creates no mappings), and drops none: BeziSync writes and deletes a test index."
    ],
    "fixes": [
-    "Give the user the create_index, index and delete_index privileges on the indexes it writes, and allow automatic index creation (action.auto_create_index)."
+    "Give the user the create_index, index and delete_index privileges on the indexes it writes and on bezisync_check_* (the check's test index), and allow automatic index creation (action.auto_create_index).",
+    "Delete the index {probe}, and give the user the delete_index privilege on the indexes it writes."
    ]
   },
   {
@@ -3558,8 +3560,22 @@
     "Paimon keeps data, manifests and snapshots under the warehouse: BeziSync writes and deletes a test object there."
    ],
    "fixes": [
-    "Check the bucket, the endpoint (and path-style access for S3-compatible stores) and that the key may put, get, list and delete objects under the warehouse.",
+    "Check the bucket, the endpoint (and path-style access for S3-compatible stores) and that the key, or the runtime's role when no key is set, may put, get, list and delete objects under the warehouse (the check tries put and delete).",
     "Allow the address in BEZISYNC_SSRF_ALLOW_CIDRS, or use another endpoint."
+   ]
+  },
+  {
+   "code": "paimon_keyless_table",
+   "section": "Apache Paimon",
+   "titles": [
+    "Table without a key"
+   ],
+   "whys": [
+    "A Paimon table without a primary key is an append table: it can't take the updates and deletes Flink CDC writes. Tables the pipeline creates get the source table's key."
+   ],
+   "fixes": [
+    "Drop them (with Flink SQL or Spark on the same catalog) and let the pipeline create them with the table's key, or name other destinations in the Destination step.",
+    "Check that the connection may list and read objects under the warehouse, then run preflight again."
    ]
   },
   {

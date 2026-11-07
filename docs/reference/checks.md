@@ -1796,7 +1796,13 @@ GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{da
 Fix:
 
 ```
-Give the user the create_index, index and delete_index privileges on the indexes it writes, and allow automatic index creation (action.auto_create_index).
+Give the user the create_index, index and delete_index privileges on the indexes it writes and on bezisync_check_* (the check's test index), and allow automatic index creation (action.auto_create_index).
+```
+
+Fix:
+
+```
+Delete the index {probe}, and give the user the delete_index privilege on the indexes it writes.
 ```
 
 <a id="elasticsearch-login"></a>
@@ -1852,12 +1858,37 @@ Fix:
 Set the connection's version to {major}.
 ```
 
+Fix:
+
+```
+Point the connection at an Elasticsearch 6, 7 or 8 cluster.
+```
+
 ## Apache Paimon
 
 <a id="paimon-config"></a>
 ### `paimon_config`
 
 **Settings**
+
+<a id="paimon-keyless-table"></a>
+### `paimon_keyless_table`
+
+**Table without a key**
+
+- Why: A Paimon table without a primary key is an append table: it can't take the updates and deletes Flink CDC writes. Tables the pipeline creates get the source table's key.
+
+Fix:
+
+```
+Drop them (with Flink SQL or Spark on the same catalog) and let the pipeline create them with the table's key, or name other destinations in the Destination step.
+```
+
+Fix:
+
+```
+Check that the connection may list and read objects under the warehouse, then run preflight again.
+```
 
 <a id="paimon-storage"></a>
 ### `paimon_storage`
@@ -1869,7 +1900,7 @@ Set the connection's version to {major}.
 Fix:
 
 ```
-Check the bucket, the endpoint (and path-style access for S3-compatible stores) and that the key may put, get, list and delete objects under the warehouse.
+Check the bucket, the endpoint (and path-style access for S3-compatible stores) and that the key, or the runtime's role when no key is set, may put, get, list and delete objects under the warehouse (the check tries put and delete).
 ```
 
 Fix:

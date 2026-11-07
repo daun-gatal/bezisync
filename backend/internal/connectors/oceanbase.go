@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
@@ -29,7 +30,8 @@ var oceanbase = olapSink{typ: "oceanbase", title: "OceanBase", noHTTP: true, mys
 		return fmt.Sprintf("CREATE TABLE %s (id INT NOT NULL PRIMARY KEY)", table)
 	},
 	grant: func(c olapConfig) string {
-		return fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO '%s';\nGRANT CREATE ON *.* TO '%s';", olapQuote(c.Database), userOnly(c.User), userOnly(c.User))
+		u := strings.ReplaceAll(userOnly(c.User), "'", "''")
+		return fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO '%s';\nGRANT CREATE ON *.* TO '%s';", olapQuote(c.Database), u, u)
 	}}
 
 // userOnly is the user name without OceanBase's @tenant#cluster suffix (as GRANT names it).

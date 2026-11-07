@@ -78,9 +78,10 @@ func (s *elasticsearchSink) FlinkSink(conn Resolved, _ CompileContext) (*FlinkBl
 	return &FlinkBlock{Options: o, Env: env, Connector: "elasticsearch"}, nil
 }
 
-// FlinkDestination: the index is the routed name, lower-cased (index names are lower case).
+// FlinkDestination: the index is the routed name with dots as '_', lower-cased (index names
+// are lower case; the naming rule checks names with dots flattened).
 func (s *elasticsearchSink) FlinkDestination(_ Resolved, _ CompileContext, routed string) string {
-	return strings.ToLower(routed)
+	return strings.ToLower(strings.ReplaceAll(routed, ".", "_"))
 }
 
 // Destination is the same name for every caller that shows one.
@@ -166,7 +167,14 @@ func (s *elasticsearchSink) Check(ctx context.Context, conn Resolved, _ []string
 	}
 	_ = json.Unmarshal(body, &info)
 	run.Passed("elasticsearch_login", "Sign in", checks.CatAuth, "Signed in (Elasticsearch "+info.Version.Number+").", "")
-	if major, _, _ := strings.Cut(info.Version.Number, "."); major != strconv.Itoa(cfg.Version) {
+	major, _, _ := strings.Cut(info.Version.Number, ".")
+	switch {
+	case major == "":
+		run.Add(checks.Check{Code: "elasticsearch_version", Title: "Version", Status: checks.Fail, Category: checks.CatDestination, Blocking: true,
+			Message: "The server didn't say its version: it may not be Elasticsearch (OpenSearch isn't supported by the sink).", Technical: firstRunes(string(body), 300),
+			Fix: &checks.Fix{Kind: "text", Who: "you", Code: "Point the connection at an Elasticsearch 6, 7 or 8 cluster."}})
+		return checks.Summarize(run.Checks, started), nil
+	case major != strconv.Itoa(cfg.Version):
 		run.Add(checks.Check{Code: "elasticsearch_version", Title: "Version", Status: checks.Fail, Category: checks.CatDestination, Blocking: true,
 			Message: fmt.Sprintf("The connection says version %d, and the server is %s: the sink writes with the client of the version set.", cfg.Version, info.Version.Number),
 			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Set the connection's version to " + major + "."}})
@@ -183,10 +191,20 @@ func (s *elasticsearchSink) Check(ctx context.Context, conn Resolved, _ []string
 		}
 		run.Add(checks.Check{Code: "elasticsearch_create_index", Title: "Create indexes", Status: checks.Fail, Category: checks.CatPermissions, Blocking: true,
 			Message: "Writing a document to a new index failed: Flink CDC's sink writes into indexes created by their first document.", Technical: firstRunes(tech, 300),
-			Fix: &checks.Fix{Kind: "text", Who: "Elasticsearch admin", Code: "Give the user the create_index, index and delete_index privileges on the indexes it writes, and allow automatic index creation (action.auto_create_index)."}})
+			Fix: &checks.Fix{Kind: "text", Who: "Elasticsearch admin", Code: "Give the user the create_index, index and delete_index privileges on the indexes it writes and on bezisync_check_* (the check's test index), and allow automatic index creation (action.auto_create_index)."}})
 		return checks.Summarize(run.Checks, started), nil
 	}
-	_, _, _ = esCall(context.WithoutCancel(ctx), cfg, http.MethodDelete, "/"+probe, nil, 10*time.Second)
+	if code, body, err := esCall(context.WithoutCancel(ctx), cfg, http.MethodDelete, "/"+probe, nil, 10*time.Second); err != nil || code != http.StatusOK {
+		tech := string(body)
+		if err != nil {
+			tech = err.Error()
+		}
+		// The sink never deletes indexes; "drop destinations" does, so a missing right shows here.
+		run.Add(checks.Check{Code: "elasticsearch_create_index", Title: "Create indexes", Status: checks.Warn, Category: checks.CatPermissions,
+			Message: "Created a test index, " + probe + ", but couldn't delete it: deleting a pipeline with \"drop destinations\" would fail the same way.", Technical: firstRunes(tech, 300),
+			Fix: &checks.Fix{Kind: "text", Who: "Elasticsearch admin", Code: "Delete the index " + probe + ", and give the user the delete_index privilege on the indexes it writes."}})
+		return checks.Summarize(run.Checks, started), nil
+	}
 	run.Passed("elasticsearch_create_index", "Create indexes", checks.CatPermissions, "Created and deleted a test index.", "")
 	return checks.Summarize(run.Checks, started), nil
 }

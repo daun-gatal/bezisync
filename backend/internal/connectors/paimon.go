@@ -2,13 +2,17 @@ package connectors
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
@@ -105,20 +109,29 @@ func (s *paimonSink) Destination(conn Resolved, _ CompileContext, routed string)
 	return databaseDestination(conn, routed)
 }
 
-func (c paimonConfig) client() *s3.Client {
-	opts := s3.Options{Region: c.Region, HTTPClient: ssrf.HTTPClient(15 * time.Second), UsePathStyle: c.PathStyle}
-	if opts.Region == "" {
-		opts.Region = "us-east-1"
+// client signs with the connection's key, or else the runtime's own credentials (an IAM role,
+// as the form offers), and dials only what the SSRF guard allows.
+func (c paimonConfig) client(ctx context.Context) (*s3.Client, error) {
+	var opts []func(*awsconfig.LoadOptions) error
+	region := c.Region
+	if region == "" {
+		region = "us-east-1"
 	}
-	if c.Endpoint != "" {
-		opts.BaseEndpoint = aws.String(c.Endpoint)
-	}
+	opts = append(opts, awsconfig.WithRegion(region))
 	if c.AccessKey != "" {
-		opts.Credentials = credentials.NewStaticCredentialsProvider(c.AccessKey, c.SecretKey, "")
-	} else {
-		opts.Credentials = aws.AnonymousCredentials{}
+		opts = append(opts, awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(c.AccessKey, c.SecretKey, "")))
 	}
-	return s3.New(opts)
+	ac, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	ac = GuardAWS(ac, 15*time.Second)
+	return s3.NewFromConfig(ac, func(o *s3.Options) {
+		o.UsePathStyle = c.PathStyle
+		if c.Endpoint != "" {
+			o.BaseEndpoint = aws.String(c.Endpoint)
+		}
+	}), nil
 }
 
 func (s *paimonSink) Check(ctx context.Context, conn Resolved, _ []string) (checks.Report, error) {
@@ -135,8 +148,10 @@ func (s *paimonSink) Check(ctx context.Context, conn Resolved, _ []string) (chec
 	}
 	// Paimon writes data, manifests and snapshots under the warehouse: prove a write and a delete.
 	key := strings.TrimPrefix(cfg.Prefix+"/bezisync-check-"+fmt.Sprint(time.Now().UnixNano()), "/")
-	c := cfg.client()
-	_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(cfg.Bucket), Key: aws.String(key), Body: strings.NewReader("bezisync")})
+	c, err := cfg.client(ctx)
+	if err == nil {
+		_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(cfg.Bucket), Key: aws.String(key), Body: strings.NewReader("bezisync")})
+	}
 	if err == nil {
 		_, err = c.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(cfg.Bucket), Key: aws.String(key)})
 	}
@@ -148,7 +163,7 @@ func (s *paimonSink) Check(ctx context.Context, conn Resolved, _ []string) (chec
 	case err != nil:
 		run.Add(checks.Check{Code: "paimon_storage", Title: "Storage", Status: checks.Fail, Category: checks.CatPermissions, Blocking: true,
 			Message: "Writing and deleting a test object under " + cfg.Warehouse + " failed.", Technical: firstRunes(err.Error(), 300),
-			Fix: &checks.Fix{Kind: "text", Who: "you", Code: "Check the bucket, the endpoint (and path-style access for S3-compatible stores) and that the key may put, get, list and delete objects under the warehouse."}})
+			Fix: &checks.Fix{Kind: "text", Who: "you", Code: "Check the bucket, the endpoint (and path-style access for S3-compatible stores) and that the key, or the runtime's role when no key is set, may put, get, list and delete objects under the warehouse (the check tries put and delete)."}})
 	default:
 		run.Passed("paimon_storage", "Storage", checks.CatPermissions, "Wrote and deleted a test object under "+cfg.Warehouse+".", "")
 	}
@@ -173,4 +188,106 @@ func databaseDestination(conn Resolved, routed string) string {
 		db = "cdc"
 	}
 	return db + "." + strings.ToLower(strings.ReplaceAll(routed, ".", "_"))
+}
+
+// paimonObjects is what the keyless-table check reads from the warehouse.
+type paimonObjects interface {
+	list(ctx context.Context, prefix string) ([]string, error)
+	get(ctx context.Context, key string) ([]byte, error)
+}
+
+type paimonS3 struct {
+	c      *s3.Client
+	bucket string
+}
+
+func (p paimonS3) list(ctx context.Context, prefix string) ([]string, error) {
+	var keys []string
+	pg := s3.NewListObjectsV2Paginator(p.c, &s3.ListObjectsV2Input{Bucket: aws.String(p.bucket), Prefix: aws.String(prefix)})
+	for pg.HasMorePages() {
+		out, err := pg.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range out.Contents {
+			keys = append(keys, aws.ToString(o.Key))
+		}
+	}
+	return keys, nil
+}
+
+func (p paimonS3) get(ctx context.Context, key string) ([]byte, error) {
+	out, err := p.c.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(p.bucket), Key: aws.String(key)})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = out.Body.Close() }()
+	return io.ReadAll(io.LimitReader(out.Body, 4<<20))
+}
+
+// CheckPipeline is paimon_keyless_table: a table that already exists without a primary key is
+// an append table, which can't take the updates and deletes Flink CDC writes (the job fails on
+// the first one, or the changes are kept as rows). Tables the pipeline creates get the key.
+func (s *paimonSink) CheckPipeline(ctx context.Context, conn Resolved, _ CompileContext, facts PipelineFacts) []checks.Check {
+	cfg, err := paimonCfg(conn)
+	if err != nil {
+		return nil
+	}
+	c, err := cfg.client(ctx)
+	if err != nil {
+		return nil
+	}
+	return paimonKeylessChecks(ctx, paimonS3{c: c, bucket: cfg.Bucket}, cfg.Prefix, facts.Destinations)
+}
+
+func paimonKeylessChecks(ctx context.Context, store paimonObjects, prefix string, destinations map[string]string) []checks.Check {
+	var keyless, unread []string
+	checked := false
+	for _, dest := range sortedUnique(destinations) {
+		db, table, _ := strings.Cut(dest, ".")
+		// A table's schema files: <warehouse>/<db>.db/<table>/schema/schema-<n> (the highest is current).
+		dir := strings.TrimPrefix(prefix+"/"+db+".db/"+table+"/schema/schema-", "/")
+		keys, err := store.list(ctx, dir)
+		if err != nil {
+			unread = append(unread, dest)
+			continue
+		}
+		latest, n := "", -1
+		for _, k := range keys {
+			if v, err := strconv.Atoi(strings.TrimPrefix(k, dir)); err == nil && v > n {
+				latest, n = k, v
+			}
+		}
+		checked = true
+		if latest == "" {
+			continue // the pipeline creates it, with the key
+		}
+		body, err := store.get(ctx, latest)
+		var schema struct {
+			PrimaryKeys []string `json:"primaryKeys"`
+		}
+		if err != nil || json.Unmarshal(body, &schema) != nil {
+			unread = append(unread, dest)
+			continue
+		}
+		if len(schema.PrimaryKeys) == 0 {
+			keyless = append(keyless, dest)
+		}
+	}
+	var out []checks.Check
+	if len(keyless) > 0 {
+		out = append(out, checks.Check{Code: "paimon_keyless_table", Title: "Table without a key", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
+			Message: "These Paimon tables exist without a primary key, so they can't take the updates and deletes Flink CDC writes: " + strings.Join(keyless, ", ") + ".",
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Drop them (with Flink SQL or Spark on the same catalog) and let the pipeline create them with the table's key, or name other destinations in the Destination step."}})
+	}
+	if len(unread) > 0 {
+		out = append(out, checks.Check{Code: "paimon_keyless_table", Title: "Table without a key", Status: checks.Warn, Category: checks.CatDestination,
+			Message: "Couldn't read whether these tables exist, or their schema: " + strings.Join(unread, ", ") + ".",
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Check that the connection may list and read objects under the warehouse, then run preflight again."}})
+	}
+	if len(keyless)+len(unread) == 0 && checked {
+		out = append(out, checks.Check{Code: "paimon_keyless_table", Title: "Table without a key", Status: checks.Pass, Category: checks.CatDestination,
+			Message: "No destination exists without a primary key."})
+	}
+	return out
 }

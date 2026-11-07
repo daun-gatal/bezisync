@@ -3525,9 +3525,9 @@
     "sink": {
      "naming": {
       "default": "{schema}_{table}",
-      "pattern": "^[A-Za-z0-9_-]+$",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
       "max_length": 200,
-      "message": "Use letters, digits, '_' and '-' (dots become '_'; index names are lower-cased).",
+      "message": "Start with a letter or digit; then letters, digits, '_' and '-' (dots become '_'; index names are lower-cased).",
       "flatten_dots": true,
       "single": false
      },

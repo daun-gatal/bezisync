@@ -1,7 +1,8 @@
 // Package engine names the change-data-capture engines BeziSync runs and what each one can do.
 //
 // Debezium Server streams change events to every destination BeziSync supports. Flink CDC keeps
-// tables in sync in analytics and lakehouse stores (Iceberg, StarRocks, Doris, Fluss), reading
+// tables in sync in analytics, lakehouse and search stores (Iceberg, StarRocks, Doris, Fluss,
+// Paimon, OceanBase, Elasticsearch) and writes Kafka too, reading
 // MySQL/MariaDB, PostgreSQL, SQL Server and Oracle. A pipeline's engine is chosen when its
 // destination is chosen and fixed once it is deployed.
 //

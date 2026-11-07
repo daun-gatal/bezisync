@@ -31,7 +31,7 @@ to Kafka, Iceberg or a dozen other destinations — with the mistakes caught bef
 | 🤖 **AI agents over MCP** | Agents get exactly their person's permissions, and never a credential. |
 
 **Sources:** PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, MongoDB, CockroachDB, Vitess, Google Cloud Spanner.<br>
-**Destinations:** Kafka, Apache Iceberg, PostgreSQL / MySQL / MariaDB / SQL Server, Pub/Sub, Kinesis, SQS, SNS, Azure Event Hubs, Pulsar, Redis Streams, NATS, HTTP; with the optional Flink CDC engine also StarRocks, Apache Doris and Apache Fluss.<br>
+**Destinations:** Kafka, Apache Iceberg, PostgreSQL / MySQL / MariaDB / SQL Server, Pub/Sub, Kinesis, SQS, SNS, Azure Event Hubs, Pulsar, Redis Streams, NATS, HTTP; with the optional Flink CDC engine also StarRocks, Apache Doris, Apache Fluss, Apache Paimon, OceanBase and Elasticsearch.<br>
 **Runtimes:** Docker or Kubernetes, in your cluster or remote through an outbound-only agent.
 
 ## Quick start

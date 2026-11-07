@@ -33,6 +33,8 @@ interface Journey {
   readable: boolean;
   /** What "drop destinations" does with the table. */
   cleanup: 'removed' | 'retained';
+  /** S-10: a timestamp column, read back unshifted (OceanBase's tenant default is +08:00). */
+  timestamp?: boolean;
 }
 
 const { password: esPassword, ...esConfig } = ELASTICSEARCH;
@@ -41,7 +43,7 @@ const { secret_access_key: pmSecret, ...pmConfig } = PAIMON;
 const JOURNEYS: Journey[] = [
   { type: 'kafka', config: { ...KAFKA, security_protocol: 'PLAINTEXT', create_topics: true, partitions: 3, replication_factor: 1 }, secrets: {}, readable: true, cleanup: 'removed' },
   { type: 'elasticsearch', config: esConfig, secrets: { password: esPassword }, readable: true, cleanup: 'removed' },
-  { type: 'oceanbase', config: obConfig, secrets: { password: obPassword }, readable: true, cleanup: 'removed' },
+  { type: 'oceanbase', config: obConfig, secrets: { password: obPassword }, readable: true, cleanup: 'removed', timestamp: true },
   { type: 'paimon', config: pmConfig, secrets: { secret_access_key: pmSecret }, readable: false, cleanup: 'retained' },
 ];
 
@@ -52,8 +54,10 @@ async function journey(page: Page, j: Journey) {
   const base = `/api/v1/projects/${project.id}`;
   const tag = unique(`fs-${j.type.slice(0, 5)}`);
   const table = `shop.fs_${tag.replace(/-/g, '_')}`;
-  await ownerSql(`CREATE TABLE ${table} (id bigint PRIMARY KEY, status text, total numeric(10,2)); ALTER TABLE ${table} REPLICA IDENTITY FULL;
-    INSERT INTO ${table} VALUES (1, 'copied', 10.50), (2, 'gone', 2)`);
+  const at = j.timestamp ? ', at timestamp' : '';
+  const atValue = j.timestamp ? ", '2026-01-02 03:04:05'" : '';
+  await ownerSql(`CREATE TABLE ${table} (id bigint PRIMARY KEY, status text, total numeric(10,2)${at}); ALTER TABLE ${table} REPLICA IDENTITY FULL;
+    INSERT INTO ${table} VALUES (1, 'copied', 10.50${atValue}), (2, 'gone', 2${atValue})`);
   const { password, ...pg } = SOURCE_PG;
   const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
   const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
@@ -81,7 +85,7 @@ async function journey(page: Page, j: Journey) {
     if (cur.lifecycle === 'failed') throw new Error(JSON.stringify(cur.status));
     return cur.lifecycle === 'streaming';
   }, 900_000);
-  await ownerSql(`INSERT INTO ${table} VALUES (3, 'streamed', 7.25); UPDATE ${table} SET status = 'changed' WHERE id = 1; DELETE FROM ${table} WHERE id = 2`);
+  await ownerSql(`INSERT INTO ${table} VALUES (3, 'streamed', 7.25${atValue}); UPDATE ${table} SET status = 'changed' WHERE id = 1; DELETE FROM ${table} WHERE id = 2`);
 
   if (j.readable) {
     // Kafka reads the change log (the last change per key wins); the others read the rows.
@@ -94,6 +98,7 @@ async function journey(page: Page, j: Journey) {
         const id = Number((v && 'after' in v ? ((v.after ?? v.before) as Record<string, unknown>)?.id : v?.id) ?? NaN);
         if (!Number.isNaN(id)) rows.set(id, row);
       }
+      if (j.timestamp && rows.get(3)) expect(String(rows.get(3)?.at), 'S-10: written in UTC').toContain('03:04:05');
       return rows.get(1)?.status === 'changed' && rows.get(3)?.status === 'streamed' && (rows.get(2) === null || !rows.has(2));
     }, 600_000);
   } else {
@@ -110,6 +115,11 @@ async function journey(page: Page, j: Journey) {
 
   await api.send('DELETE', `${url}?drop_destinations=true`);
   await waitFor(`Flink CDC → ${j.type} deleted`, async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
+  // "Drop destinations" removed the destination, or says it stays (Paimon: no client to drop it).
+  const gone = await api.get<{ artifacts: { cleanup?: { kind: string; name: string; outcome: string }[] } }>(url);
+  const mine = (gone.artifacts.cleanup ?? []).filter((r) => r.name.toLowerCase().includes(tag.replace(/-/g, '_')));
+  expect(mine.length, JSON.stringify(gone.artifacts.cleanup)).toBeGreaterThan(0);
+  for (const r of mine) expect(r.outcome, JSON.stringify(r)).toBe(j.cleanup);
   await ownerSql(`DROP TABLE IF EXISTS ${table}`);
 }
 
