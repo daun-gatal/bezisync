@@ -96,6 +96,7 @@ func crdbConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*pg
 		done()
 		return nil, nil, err
 	}
+	pc.DialFunc = DialContext // the SSRF guard (ADR 0004)
 	pc.RuntimeParams["statement_timeout"] = "10s"
 	cctx, cancel := context.WithTimeout(ctx, timeout+5*time.Second)
 	defer cancel()

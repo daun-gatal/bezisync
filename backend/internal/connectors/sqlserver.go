@@ -74,6 +74,7 @@ func msConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 		closeTunnel()
 		return nil, nil, err
 	}
+	connector.Dialer = guardedDialer{} // the SSRF guard (ADR 0004)
 	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(1)
 	c, err := db.Conn(ctx)

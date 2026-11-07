@@ -1204,7 +1204,7 @@ All settings are environment variables prefixed with `BEZISYNC_`.
 | `PUBLIC_URL`, `COOKIE_SECURE`, `SESSION_TTL_HOURS` | `http://localhost:8080`, `false`, `12` | Browser access |
 | `ALLOW_PLAIN_HTTP` | `false` | Production over http when the network encrypts traffic (e.g. Tailscale) |
 | `BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | `admin@bezisync.local` / — | First administrator |
-| `SSRF_ALLOW_CIDRS` / `SSRF_EXTRA_DENY_CIDRS` | — | Networks connection checks may (not) reach |
+| `SSRF_ALLOW_CIDRS` / `SSRF_EXTRA_DENY_CIDRS` | — | Networks BeziSync may (not) reach for connections, secret stores and alerts: checks and every later connection (loopback, link-local and cloud metadata are refused by default) |
 | `DEBEZIUM_DEFAULT_IMAGE` | `quay.io/debezium/server:3.7.0.Final` | Image when neither pipeline nor runtime picks one, unless an Admin chose a catalog default |
 | `ICEBERG_IMAGE` | the pinned `ghcr.io/memiiso/debezium-server-iceberg` build | Image of Apache Iceberg pipelines (e.g. a mirror in a private registry) |
 | `AGENT_URL` / `AGENT_IMAGE` / `AGENT_CHART` / `AGENT_CHART_VERSION` | `PUBLIC_URL` / this release's `bezisync` image / OCI chart / the agent chart version the control-plane chart was released with (unset: the newest) | Used in generated agent install commands |

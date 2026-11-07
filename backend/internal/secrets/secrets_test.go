@@ -228,3 +228,33 @@ func TestGoogleEndpointWithoutKeySendsNoSignIn(t *testing.T) {
 		t.Fatal("metadata endpoint allowed")
 	}
 }
+
+// Vault answers through the SSRF guard (ADR 0004, Known issue 1): a redirect isn't followed (the
+// token header would go with it), and an answer is read only up to a bound.
+func TestVaultRefusesRedirectsAndHugeAnswers(t *testing.T) {
+	allowLoopback(t)
+	var leaked bool
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/secret/data/moved":
+			http.Redirect(w, r, other.URL+"/steal", http.StatusTemporaryRedirect)
+		case "/v1/secret/data/huge":
+			_, _ = w.Write([]byte(`{"data":{"data":{"k":"` + strings.Repeat("x", 5<<20) + `"}}}`))
+		}
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	c, err := secrets.Build(ctx, "vault", map[string]any{"address": srv.URL, "mount": "secret", "namespace": "", "auth_method": "token", "approle_mount": "approle"},
+		map[string]any{"token": "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secrets.Get(ctx, c, "moved", nil); err == nil || leaked {
+		t.Fatalf("redirect followed (leaked=%v): %v", leaked, err)
+	}
+	if _, err := secrets.Get(ctx, c, "huge", nil); err == nil || !strings.Contains(err.Error(), "larger than 4 MiB") {
+		t.Fatalf("huge answer: %v", err)
+	}
+}

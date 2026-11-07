@@ -159,7 +159,8 @@ func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	var d net.Dialer
+	// A dial without a deadline of its own still ends (a caller's context usually sets one).
+	d := net.Dialer{Timeout: 30 * time.Second}
 	var last error
 	for _, ip := range ips {
 		c, err := d.DialContext(ctx, network, net.JoinHostPort(ip, portStr))

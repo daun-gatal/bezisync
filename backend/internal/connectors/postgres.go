@@ -116,6 +116,7 @@ func pgConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*pgx.
 		done()
 		return nil, nil, err
 	}
+	pc.DialFunc = DialContext // the SSRF guard (ADR 0004)
 	pc.RuntimeParams["options"] = "-c statement_timeout=10000"
 	cctx, cancel := context.WithTimeout(ctx, timeout+5*time.Second)
 	defer cancel()

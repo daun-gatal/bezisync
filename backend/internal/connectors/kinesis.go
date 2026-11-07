@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -55,7 +54,6 @@ func kinesisCfg(conn Resolved) (kinesisConfig, error) {
 func kinesisClient(ctx context.Context, cfg kinesisConfig) (*kinesis.Client, error) {
 	opts := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(cfg.Region),
-		awsconfig.WithHTTPClient(&http.Client{Timeout: 15 * time.Second}),
 		awsconfig.WithRetryer(func() aws.Retryer { return retry.AddWithMaxAttempts(retry.NewStandard(), 2) }),
 	}
 	if ak := orEmpty(cfg.AccessKey); ak != "" {
@@ -65,6 +63,7 @@ func kinesisClient(ctx context.Context, cfg kinesisConfig) (*kinesis.Client, err
 	if err != nil {
 		return nil, err
 	}
+	ac = GuardAWS(ac, 15*time.Second) // a custom endpoint is dialled through the SSRF guard
 	return kinesis.NewFromConfig(ac, func(o *kinesis.Options) {
 		if ep := orEmpty(cfg.Endpoint); ep != "" {
 			o.BaseEndpoint = aws.String(ep)

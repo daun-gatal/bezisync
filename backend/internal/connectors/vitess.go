@@ -79,6 +79,7 @@ func vtConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 	mc.AllowCleartextPasswords = true // VTGate's static auth may only offer mysql_clear_password
 	mc.InterpolateParams = true
 	mc.TLSConfig = "preferred"
+	mc.DialFunc = DialContext // the SSRF guard (ADR 0004)
 	connector, err := mysql.NewConnector(mc)
 	if err != nil {
 		closeTunnel()

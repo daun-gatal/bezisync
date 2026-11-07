@@ -41,7 +41,9 @@ func natsCfg(conn Resolved) (natsConfig, error) {
 }
 
 func natsConnect(cfg natsConfig) (*nats.Conn, error) {
-	opts := []nats.Option{nats.Timeout(5 * time.Second), nats.NoReconnect(), nats.MaxReconnects(0)}
+	// The SSRF guard (ADR 0004), for every server the cluster advertises too.
+	opts := []nats.Option{nats.Timeout(5 * time.Second), nats.NoReconnect(), nats.MaxReconnects(0),
+		nats.SetCustomDialer(guardedDialer{timeout: 5 * time.Second})}
 	if cfg.User != nil || cfg.Password != nil {
 		opts = append(opts, nats.UserInfo(orEmpty(cfg.User), orEmpty(cfg.Password)))
 	}

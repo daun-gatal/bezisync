@@ -25,8 +25,8 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
 2. **CLI / CI ↔ API** — bearer API tokens (`bzt_…`), hashed, scoped to a project, optional
    read-only, expiring; minted only from an interactive session.
 3. **API / controller ↔ sources and destinations** — outbound connections for checks,
-   discovery, previews and preparation, through the SSRF guard (the paths that don't yet hold it on the final
-   connection are listed in [ARCHITECTURE.md › Known issues](../../ARCHITECTURE.md#known-issues), 1).
+   discovery, previews and preparation, through the SSRF guard on every dial
+   ([ADR 0004](../adr/0004-ssrf-on-every-dial.md)).
 4. **Controller ↔ runtimes** — Kubernetes API (namespaced ServiceAccount) or Docker API;
    for remote runtimes an **agent dials out** with a `bza_…` token, so no inbound access is
    needed to the runtime.
@@ -71,7 +71,7 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
 | Tampering | Saving secret-store settings that break every connection reading from it | Adding and editing a store from the UI test the settings first (`test_first`) and save nothing when the test fails, unless the Admin chooses "Save anyway" |
 | Information disclosure | Secret values reaching the browser through the secret-store picker | Listing returns secret paths and key names only (`…/secrets`, `…/keys`); keys are read server-side and the values dropped there; both need `connection.manage`, like checking a reference. A pasted kubeconfig may only use a static token: `exec` plugins and auth providers are refused, so BeziSync never runs a program a kubeconfig names, and its API server goes through the SSRF guard on every dial |
 | Information disclosure | Probing other projects | Project-scoped authorization; unknown and forbidden look identical (404) |
-| Information disclosure | SSRF via connection hosts (cloud metadata, loopback) | Every outbound check/store call resolves and refuses blocked addresses (all DNS answers checked); admins opt in with `BEZISYNC_SSRF_ALLOW_CIDRS`. Gaps: some calls check the host and then connect with a client of their own, and a few never check; see [ARCHITECTURE.md › Known issues](../../ARCHITECTURE.md#known-issues) (1) |
+| Information disclosure | SSRF via connection hosts (cloud metadata, loopback) | Every outbound check/store call resolves and refuses blocked addresses (all DNS answers checked); admins opt in with `BEZISYNC_SSRF_ALLOW_CIDRS`. The guard is the dialer itself, for every driver, HTTP client (redirects included), emulator and custom cloud endpoint, so a rebinding DNS answer or an address a server advertises (Kafka brokers, MongoDB members, NATS servers) is checked too; the only exception is the local end of BeziSync's own SSH tunnel. AWS service calls are guarded while the credential chain keeps reaching instance and pod metadata. Residual: Event Hubs' SDK dials AMQP itself, so its endpoint is checked just before each client and a DNS answer that changes in between isn't covered; connector workloads (Debezium, Flink CDC, the SSH sidecar) dial outside BeziSync's guard — limit them with network policy ([ADR 0004](../adr/0004-ssrf-on-every-dial.md)) |
 | Information disclosure | Telemetry leaking details | Off by default; needs both a flag and a collector URL; aggregate counts only; admins can preview the exact payload |
 | Denial of service | Source disk filled by retained WAL | Source-impact probes, "At risk" health, alerts on retained log, retention-limit checks with fixes, `uninstall` removes slots |
 | Denial of service | Expensive checks hammered | Rate limit on connection checks |

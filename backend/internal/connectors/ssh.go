@@ -15,6 +15,7 @@ import (
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/logging"
+	"github.com/daun-gatal/bezisync/backend/internal/ssrf"
 )
 
 // SSH tunnels to databases behind a bastion host. The control plane opens a short-lived
@@ -57,7 +58,7 @@ func SSHOf(config, secrets map[string]any) (*SSHConfig, string, error) {
 	return cfg, key, nil
 }
 
-func dialSSH(ctx context.Context, cfg *SSHConfig, key string) (*ssh.Client, error) {
+func dialSSH(ctx context.Context, cfg *SSHConfig, key string, dial func(ctx context.Context, network, addr string) (net.Conn, error)) (*ssh.Client, error) {
 	signer, err := ssh.ParsePrivateKey([]byte(key))
 	if err != nil {
 		return nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: invalid private key (%v)", cfg.Host, cfg.Port, err)}
@@ -77,8 +78,9 @@ func dialSSH(ctx context.Context, cfg *SSHConfig, key string) (*ssh.Client, erro
 		Timeout:         10 * time.Second,
 	}
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	d := net.Dialer{Timeout: 10 * time.Second}
-	raw, err := d.DialContext(ctx, "tcp", addr)
+	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	raw, err := dial(dctx, "tcp", addr)
 	if err != nil {
 		return nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: %v", cfg.Host, cfg.Port, err)}
 	}
@@ -154,7 +156,9 @@ func Tunnel(ctx context.Context, config, secrets map[string]any, host string, po
 	}
 	dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	client, err := dialSSH(dctx, cfg, key)
+	// The control plane reaches the bastion through the SSRF guard. The forward's target is
+	// resolved by the bastion ("localhost" there is a normal setup), so it can't be checked here.
+	client, err := dialSSH(dctx, cfg, key, ssrf.DialContext)
 	if err != nil {
 		return "", 0, nil, err
 	}
@@ -164,8 +168,11 @@ func Tunnel(ctx context.Context, config, secrets map[string]any, host string, po
 		_ = client.Close()
 		return "", 0, nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: %v", cfg.Host, cfg.Port, err)}
 	}
+	local := l.Addr().String()
+	tunnels.Store(local, struct{}{})
 	go forward(l, client, host, port)
 	closer := func() {
+		tunnels.Delete(local)
 		_ = l.Close()
 		_ = client.Close()
 	}
@@ -183,7 +190,9 @@ func ServeOn(ctx context.Context, cfg *SSHConfig, key, host string, port int, li
 	log := logging.Logger("bezisync.tunnel")
 	delay := time.Second
 	for ctx.Err() == nil {
-		client, err := dialSSH(ctx, cfg, key)
+		// The sidecar runs next to the connector, which reaches the same hosts unguarded: BeziSync's
+		// SSRF guard is the control plane's (ADR 0004), and the bastion passed it at check time.
+		client, err := dialSSH(ctx, cfg, key, (&net.Dialer{}).DialContext)
 		if err == nil {
 			var l net.Listener
 			var lc net.ListenConfig

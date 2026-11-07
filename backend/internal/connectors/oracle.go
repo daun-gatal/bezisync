@@ -135,11 +135,13 @@ func oraConnect(ctx context.Context, conn Resolved, service string, timeout time
 		"TIMEOUT":            "30",
 		"PROGRAM":            "bezisync",
 	})
-	db, err := sql.Open("oracle", url)
-	if err != nil {
+	connector, ok := goora.NewConnector(url).(*goora.OracleConnector)
+	if !ok {
 		closeTunnel()
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("unexpected Oracle connector")
 	}
+	connector.Dialer(guardedDialer{}) // the SSRF guard (ADR 0004)
+	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(1)
 	cctx, cancel := context.WithTimeout(ctx, timeout+5*time.Second)
 	defer cancel()

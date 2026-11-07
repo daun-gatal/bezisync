@@ -152,6 +152,7 @@ func (c jdbcConfig) open(ctx context.Context, timeout time.Duration) (*sql.DB, e
 		mc.Timeout, mc.ReadTimeout, mc.WriteTimeout = timeout, 15*time.Second, 15*time.Second
 		mc.AllowNativePasswords = true
 		mc.TLSConfig = map[string]string{"disable": "false", "require": "skip-verify", "verify": "true"}[c.TLS]
+		mc.DialFunc = DialContext // the SSRF guard (ADR 0004)
 		connector, err := mysql.NewConnector(mc)
 		if err != nil {
 			return nil, err
@@ -168,6 +169,7 @@ func (c jdbcConfig) open(ctx context.Context, timeout time.Duration) (*sql.DB, e
 		if err != nil {
 			return nil, err
 		}
+		connector.Dialer = guardedDialer{} // the SSRF guard (ADR 0004)
 		db = sql.OpenDB(connector)
 	default:
 		mode := map[string]string{"disable": "disable", "require": "require", "verify": "verify-full"}[c.TLS]
@@ -176,6 +178,7 @@ func (c jdbcConfig) open(ctx context.Context, timeout time.Duration) (*sql.DB, e
 		if err != nil {
 			return nil, err
 		}
+		pc.DialFunc = DialContext // the SSRF guard (ADR 0004)
 		db = stdlib.OpenDB(*pc)
 	}
 	db.SetMaxOpenConns(1)

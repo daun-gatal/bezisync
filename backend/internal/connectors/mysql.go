@@ -96,6 +96,7 @@ func myConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 	default:
 		mc.TLSConfig = "false"
 	}
+	mc.DialFunc = DialContext // the SSRF guard (ADR 0004)
 	connector, err := mysql.NewConnector(mc)
 	if err != nil {
 		closeTunnel()
