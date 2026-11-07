@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
+	"github.com/daun-gatal/bezisync/backend/internal/ssrf"
 )
 
 // HTTP sink: POST each change event as JSON to an endpoint.
@@ -51,7 +52,8 @@ func (s *httpSink) Check(ctx context.Context, conn Resolved, _ []string) (checks
 	}
 	// A harmless request: the endpoint must answer HTTP (any status) within the timeout.
 	timeout := min(time.Duration(Int(cfg, "timeout_ms"))*time.Millisecond, 10*time.Second)
-	client := &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := ssrf.HTTPClient(timeout) // dials only what the guard allows (ADR 0004)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	req, err := http.NewRequestWithContext(ctx, http.MethodOptions, raw, nil)
 	if err != nil {
 		return checks.Report{}, err

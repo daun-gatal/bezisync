@@ -266,14 +266,15 @@ func icebergTableIdent(cfg icebergConfig, destination string) table.Identifier {
 // --- catalog access (checks, prepare, cleanup, Events tab) ---
 
 func (c icebergConfig) awsConfig(ctx context.Context) (aws.Config, error) {
-	opts := []func(*awsconfig.LoadOptions) error{awsconfig.WithHTTPClient(ssrf.HTTPClient(20 * time.Second))}
+	var opts []func(*awsconfig.LoadOptions) error
 	if r := c.region(); r != "" {
 		opts = append(opts, awsconfig.WithRegion(r))
 	}
 	if c.AccessKey != "" {
 		opts = append(opts, awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(c.AccessKey, c.SecretKey, "")))
 	}
-	return awsconfig.LoadDefaultConfig(ctx, opts...)
+	ac, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	return GuardAWS(ac, 20*time.Second), err
 }
 
 // ioProps are the file IO properties for data files when the catalog does not vend credentials.

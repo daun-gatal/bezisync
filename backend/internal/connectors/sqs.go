@@ -19,7 +19,6 @@ import (
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
-	"github.com/daun-gatal/bezisync/backend/internal/ssrf"
 )
 
 // Amazon SQS sink: every table goes to one queue (Debezium's sink ignores the destination), one
@@ -51,18 +50,19 @@ func sqsCfg(conn Resolved) (sqsConfig, error) {
 		AccessKey: Str(cfg, "access_key_id"), SecretKey: Str(sec, "secret_access_key")}, nil
 }
 
-// awsClientConfig is an AWS SDK configuration for checks and previews: the SSRF-guarded HTTP
-// client, two attempts, and static keys when given (else the default chain: IAM role, env).
+// awsClientConfig is an AWS SDK configuration for checks and previews: service calls through
+// the SSRF guard (GuardAWS), two attempts, and static keys when given (else the default chain:
+// IAM role, env).
 func awsClientConfig(ctx context.Context, region, accessKey, secretKey string) (aws.Config, error) {
 	opts := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(region),
-		awsconfig.WithHTTPClient(ssrf.HTTPClient(15 * time.Second)),
 		awsconfig.WithRetryer(func() aws.Retryer { return retry.AddWithMaxAttempts(retry.NewStandard(), 2) }),
 	}
 	if accessKey != "" {
 		opts = append(opts, awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")))
 	}
-	return awsconfig.LoadDefaultConfig(ctx, opts...)
+	ac, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	return GuardAWS(ac, 15*time.Second), err
 }
 
 func (c sqsConfig) client(ctx context.Context) (*sqs.Client, error) {

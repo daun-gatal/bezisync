@@ -61,7 +61,8 @@ func pubsubPublisher(ctx context.Context, cfg pubsubConfig) (*pubsubadmin.TopicA
 	switch {
 	case orEmpty(cfg.Emulator) != "":
 		opts = append(opts, option.WithEndpoint(*cfg.Emulator), option.WithoutAuthentication(),
-			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+			option.WithGRPCDialOption(grpc.WithContextDialer(grpcDial))) // the SSRF guard (ADR 0004)
 	case orEmpty(cfg.KeyJSON) != "":
 		opts = append(opts, option.WithCredentialsJSON([]byte(*cfg.KeyJSON))) //nolint:staticcheck // the key is the user's own credential
 	}

@@ -78,7 +78,8 @@ func mongoConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*m
 		return nil, nil, err
 	}
 	opts := options.Client().ApplyURI(MongoConnectionString(cfg, PyStr(sec["password"]))).
-		SetServerSelectionTimeout(timeout).SetConnectTimeout(timeout)
+		SetServerSelectionTimeout(timeout).SetConnectTimeout(timeout).
+		SetDialer(guardedDialer{}) // every member it discovers too (ADR 0004)
 	client, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, nil, err

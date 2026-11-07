@@ -86,7 +86,8 @@ These hold across directory boundaries. Breaking one is a design change and need
   call the REST router in process as the caller, so the same checks apply
   ([mcpserver](backend/internal/mcpserver/README.md)).
 - **Outbound connections to user-supplied addresses go through the SSRF guard**
-  ([ssrf](backend/internal/ssrf/README.md); `.rules/backend.md`). See Known issues 1 for the places that don't.
+  ([ssrf](backend/internal/ssrf/README.md); `.rules/backend.md`), on the dial itself, not a probe before it
+  ([ADR 0004](docs/adr/0004-ssrf-on-every-dial.md)).
 - **A deployed spec keeps its `config_hash`.** The controller replaces workloads whose hash
   drifted, so the compiler and its JSON/YAML encoders stay byte-stable
   ([compiler](backend/internal/compiler/README.md), [pyjson](backend/internal/pyjson/README.md),
@@ -116,16 +117,11 @@ These hold across directory boundaries. Breaking one is a design change and need
 
 ## Known issues
 
-Code behaviour that contradicts a project rule. These were found by the 2026-11-06 contract
-review, confirmed by reading the code (none were reproduced at runtime), and are recorded here
-until fixed. Contracts that describe them link here. When you fix one, update the contract and
-remove the entry.
+Code behaviour that contradicts a project rule, recorded here until it is fixed. Contracts that
+describe an open issue link here. When you fix one, update the contract and remove its row.
 
-| # | Issue | Where |
-|---|---|---|
-| 1 | Some outbound calls to user-supplied addresses check the host with the SSRF guard, then send through a plain `http.Client`. That client resolves DNS again, and for alerts also follows redirects. Database and broker drivers (pgx, MySQL, SQL Server, Oracle, MongoDB, Kafka, Redis, NATS, StarRocks/Doris) dial with their own dialers too, and only connection checks probe first; Discover, Prepare, Cleanup, Signal, Probe and Tail dial straight away. `.rules/backend.md` asks for `ssrf.HTTPClient` / `ssrf.DialContext`. The Vault client also reads its response unbounded. | `services/alerts.go` (`postJSON`), `secrets/secrets.go` (Vault; the AWS custom endpoint is checked once, then used by the SDK's own client), `connectors/http.go` (HTTP sink check), `connectors/kinesis.go` (a custom endpoint with no guard at all), `connectors/pubsub.go` (a user-set `emulator_host` is dialled with no guard at all), `connectors/spanner.go` (the `emulator_host` passes `NetworkCheck`, then the client dials it over insecure gRPC), `connectors/ssh.go` (`dialSSH` dials directly after the probe), the database and broker connectors |
-
-Paths are under `backend/internal/` unless they start with `frontend/`.
+None open: the 2026-11-06 contract review's 17 issues were closed on 2026-11-07 (#11, #12). Record
+new ones here as a table (`| # | Issue | Where |`), numbered after 18, never renumbered.
 
 ## Verification
 

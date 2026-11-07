@@ -78,6 +78,8 @@ func redisClient(cfg redisConfig, timeout time.Duration) *redis.Client {
 			},
 		}
 	}
+	// The SSRF guard (ADR 0004). A custom dialer replaces go-redis's, TLS included.
+	opts.Dialer = tlsDialer(opts.TLSConfig)
 	return redis.NewClient(opts)
 }
 

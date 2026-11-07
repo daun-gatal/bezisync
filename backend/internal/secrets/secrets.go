@@ -252,7 +252,10 @@ func (v *vault) call(ctx context.Context, method, path string, headers map[strin
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	// Every dial through the SSRF guard; no redirects (the token header would follow one).
+	client := ssrf.HTTPClient(timeout)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, errf("Cannot reach Vault at %s: %v", v.address, err)
 	}
@@ -265,7 +268,13 @@ func (v *vault) call(ctx context.Context, method, path string, headers map[strin
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		return nil, errf("Vault answered HTTP %d.", resp.StatusCode)
 	}
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxStoreResponse+1))
+	if err != nil {
+		return nil, errf("Cannot read Vault's answer: %v", err)
+	}
+	if len(raw) > maxStoreResponse {
+		return nil, errf("Vault's answer is larger than %d MiB.", maxStoreResponse>>20)
+	}
 	g, err := om.DecodeOrdered(raw)
 	if err != nil {
 		return nil, err
@@ -401,6 +410,9 @@ func newAWS(ctx context.Context, cfg, sec map[string]any) (Client, error) {
 	if err != nil {
 		return nil, errf("Cannot reach AWS Secrets Manager: %v", err)
 	}
+	// Service calls (a custom endpoint included) through the SSRF guard; the credential chain,
+	// resolved above, keeps the SDK's client so instance and pod roles still work.
+	ac.HTTPClient = ssrf.HTTPClient(timeout)
 	return &awsStore{secretsmanager.NewFromConfig(ac, func(o *secretsmanager.Options) {
 		if endpoint != "" {
 			o.BaseEndpoint = aws.String(endpoint)
@@ -535,12 +547,22 @@ func (g *gcpStore) get(ctx context.Context, path string) (map[string]any, error)
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		return nil, errf("Google Secret Manager answered HTTP %d.", resp.StatusCode)
 	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxStoreResponse+1))
+	if err != nil {
+		return nil, errf("Cannot read Google Secret Manager's answer: %v", err)
+	}
+	if len(raw) > maxStoreResponse {
+		return nil, errf("Google Secret Manager's answer is larger than %d MiB.", maxStoreResponse>>20)
+	}
 	var body map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
 	return body, nil
 }
+
+// maxStoreResponse bounds what BeziSync reads from a secret store's answer.
+const maxStoreResponse = 4 << 20
 
 func (g *gcpStore) Read(ctx context.Context, path string) (string, error) {
 	name, version, _ := strings.Cut(path, "/versions/")

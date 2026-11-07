@@ -87,7 +87,8 @@ func (c spConfig) options() []option.ClientOption {
 	switch {
 	case c.Emulator != "":
 		return []option.ClientOption{option.WithEndpoint(c.Emulator), option.WithoutAuthentication(),
-			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
+			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+			option.WithGRPCDialOption(grpc.WithContextDialer(grpcDial))} // the SSRF guard (ADR 0004)
 	case c.KeyJSON != "":
 		return []option.ClientOption{option.WithCredentialsJSON([]byte(c.KeyJSON))} //nolint:staticcheck // the key is the user's own credential
 	}

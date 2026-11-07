@@ -57,7 +57,7 @@ func msConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 	if err != nil {
 		return nil, nil, err
 	}
-	host, port, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
+	host, port, dial, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -74,6 +74,7 @@ func msConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*sql.
 		closeTunnel()
 		return nil, nil, err
 	}
+	connector.Dialer = guardedDialer{dial: dial} // the SSRF guard, or this connection's own tunnel (ADR 0004)
 	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(1)
 	c, err := db.Conn(ctx)

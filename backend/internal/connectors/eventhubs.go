@@ -15,6 +15,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
+	"github.com/daun-gatal/bezisync/backend/internal/ssrf"
 )
 
 // Azure Event Hubs sink: every table goes to one event hub (Debezium's sink ignores the
@@ -83,6 +84,18 @@ func eventHubsEndpoint(connection string) (string, int) {
 	return host, 5671
 }
 
+// eventHubsGuard checks a connection string's endpoint with the SSRF guard before a client is
+// made from it. The Event Hubs SDK dials AMQP itself with no dialer to hand it, so this check
+// (with a DNS answer that could change before the SDK dials) is all BeziSync can do (ADR 0004).
+func eventHubsGuard(ctx context.Context, connection string) error {
+	host, port := eventHubsEndpoint(connection)
+	if host == "" {
+		return errors.New("the connection string has no Endpoint")
+	}
+	_, err := ssrf.ResolveChecked(ctx, host, port)
+	return err
+}
+
 func (s *eventHubsSink) CompileSink(conn Resolved, _ CompileContext) (map[string]string, map[string]string, error) {
 	cfg, err := eventHubsCfg(conn)
 	if err != nil {
@@ -138,7 +151,11 @@ func (s *eventHubsSink) Check(ctx context.Context, conn Resolved, _ []string) (c
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	producer, err := azeventhubs.NewProducerClientFromConnectionString(cfg.Connection, cfg.Hub, nil)
+	err = eventHubsGuard(ctx, cfg.Connection)
+	var producer *azeventhubs.ProducerClient
+	if err == nil {
+		producer, err = azeventhubs.NewProducerClientFromConnectionString(cfg.Connection, cfg.Hub, nil)
+	}
 	var props azeventhubs.EventHubProperties
 	if err == nil {
 		defer func() { _ = producer.Close(context.WithoutCancel(ctx)) }()
@@ -167,6 +184,9 @@ func (c eventHubsConfig) listen() string {
 
 // eventHubsLastSequences reads each partition's last sequence number (needs Listen).
 func eventHubsLastSequences(ctx context.Context, cfg eventHubsConfig) (map[string]int64, error) {
+	if err := eventHubsGuard(ctx, cfg.listen()); err != nil {
+		return nil, err
+	}
 	consumer, err := azeventhubs.NewConsumerClientFromConnectionString(cfg.listen(), cfg.Hub, azeventhubs.DefaultConsumerGroup, nil)
 	if err != nil {
 		return nil, err
@@ -198,7 +218,7 @@ func (s *eventHubsSink) Tail(ctx context.Context, conn Resolved, destination str
 	}
 	ctx, cancel := context.WithTimeout(ctx, max(timeout, 10*time.Second))
 	defer cancel()
-	last, err := eventHubsLastSequences(ctx, cfg)
+	last, err := eventHubsLastSequences(ctx, cfg) // checks the endpoint first
 	if err != nil {
 		return nil, err
 	}

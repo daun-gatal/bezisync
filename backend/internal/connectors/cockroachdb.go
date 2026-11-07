@@ -62,7 +62,7 @@ func crdbConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*pg
 	if err != nil {
 		return nil, nil, err
 	}
-	host, port, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
+	host, port, dial, closeTunnel, err := Tunnel(ctx, conn.Config, conn.Secrets, cfg.Host, cfg.Port)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -96,6 +96,7 @@ func crdbConnect(ctx context.Context, conn Resolved, timeout time.Duration) (*pg
 		done()
 		return nil, nil, err
 	}
+	pc.DialFunc = dial // the SSRF guard, or this connection's own tunnel (ADR 0004)
 	pc.RuntimeParams["statement_timeout"] = "10s"
 	cctx, cancel := context.WithTimeout(ctx, timeout+5*time.Second)
 	defer cancel()

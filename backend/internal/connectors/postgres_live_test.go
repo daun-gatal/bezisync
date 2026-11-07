@@ -173,7 +173,9 @@ func TestPostgresCleanupDropsFlinkCopySlots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = pg.Close(ctx) }()
+	// Closed after the slot cleanup below (cleanups run last-registered first): a deferred close
+	// ran before it and left the slots behind for the next run.
+	t.Cleanup(func() { _ = pg.Close(context.Background()) })
 	short := "c1ea0c1ea0c1"
 	names := []string{"bz_" + short, "bz_" + short + "_1", "bz_" + short + "_12", "bz_" + short + "x", "bz_c1ea0c1ea0c2_1"}
 	for _, n := range names {

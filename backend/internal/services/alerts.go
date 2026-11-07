@@ -416,7 +416,9 @@ func postJSON(ctx context.Context, rawURL string, body []byte, headers map[strin
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	// The check above gives a clear message; the guarded client is what holds: every dial,
+	// redirects included, resolves and checks again (ADR 0004).
+	resp, err := ssrf.HTTPClient(10 * time.Second).Do(req)
 	if err != nil {
 		return err
 	}

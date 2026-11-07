@@ -19,10 +19,10 @@ config and decrypted credentials.
 ## Invariants
 - References must match `[secrets.go:refRe]` (store `[a-z0-9][a-z0-9-]{0,62}`, path without `#` or spaces, optional key); a malformed `ref+` value is an `Error`.
 - Values never leave `Read`/`Get`: `[secrets.go:Keys]` returns names only, `List` never reads a value, and error messages name paths and keys but not contents.
-- User-supplied addresses go through the SSRF guard, but not all of them at dial time:
-  - Vault URLs are resolved and checked by `[secrets.go:guard]` before every call, then sent through a plain `http.Client` that resolves DNS again, follows redirects and uses environment proxies; the response body is read without a size limit (`[secrets.go:vault.call]`) — known issue, see [ARCHITECTURE.md › Known issues](../../../ARCHITECTURE.md#known-issues).
-  - AWS custom endpoints are checked once in `[secrets.go:newAWS]`; requests then go through the AWS SDK's own HTTP client.
-  - GCP custom endpoints are checked at `[secrets.go:Build]` and every request dials through `ssrf.HTTPClient` (`[secrets.go:gcpStore.get]`); without a service-account key such an endpoint is treated as an emulator and gets no sign-in.
+- User-supplied addresses go through the SSRF guard on every dial (ADR 0004):
+  - Vault URLs are checked by `[secrets.go:guard]` (a clear early error), then every call goes through `ssrf.HTTPClient` (each dial checked; an operator's proxy is used after the target is checked) without following redirects, and the answer is read up to `[secrets.go:maxStoreResponse]` (4 MiB) (`[secrets.go:vault.call]`).
+  - AWS custom endpoints are checked in `[secrets.go:newAWS]`, and every Secrets Manager call goes through `ssrf.HTTPClient`, set after the credential chain loaded so instance and pod roles still work.
+  - GCP answers are read up to 4 MiB too. GCP custom endpoints are checked at `[secrets.go:Build]` and every request dials through `ssrf.HTTPClient` (`[secrets.go:gcpStore.get]`); without a service-account key such an endpoint is treated as an emulator and gets no sign-in.
   - Pasted kubeconfigs dial through `ssrf.DialContext` with environment proxies disabled (`[secrets.go:kubeconfigREST]`).
 - Pasted kubeconfigs that sign in with `exec` or an auth provider are refused (`[secrets.go:kubeconfigREST]`).
 - Kubernetes listings skip service-account tokens, Helm releases and image pull secrets (`[secrets.go:skippedSecretTypes]`).

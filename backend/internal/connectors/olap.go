@@ -65,6 +65,7 @@ func (c olapConfig) open(ctx context.Context, timeout time.Duration) (*sql.Conn,
 	mc.AllowNativePasswords = true
 	mc.InterpolateParams = true
 	mc.TLSConfig = "false"
+	mc.DialFunc = DialContext // the SSRF guard (ADR 0004)
 	connector, err := mysql.NewConnector(mc)
 	if err != nil {
 		return nil, nil, err

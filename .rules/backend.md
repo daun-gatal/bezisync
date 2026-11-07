@@ -89,7 +89,13 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `docs/reference/checks.md` differs from `bezisync check-docs`.
 - Every outbound probe goes through `ssrf` (`connectors.NetworkCheck`, `ssrf.TCPProbe`,
   `ssrf.ResolveChecked`). Loopback, link-local and metadata addresses are denied unless
-  `BEZISYNC_SSRF_ALLOW_CIDRS` allows them.
+  `BEZISYNC_SSRF_ALLOW_CIDRS` allows them. The probe is only a clear early message: the dial itself
+  must hold the guard ([ADR 0004](../docs/adr/0004-ssrf-on-every-dial.md)). A connector's driver
+  takes `connectors.DialContext` as its dialer (`tlsDialer` when the driver drops its TLS settings
+  for a custom dialer, `grpcDial` for gRPC), HTTP calls use `ssrf.HTTPClient`, and an AWS
+  configuration is loaded first and then guarded with `connectors.GuardAWS` (never
+  `awsconfig.WithHTTPClient`, which would refuse role credentials). A new driver gets a case in
+  `TestEveryDriverDialsThroughTheGuard`.
 - Secrets: `services.ValidateConnection` validates, `services.MergeSecrets` applies write-only patches,
   `services.EncryptOrNil` encrypts, and `services.ScrubReport` removes known secret values from every
   check message. API responses expose only `secret_fields_set` (and `secret_refs`).

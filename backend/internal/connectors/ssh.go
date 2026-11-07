@@ -15,6 +15,7 @@ import (
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/logging"
+	"github.com/daun-gatal/bezisync/backend/internal/ssrf"
 )
 
 // SSH tunnels to databases behind a bastion host. The control plane opens a short-lived
@@ -57,7 +58,7 @@ func SSHOf(config, secrets map[string]any) (*SSHConfig, string, error) {
 	return cfg, key, nil
 }
 
-func dialSSH(ctx context.Context, cfg *SSHConfig, key string) (*ssh.Client, error) {
+func dialSSH(ctx context.Context, cfg *SSHConfig, key string, dial func(ctx context.Context, network, addr string) (net.Conn, error)) (*ssh.Client, error) {
 	signer, err := ssh.ParsePrivateKey([]byte(key))
 	if err != nil {
 		return nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: invalid private key (%v)", cfg.Host, cfg.Port, err)}
@@ -77,8 +78,9 @@ func dialSSH(ctx context.Context, cfg *SSHConfig, key string) (*ssh.Client, erro
 		Timeout:         10 * time.Second,
 	}
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	d := net.Dialer{Timeout: 10 * time.Second}
-	raw, err := d.DialContext(ctx, "tcp", addr)
+	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	raw, err := dial(dctx, "tcp", addr)
 	if err != nil {
 		return nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: %v", cfg.Host, cfg.Port, err)}
 	}
@@ -142,34 +144,37 @@ func forward(l net.Listener, client *ssh.Client, host string, port int) {
 	}
 }
 
-// Tunnel returns the (host, port) to connect to: the database itself, or the local end of
-// an SSH forward; close releases it.
-func Tunnel(ctx context.Context, config, secrets map[string]any, host string, port int) (string, int, func(), error) {
+// Tunnel returns the (host, port) to connect to (the database itself, or the local end of an
+// SSH forward), the dialer this connection's driver must use (the SSRF guard, which lets this
+// connection, and only it, reach its own forward: ADR 0004), and close, which releases it.
+func Tunnel(ctx context.Context, config, secrets map[string]any, host string, port int) (string, int, DialFunc, func(), error) {
 	cfg, key, err := SSHOf(config, secrets)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, nil, err
 	}
 	if cfg == nil {
-		return host, port, func() {}, nil
+		return host, port, DialContext, func() {}, nil
 	}
 	dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	client, err := dialSSH(dctx, cfg, key)
+	// The control plane reaches the bastion through the SSRF guard. The forward's target is
+	// resolved by the bastion ("localhost" there is a normal setup), so it can't be checked here.
+	client, err := dialSSH(dctx, cfg, key, ssrf.DialContext)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, nil, err
 	}
 	var lc net.ListenConfig
 	l, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		_ = client.Close()
-		return "", 0, nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: %v", cfg.Host, cfg.Port, err)}
+		return "", 0, nil, nil, &TunnelError{fmt.Sprintf("Cannot open SSH to %s:%d: %v", cfg.Host, cfg.Port, err)}
 	}
 	go forward(l, client, host, port)
 	closer := func() {
 		_ = l.Close()
 		_ = client.Close()
 	}
-	return "127.0.0.1", l.Addr().(*net.TCPAddr).Port, closer, nil
+	return "127.0.0.1", l.Addr().(*net.TCPAddr).Port, tunnelDialer(l.Addr().String()), closer, nil
 }
 
 // Serve keeps a forward open forever, reconnecting with backoff (the connector sidecar).
@@ -183,7 +188,9 @@ func ServeOn(ctx context.Context, cfg *SSHConfig, key, host string, port int, li
 	log := logging.Logger("bezisync.tunnel")
 	delay := time.Second
 	for ctx.Err() == nil {
-		client, err := dialSSH(ctx, cfg, key)
+		// The sidecar runs next to the connector, which reaches the same hosts unguarded: BeziSync's
+		// SSRF guard is the control plane's (ADR 0004), and the bastion passed it at check time.
+		client, err := dialSSH(ctx, cfg, key, (&net.Dialer{}).DialContext)
 		if err == nil {
 			var l net.Listener
 			var lc net.ListenConfig
@@ -226,7 +233,7 @@ func SSHChecks(ctx context.Context, run *checks.Run, config, secrets map[string]
 	if !NetworkCheck(ctx, run, cfg.Host, cfg.Port, code+"_ssh", "the SSH bastion", 0) {
 		return false
 	}
-	_, _, closer, err := Tunnel(ctx, config, secrets, host, port)
+	_, _, _, closer, err := Tunnel(ctx, config, secrets, host, port)
 	if err != nil {
 		var te *TunnelError
 		msg := err.Error()

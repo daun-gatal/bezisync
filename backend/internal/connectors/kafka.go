@@ -101,15 +101,18 @@ func kafkaClient(cfg kafkaConfig, timeout time.Duration, extra ...kgo.Opt) (*kgo
 		kgo.RequestTimeoutOverhead(timeout),
 		kgo.RetryTimeout(timeout),
 	}
+	// Every broker the metadata names is dialled through the SSRF guard (ADR 0004). franz-go
+	// can't combine a dialer with DialTLSConfig, so the dialer speaks TLS itself.
+	var tc *tls.Config
 	if strings.HasSuffix(cfg.Protocol, "SSL") {
-		tc := &tls.Config{MinVersion: tls.VersionTLS12}
+		tc = &tls.Config{MinVersion: tls.VersionTLS12}
 		if ca := orEmpty(cfg.CAPEM); ca != "" {
 			pool := x509.NewCertPool()
 			pool.AppendCertsFromPEM([]byte(ca))
 			tc.RootCAs = pool
 		}
-		opts = append(opts, kgo.DialTLSConfig(tc))
 	}
+	opts = append(opts, kgo.Dialer(tlsDialer(tc)))
 	if strings.HasPrefix(cfg.Protocol, "SASL") {
 		mech := orEmpty(cfg.Mechanism)
 		if mech == "" {
