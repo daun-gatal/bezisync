@@ -363,3 +363,21 @@ func TestFlinkReadersChangeNeedsStartOver(t *testing.T) {
 		t.Fatal(c)
 	}
 }
+
+// Flink CDC can't copy one table again while the others stream: a snapshot request is refused,
+// and a snapshot job queued for one is dropped instead of sending a Debezium signal (Known issue 10).
+func TestFlinkRefusesSnapshots(t *testing.T) {
+	e := newPipelineEnv(t)
+	p, url := flinkPipeline(t, e)
+	exec(t, `UPDATE pipelines SET desired_state = 'running', lifecycle = 'streaming' WHERE id = '`+p.Str("id")+`'`)
+	r := e.admin.post(url+"/snapshots", map[string]any{"tables": []string{"shop.orders"}}).expect(422)
+	if r.Code() != "snapshot_unsupported" || !strings.Contains(r.Str("detail"), "Flink CDC can't copy one table again") {
+		t.Fatal(string(r.Raw))
+	}
+	id := stuckJob(t, p.Str("id"), "snapshot", 0, 0)
+	exec(t, `UPDATE jobs SET state = 'queued', locked_at = NULL, locked_by = NULL WHERE id = '`+id.String()+`'`)
+	e.runJobs()
+	if j := jobRow(t, id); j.State != "done" || j.Result["skipped"] == nil {
+		t.Fatalf("%s %v %v", j.State, j.Result, j.Error)
+	}
+}

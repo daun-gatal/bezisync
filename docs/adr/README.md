@@ -39,3 +39,5 @@ The other options, and why they lost.
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](0001-wizard-truth.md) | Wizard truth: Keep deleted rows, the Review autosave loop, and a badge that names the field | Accepted |
+| [0002](0002-policies-fail-closed.md) | Project policies that can't be read fail closed | Accepted |
+| [0003](0003-job-reclaim.md) | Reclaiming jobs a crashed controller left running | Accepted |

@@ -266,3 +266,24 @@ func TestDockerFlinkComponentLogs(t *testing.T) {
 		t.Fatal(out, err) // a component that doesn't exist has no logs
 	}
 }
+
+// Copying the helper may outlast one API request: the wait isn't cut off by the request timeout
+// (Known issue 11), only by HelperInstallTimeout.
+func TestDockerFlinkSlowHelperInstall(t *testing.T) {
+	defer runtime.SetRequestTimeout(100 * time.Millisecond)()
+	f, d := newFlinkDocker(t)
+	f.wait = 400 * time.Millisecond
+	ctx := context.Background()
+	if err := d.Apply(ctx, flinkWorkload(1, "h1")); err != nil {
+		t.Fatalf("a slow helper copy must not fail: %v", err)
+	}
+	prev := runtime.HelperInstallTimeout
+	runtime.HelperInstallTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { runtime.HelperInstallTimeout = prev })
+	f2, d2 := newFlinkDocker(t)
+	f2.wait = 400 * time.Millisecond
+	err := d2.Apply(ctx, flinkWorkload(1, "h1"))
+	if err == nil || !strings.Contains(err.Error(), "took longer than 0 seconds") {
+		t.Fatalf("install timeout: %v", err)
+	}
+}

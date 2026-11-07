@@ -23,3 +23,16 @@ describe('api helpers', () => {
     await expect(unwrap(Promise.reject(new TypeError('fetch failed')))).rejects.toMatchObject({ code: 'network_error' });
   });
 });
+
+describe('session expiry', () => {
+  it('opens sign-in for any 401 but a failed sign-in or the session probe', async () => {
+    const { quietUnauthorized } = await import('../api');
+    const at = (method: string, url: string) => new Request(`http://localhost${url}`, { method });
+    expect(quietUnauthorized(at('POST', '/api/v1/auth/login'))).toBe(true);
+    expect(quietUnauthorized(at('GET', '/api/v1/auth/me'))).toBe(true);
+    expect(quietUnauthorized(at('GET', '/api/v1/auth/me?x=1'))).toBe(true);
+    // Saving your profile after the session expired is an expired session (Known issue 16).
+    expect(quietUnauthorized(at('PATCH', '/api/v1/auth/me'))).toBe(false);
+    expect(quietUnauthorized(at('GET', '/api/v1/projects'))).toBe(false);
+  });
+});

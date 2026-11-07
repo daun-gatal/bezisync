@@ -16,6 +16,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
+	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
 
 // Apply and export pipeline manifests (config-as-code), and promote between projects.
@@ -242,6 +243,13 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 	if existing != nil && existing.SourceID != *sourceID {
 		return nil, problem.Conflict("source_changed", fmt.Sprintf("Pipeline %s reads from another source; the source cannot change.", parsed.Name), nil)
 	}
+	// New or changed labels follow the create-time rule; an exported manifest of a pipeline that
+	// already holds older labels applies (and promotes) unchanged.
+	if (existing == nil || !labelsEqual(existing.Labels, parsed.Labels)) && !domain.LabelsValid(parsed.Labels) {
+		v := &val.V{}
+		v.Fail(val.Loc{"body", "metadata", "labels"}, "value_error", domain.LabelsMessage)
+		return nil, v.Problem()
+	}
 	engineChanged := existing != nil && parsed.Engine != "" && parsed.Engine != existing.Engine
 	metaChanged := existing != nil && (existing.Description != parsed.Description || existing.Owner != parsed.Owner ||
 		!labelsEqual(existing.Labels, parsed.Labels) || uuidChanged(existing.SinkID, sinkID) || uuidChanged(existing.RuntimeID, runtimeID) || engineChanged)
@@ -256,6 +264,10 @@ func ApplyManifest(ctx context.Context, q db.Querier, a *auth.ProjectAccess, par
 		rules, err := PoliciesOf(ctx, q, pid)
 		if err != nil {
 			return nil, err
+		}
+		if rules.Unreadable { // the apply itself is refused (ADR 0002): say so in the plan
+			c := domain.UnreadableCheck()
+			notes = append(notes, c.Message)
 		}
 		refused := SettingLimitViolations(rules, eng, parsed.Spec, nil)
 		for _, k := range tuningKeys(refused) {

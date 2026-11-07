@@ -241,11 +241,18 @@ func TestDeliveryCanaryEndToEnd(t *testing.T) {
 		c.Str("status", "canary", "pending", "token") == token {
 		t.Fatal(string(c.Raw))
 	}
+	lost := c.Str("status", "canary", "pending", "token")
+	lostAt := c.Str("status", "canary", "pending", "sent_at")
 	withConfig(t, func(s *config.Settings) { s.CanaryTimeoutSeconds = 0 })
 	ctrl.TickOnce(ctx)
-	ctrl.TickOnce(ctx)
 	c = admin.get(u)
-	if c.At("status", "canary", "ok") != false || c.At("status", "canary", "pending") == nil {
+	// A lost canary no longer blocks the next one (Known issue 7).
+	if c.At("status", "canary", "ok") != false || c.Str("status", "canary", "lost_sent_at") != lostAt ||
+		c.Str("status", "canary", "pending", "token") == "" || c.Str("status", "canary", "pending", "token") == lost {
+		t.Fatal(string(c.Raw))
+	}
+	ctrl.TickOnce(ctx)
+	if c = admin.get(u); c.At("status", "canary", "ok") != false || c.At("status", "canary", "pending") == nil {
 		t.Fatal(string(c.Raw))
 	}
 	if !conditionActive(t, pipe.Str("id"), "delivery_unverified") {

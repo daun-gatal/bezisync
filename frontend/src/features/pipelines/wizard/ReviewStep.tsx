@@ -1,6 +1,6 @@
 import { captureOf, sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/connections';
 import type { JsonSchema } from '@/components/SchemaForm';
-import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Check as CheckIcon, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -211,7 +211,19 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   // Save shortly after the last change, one save at a time, so versions never conflict. A save
   // the server refused is not repeated until the draft changes, Try again, or the step is left.
   const signature = JSON.stringify(body);
-  const autosave = useAutosave({ signature, dirty, invalid: Boolean(invalid), saving, save: () => save(body), delay: AUTOSAVE_MS });
+  // Saves made here: a new version from anywhere else is someone else's (said below).
+  const ownSave = useRef(false);
+  const autosave = useAutosave({
+    signature,
+    dirty,
+    invalid: Boolean(invalid),
+    saving,
+    save: () => {
+      ownSave.current = true;
+      return save(body);
+    },
+    delay: AUTOSAVE_MS,
+  });
   const paused = autosave.paused && Boolean(saveError);
   // Back to the stored values: nothing is unsaved, so no stale error stays on screen.
   useEffect(() => {
@@ -223,9 +235,24 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     commit: async () => (!dirty ? true : invalid ? false : autosave.attempt()),
   }));
 
-  // The final checks run against exactly what is saved: after each save.
+  // The final checks run against exactly what is saved: after each save, on the version saved.
+  // Deploy then sends that version, so it deploys what was checked here, never a version someone
+  // else saved after (Known issue 17).
+  const check = () => preflight.mutate({ id: pipeline.id, version: pipeline.current_version ?? undefined });
+  const checkedVersion = preflight.variables?.version;
+  // A version someone else saved while this step is open: the summary and checks follow it, and
+  // the step says so instead of switching quietly.
+  const [othersVersion, setOthersVersion] = useState<number | null>(null);
   useEffect(() => {
-    if (pipeline.runtime && pipeline.sink) preflight.mutate({ id: pipeline.id });
+    if (!saving && saveError) ownSave.current = false; // a refused save made no version
+  }, [saving, saveError]);
+  const seenVersion = useRef(pipeline.current_version);
+  useEffect(() => {
+    const next = pipeline.current_version;
+    if (next !== seenVersion.current && !ownSave.current && seenVersion.current !== null && next !== null) setOthersVersion(next);
+    seenVersion.current = next;
+    ownSave.current = false;
+    if (pipeline.runtime && pipeline.sink) check();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipeline.version]);
 
@@ -238,7 +265,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
 
   function doDeploy(forceReason?: string) {
     deploy.mutate(
-      { id: pipeline.id, forceReason },
+      { id: pipeline.id, version: checkedVersion, forceReason },
       {
         onSuccess: (p) => {
           if (p.pending_change) toast.success(`Sent ${p.name} v${p.pending_change.version} for approval`);
@@ -596,6 +623,12 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       </Card>
 
       <Card title="Final checks">
+        {othersVersion !== null ? (
+          <Notice tone="warn" title={`Someone else saved v${othersVersion}`}>
+            While you were on this step another change was saved. What you see here and the checks below now show v{othersVersion}, and
+            Deploy deploys v{othersVersion}: read it through before you deploy.
+          </Notice>
+        ) : null}
         <KeyValue
           items={[
             ['From', `${pipeline.source.name} · ${plural(spec.source.tables.include.length, 'table')}`],
@@ -611,12 +644,12 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             <Skeleton lines={4} />
           </div>
         ) : preflight.error ? (
-          <InlineError error={preflight.error} doing="Couldn’t run the final checks" onRetry={() => preflight.mutate({ id: pipeline.id })} />
+          <InlineError error={preflight.error} doing="Couldn’t run the final checks" onRetry={check} />
         ) : report ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <Pill tone={report.ok ? 'ok' : 'bad'}>{report.summary}</Pill>
-              <Button size="sm" variant="ghost" onClick={() => preflight.mutate({ id: pipeline.id })}>
+              <Button size="sm" variant="ghost" onClick={check}>
                 Re-run
               </Button>
             </div>
@@ -667,7 +700,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             </Button>
           ) : null}
           <Button variant="primary" disabled={Boolean(deployWhy)} why={deployWhy} loading={deploy.isPending} onClick={() => doDeploy()}>
-            {pipeline.approval_required ? 'Request approval' : deployed ? `Deploy v${pipeline.current_version}` : 'Deploy'}
+            {pipeline.approval_required ? 'Request approval' : deployed ? `Deploy v${checkedVersion ?? pipeline.current_version}` : 'Deploy'}
           </Button>
         </div>
       </div>

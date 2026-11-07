@@ -21,6 +21,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
+	"github.com/daun-gatal/bezisync/backend/internal/logging"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
@@ -274,7 +275,34 @@ func PoliciesOf(ctx context.Context, q db.Querier, projectID uuid.UUID) (domain.
 	if proj == nil || len(proj.Policies) == 0 {
 		return domain.DefaultPolicies(), nil
 	}
-	return domain.LoadPolicies(proj.Policies), nil
+	p := domain.LoadPolicies(proj.Policies)
+	if p.Unreadable {
+		warnUnreadable(projectID, len(p.Problems))
+	}
+	return p, nil
+}
+
+var (
+	policyLog      = logging.Logger("bezisync.services.policies")
+	policyWarnedAt sync.Map // project id → time of the last warning
+)
+
+// warnUnreadable logs unreadable policies at most every 10 minutes per project (the controller
+// reads policies on every tick).
+func warnUnreadable(projectID uuid.UUID, problems int) {
+	now := time.Now()
+	if last, ok := policyWarnedAt.Load(projectID); ok && now.Sub(last.(time.Time)) < 10*time.Minute {
+		return
+	}
+	policyWarnedAt.Store(projectID, now)
+	policyLog.Warn("project policies can't be read: changes are blocked until an Admin saves them",
+		"project_id", projectID.String(), "problems", problems)
+}
+
+// UnreadablePolicies is the refusal of a change in a project whose policies can't be read.
+func UnreadablePolicies() error {
+	c := domain.UnreadableCheck()
+	return problem.New(409, c.Code, c.Message).WithErrors([]map[string]any{{"loc": []string{c.Code}, "message": c.Message}})
 }
 
 // EnforceSavePolicies refuses building blocks the project does not allow.
@@ -301,6 +329,9 @@ func EnforceSavePolicies(ctx context.Context, q db.Querier, projectID uuid.UUID,
 	pol, err := PoliciesOf(ctx, q, projectID)
 	if err != nil {
 		return err
+	}
+	if pol.Unreadable {
+		return UnreadablePolicies()
 	}
 	violations := domain.SaveViolations(pol, runtimeID, sourceType, sinkType)
 	if len(violations) == 0 {
@@ -547,6 +578,17 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		if err := refuseDriverProps(ctx, q, p.SourceID, prev, *e.Spec); err != nil {
 			return nil, err
 		}
+		// A changed spec in a project whose policies can't be read is refused (ADR 0002); saving
+		// the same spec again (an autosave) is not a change.
+		if current == nil || current.SpecHash != domain.SpecHash(*e.Spec) {
+			rules, err := PoliciesOf(ctx, q, p.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if rules.Unreadable {
+				return nil, UnreadablePolicies()
+			}
+		}
 		if len(e.Spec.Tuning) > 0 {
 			src, err := GetConnection(ctx, q, p.SourceID)
 			if err != nil {
@@ -597,8 +639,17 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 	}
 	if e.LabelsSet {
 		labels := db.Map{}
+		same := len(e.Labels) == len(p.Labels)
 		for k, v := range e.Labels {
 			labels[k] = v
+			same = same && p.Labels[k] == v
+		}
+		// Changed labels follow the create-time rule; unchanged ones (even an older pipeline's
+		// that break it) save as they are.
+		if !same && !domain.LabelsValid(e.Labels) {
+			v := &val.V{}
+			v.Fail(val.Loc{"body", "labels"}, "value_error", domain.LabelsMessage)
+			return nil, v.Problem()
 		}
 		p.Labels = labels
 	}
@@ -1514,8 +1565,10 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 	if err != nil {
 		return nil, nil, err
 	}
-	// Tables added to a running pipeline are copied while it streams, where the source can.
-	if previous != nil && *previous != v.ID && len(report.Change.TablesAdded) > 0 && capture.Incremental {
+	// Tables added to a running pipeline are copied while it streams, where the source can. Only
+	// Debezium needs a snapshot signal for that; Flink CDC copies added tables itself (AddTables).
+	if previous != nil && *previous != v.ID && len(report.Change.TablesAdded) > 0 && capture.Incremental &&
+		engine.CapsFor(EngineOf(p), "").RecopyTable {
 		tables := make([]any, len(report.Change.TablesAdded))
 		for i, t := range report.Change.TablesAdded {
 			tables[i] = t
@@ -1745,6 +1798,9 @@ func PolicyChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec do
 		}
 	}
 	out := domain.EvaluatePolicies(rules, spec, p.RuntimeID, sourceConn.Type, sinkType, int(others))
+	if rules.Unreadable {
+		return out, nil // the one check that says why; the strict values would only add noise
+	}
 	if c := settingLimitCheck(rules, EngineOf(p), spec); c != nil {
 		kept := out[:0]
 		for _, x := range out {

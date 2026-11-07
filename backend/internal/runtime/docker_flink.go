@@ -317,6 +317,9 @@ func (d *DockerDriver) ensureNetwork(ctx context.Context, name string, labels ma
 	return err
 }
 
+// HelperInstallTimeout is how long copying the helper may take (tests shorten it).
+var HelperInstallTimeout = 2 * time.Minute
+
 // installHelper copies the bezisync binary of the BeziSync image into the opt volume.
 func (d *DockerDriver) installHelper(ctx context.Context, w Workload, labels map[string]string) error {
 	name := "bz-" + w.ShortID + "-install"
@@ -335,7 +338,10 @@ func (d *DockerDriver) installHelper(ctx context.Context, w Workload, labels map
 		return err
 	}
 	defer func() { _ = d.remove(context.WithoutCancel(ctx), res.ID) }()
-	wait := d.cli.ContainerWait(ctx, res.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNextExit})
+	// pullCli has no request timeout: the copy may take longer than one API request may.
+	wctx, cancel := context.WithTimeout(ctx, HelperInstallTimeout)
+	defer cancel()
+	wait := d.pullCli.ContainerWait(wctx, res.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNextExit})
 	if _, err := d.cli.ContainerStart(ctx, res.ID, client.ContainerStartOptions{}); err != nil {
 		return err
 	}
@@ -346,9 +352,10 @@ func (d *DockerDriver) installHelper(ctx context.Context, w Workload, labels map
 		}
 		return nil
 	case err := <-wait.Error:
+		if errors.Is(wctx.Err(), context.DeadlineExceeded) {
+			return Errorf("Copying the BeziSync helper from %s took longer than %d seconds.", w.Flink.HelperImage, int(HelperInstallTimeout.Seconds()))
+		}
 		return err
-	case <-time.After(2 * time.Minute):
-		return Errorf("Copying the BeziSync helper from %s took longer than two minutes.", w.Flink.HelperImage)
 	}
 }
 

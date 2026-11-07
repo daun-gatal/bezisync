@@ -274,6 +274,8 @@ type fakeDriver struct {
 	Cap map[string]any
 	// FlinkStatus is the helper's /bz/status body ("": {"phase": "running"}).
 	FlinkStatus string
+	// DeleteGate, when set, holds Delete (a restart) until it is closed: a job still running.
+	DeleteGate chan struct{}
 }
 
 func (d *fakeDriver) capacity() map[string]any {
@@ -308,6 +310,12 @@ func (d *fakeDriver) Apply(_ context.Context, w runtime.Workload) error {
 }
 
 func (d *fakeDriver) Delete(_ context.Context, shortID string) error {
+	d.mu.Lock()
+	gate := d.DeleteGate
+	d.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.Workloads, shortID)

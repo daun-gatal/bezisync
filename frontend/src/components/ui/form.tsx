@@ -463,11 +463,13 @@ export function Segmented<V extends string>({
   options,
   onChange,
   label,
+  disabled,
 }: {
   value: V;
   options: { value: V; label: ReactNode }[];
   onChange: (v: V) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <div role="group" aria-label={label} className="inline-flex max-w-full flex-wrap gap-0.5 rounded-md border border-line-strong bg-subtle p-0.5">
@@ -476,10 +478,11 @@ export function Segmented<V extends string>({
           key={o.value}
           type="button"
           aria-pressed={value === o.value}
+          disabled={disabled}
           onClick={() => onChange(o.value)}
           className={clsx(
-            'h-7 rounded-[5px] px-2.5 text-sm font-medium whitespace-nowrap',
-            value === o.value ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink',
+            'h-7 rounded-[5px] px-2.5 text-sm font-medium whitespace-nowrap disabled:cursor-not-allowed',
+            value === o.value ? 'bg-surface text-ink shadow-sm' : 'text-muted enabled:hover:text-ink',
           )}
         >
           {o.label}

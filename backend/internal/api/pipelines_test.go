@@ -317,6 +317,29 @@ func TestPipelinePermissionsAndValidation(t *testing.T) {
 	labels := e.ids.body()
 	labels["name"], labels["labels"] = "y", map[string]any{"Bad Key": "v"}
 	e.admin.post(base, labels).expect(422)
+	// Editing follows the same rule when the labels change (Known issue 8)...
+	u := base + "/" + pipe.Str("id")
+	cur := e.admin.get(u).expect(200)
+	if c := e.admin.patch(u, map[string]any{"labels": map[string]any{"Bad Key": "v"}}, ifMatch(cur.At("version"))...).expect(422); !strings.Contains(string(c.Raw), "up to 20 labels") {
+		t.Fatal(string(c.Raw))
+	}
+	many := map[string]any{}
+	for i := range 21 {
+		many[fmt.Sprintf("k%d", i)] = "v"
+	}
+	e.admin.patch(u, map[string]any{"labels": many}, ifMatch(cur.At("version"))...).expect(422)
+	e.admin.patch(u, map[string]any{"labels": map[string]any{"team": strings.Repeat("x", 64)}}, ifMatch(cur.At("version"))...).expect(422)
+	e.admin.patch(u, map[string]any{"labels": map[string]any{"team": strings.Repeat("x", 63)}}, ifMatch(cur.At("version"))...).expect(200)
+	// ...but labels an older pipeline already holds still save unchanged.
+	exec(t, `UPDATE pipelines SET labels = '{"Old Key": "v"}' WHERE id = '`+pipe.Str("id")+`'`)
+	cur = e.admin.get(u).expect(200)
+	e.admin.patch(u, map[string]any{"owner": "ops", "labels": map[string]any{"Old Key": "v"}}, ifMatch(cur.At("version"))...).expect(200)
+	// Its exported manifest re-applies too; a manifest that changes them to bad ones doesn't.
+	exported := e.admin.get(u + "/manifest").expect(200).Str("yaml")
+	apply(e.admin, e.pid, exported, nil).expect(200)
+	if r := apply(e.admin, e.pid, strings.Replace(exported, "Old Key", "Other Key", 1), nil); r.Status != 422 || !strings.Contains(string(r.Raw), "up to 20 labels") {
+		t.Fatal(r.Status, string(r.Raw))
+	}
 }
 
 func TestRuntimeAPI(t *testing.T) {
@@ -352,6 +375,9 @@ func TestRuntimeAPI(t *testing.T) {
 	admin.post(base+"/runtimes", map[string]any{"name": "bad", "kind": "kubernetes", "config": map[string]any{"namespace": "Bad_NS"}}).expect(422)
 	editor := member(t, srv, admin, pid, "editor")
 	editor.post(base+"/runtimes", map[string]any{"name": "x", "kind": "docker", "config": map[string]any{}}).expect(403)
+	// Testing calls the runtime and rewrites its result and capacity: runtime.manage (Known issue 9).
+	editor.post(base+"/runtimes/"+rt.Str("id")+"/test", nil).expect(403)
+	editor.post(base+"/runtimes/"+db0+"/test", nil).expect(404)
 	// Renaming, cordoning and the version check.
 	u := base + "/runtimes/" + rt.Str("id")
 	admin.patch(u, map[string]any{"enabled": false}, ifMatch(9)...).expect(412)

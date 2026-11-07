@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
@@ -139,9 +139,16 @@ export function PoliciesSection() {
   const flinkSizes = useEngines().data?.find((e) => e.id === 'flink-cdc')?.sizes ?? undefined;
   const [draft, setDraft] = useState<Policies | null>(null);
   const manage = can('project.manage');
-  useEffect(() => {
-    if (policies.data) setDraft(policies.data);
+  // The read-only answers (unreadable, problems) never go back in the draft.
+  const stored = useMemo(() => {
+    if (!policies.data) return undefined;
+    const { unreadable: _u, problems: _p, ...rest } = policies.data;
+    return rest as Policies;
   }, [policies.data]);
+  const unreadable = policies.data?.unreadable === true;
+  useEffect(() => {
+    if (stored) setDraft(stored);
+  }, [stored]);
   const save = useMutation({
     mutationFn: (body: Policies) => unwrap(client.PUT('/api/v1/projects/{project_id}/policies', { params: { path: { project_id: project.id } }, body })),
     onSuccess: (p) => {
@@ -149,7 +156,9 @@ export function PoliciesSection() {
       toast.success('Policies saved');
     },
   });
-  const dirty = Boolean(draft && policies.data && JSON.stringify(draft) !== JSON.stringify(policies.data));
+  const dirty = Boolean(draft && stored && JSON.stringify(draft) !== JSON.stringify(stored));
+  // Unreadable policies can be saved as shown: what is stored isn't what the form shows.
+  const saveable = dirty || (unreadable && manage);
   const blocker = useBlocker({ shouldBlockFn: () => dirty, enableBeforeUnload: () => dirty, withResolver: true });
 
   return (
@@ -199,6 +208,21 @@ export function PoliciesSection() {
                 deploying.
               </p>
             </div>
+            {unreadable ? (
+              <Notice tone="bad" title="These policies can't be read">
+                <p className="m-0">
+                  Changes to pipelines in {project.name} are blocked until an Admin saves valid policies. The fields below that couldn’t be read show their
+                  strictest setting; check them, then save.
+                </p>
+                <ul className="m-0 mt-1 pl-5">
+                  {(policies.data?.problems ?? []).map((p) => (
+                    <li key={p} className="font-mono">
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </Notice>
+            ) : null}
             {!manage ? <Notice tone="info">Only Admins can change policies.</Notice> : null}
             <Group title="What pipelines may connect to">
               <AllowList
@@ -418,13 +442,15 @@ export function PoliciesSection() {
                   dirty && 'sticky bottom-0 z-10 shadow-lg',
                 )}
               >
-                <Meta className="mr-auto">{empty ? 'An allow-list can’t be empty.' : dirty ? 'You have unsaved changes.' : 'No changes to save.'}</Meta>
+                <Meta className="mr-auto">
+                  {empty ? 'An allow-list can’t be empty.' : dirty ? 'You have unsaved changes.' : saveable ? 'Save to store valid policies.' : 'No changes to save.'}
+                </Meta>
                 {dirty ? (
-                  <Button variant="ghost" onClick={() => setDraft(saved)}>
+                  <Button variant="ghost" onClick={() => setDraft(stored ?? saved)}>
                     Discard
                   </Button>
                 ) : null}
-                <Button variant="primary" disabled={!dirty || empty} loading={save.isPending} onClick={() => save.mutate(draft)}>
+                <Button variant="primary" disabled={!saveable || empty} loading={save.isPending} onClick={() => save.mutate(draft)}>
                   Save policies
                 </Button>
               </div>

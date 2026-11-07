@@ -595,6 +595,9 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `pii_rule_column_missing`, `pii_unknown`, `pii_protected`. `SchemaChangeRead.personal_data`
   flags added PII-looking columns without a choice. The retired `require_pii_masking` policy is
   accepted and ignored (never dumped); the contract test strips it from the recorded cases.
+- Stored data is read by parsers that keep accepting what they once accepted: tightening a rule
+  applies to new input only. Project policies that still fail to parse fail closed
+  (`policy_unreadable`, [ADR 0002](../docs/adr/0002-policies-fail-closed.md)), never open.
 - Delivery canary (`policies.delivery_canary`): sources that support it write canary rows; the compiler
   captures that table and exempts it from the `bzmeta` filter (`(?!canary_)`); the controller writes a
   token every `CANARY_INTERVAL_SECONDS` and looks for it with the sink's `Tail` (status `canary`, alert

@@ -6540,6 +6540,15 @@
             ],
             "title": "Max Resources"
           },
+          "problems": {
+            "description": "Returned only with unreadable: why the stored policies can't be read (field and message, never a value). Ignored when sent.",
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "title": "Problems",
+            "type": "array"
+          },
           "require_approval": {
             "default": false,
             "title": "Require Approval",
@@ -6573,6 +6582,12 @@
             ],
             "title": "Shrink After Copy",
             "type": "string"
+          },
+          "unreadable": {
+            "description": "Returned (true) only when the stored policies can't be read: the fields that failed hold their strictest value, and every change in the project is refused (policy_unreadable) until an Admin saves valid policies. Ignored when sent.",
+            "readOnly": true,
+            "title": "Unreadable",
+            "type": "boolean"
           }
         },
         "title": "ProjectPolicies",

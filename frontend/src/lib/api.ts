@@ -37,6 +37,13 @@ export function readCookie(name: string): string | undefined {
     ?.slice(name.length + 1);
 }
 
+/** A 401 that isn't an expired session: a failed sign-in, or the session probe (GET /auth/me) that
+ * finds nobody signed in. Any other 401, including saving your profile (PATCH /auth/me), is. */
+export function quietUnauthorized(request: Request): boolean {
+  const path = new URL(request.url, 'http://x').pathname;
+  return path.endsWith('/auth/login') || (request.method === 'GET' && path.endsWith('/auth/me'));
+}
+
 let onUnauthorized: () => void = () => undefined;
 export function setUnauthorizedHandler(handler: () => void): void {
   onUnauthorized = handler;
@@ -51,9 +58,7 @@ const csrf: Middleware = {
     return request;
   },
   onResponse({ response, request }) {
-    if (response.status === 401 && !request.url.endsWith('/auth/login') && !request.url.endsWith('/auth/me')) {
-      onUnauthorized();
-    }
+    if (response.status === 401 && !quietUnauthorized(request)) onUnauthorized();
     return response;
   },
 };

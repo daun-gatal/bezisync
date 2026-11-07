@@ -237,9 +237,11 @@ export function RuntimesSection() {
                   title={rt.name}
                   actions={
                     <>
-                      <Button size="sm" loading={test.isPending && test.variables === rt.id} onClick={() => test.mutate(rt.id)}>
-                        Test
-                      </Button>
+                      {manage ? (
+                        <Button size="sm" loading={test.isPending && test.variables === rt.id} onClick={() => test.mutate(rt.id)}>
+                          Test
+                        </Button>
+                      ) : null}
                       {manage ? (
                         <Menu
                           label={`More actions for ${rt.name}`}

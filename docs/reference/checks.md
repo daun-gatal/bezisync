@@ -2658,3 +2658,16 @@ Fix:
 ```
 Ask an Admin to change the policy under Settings → Policies.
 ```
+
+<a id="policy-unreadable"></a>
+### `policy_unreadable`
+
+**Project policies**
+
+- Why: This project's policies can't be read, so changes are blocked until an Admin fixes them.
+
+Fix:
+
+```
+Ask an Admin to open Settings → Policies, fix the fields it lists and save.
+```

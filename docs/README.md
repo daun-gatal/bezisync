@@ -810,6 +810,13 @@ you decide, refuses an empty allow-list, and before you save lists the running p
 deploy the change would block. The wizard applies policies up front (disallowed options stay visible
 and say why); the server enforces them at save and deploy.
 
+If a project's stored policies can't be read (for example a value an older or newer release wrote
+that this one refuses), BeziSync fails closed: the page lists what couldn't be read, those fields
+show their strictest setting, the rest keep what was saved, and every change to the project's
+pipelines (saving a changed spec, creating, deploying, even with Deploy anyway) is refused with
+`policy_unreadable` until an Admin fixes the fields and saves. Running pipelines keep running, and
+pause, resume and delete still work.
+
 With approval required, deploying (including rollbacks and image moves) creates a request with the
 preflight result; another member with approval rights approves it from the pipeline page (preflight
 runs again) or rejects it with a comment. Nobody approves their own request.

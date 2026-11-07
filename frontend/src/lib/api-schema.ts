@@ -4831,6 +4831,11 @@ export interface components {
             /** Max Resources */
             max_resources?: ("small" | "medium" | "large") | null;
             /**
+             * Problems
+             * @description Returned only with unreadable: why the stored policies can't be read (field and message, never a value). Ignored when sent.
+             */
+            readonly problems?: string[];
+            /**
              * Require Approval
              * @default false
              */
@@ -4851,6 +4856,11 @@ export interface components {
              * @enum {string}
              */
             shrink_after_copy: "auto" | "suggest";
+            /**
+             * Unreadable
+             * @description Returned (true) only when the stored policies can't be read: the fields that failed hold their strictest value, and every change in the project is refused (policy_unreadable) until an Admin saves valid policies. Ignored when sent.
+             */
+            readonly unreadable?: boolean;
         };
         /** ProjectRead */
         ProjectRead: {

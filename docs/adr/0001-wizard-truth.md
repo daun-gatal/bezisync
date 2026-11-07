@@ -509,7 +509,7 @@ A drift check of this ADR and the touched contracts against the code (`egm-drift
   - every Review blocker comes from one list, so the badge, the Deploy reason, the field errors and focus agree;
   - a refused save costs one request instead of one a second.
 - **Accepted: three new frontend copies of backend rules.** These are `shapeIndex` (`validateTransforms`), `effectiveDeletes` (`withSinkUnwrap` then `withSoftDelete`) and `rawErrors` (`RefuseNewAdvanced`). A change to those Go functions must update them. Their contracts list them under the backend mirrors.
-- **Accepted: a compiler ordering issue stays open.** For a destination that requires the event shape, `[soft_delete, rename]` without an unwrap compiles to `[rename, unwrap]`. The wizard can't build that chain; the API can. It is recorded in `ARCHITECTURE.md` Known issues and needs a backend change.
+- **Accepted: a compiler ordering issue stays open.** For a destination that requires the event shape, `[soft_delete, rename]` without an unwrap compiles to `[rename, unwrap]`. The wizard can't build that chain; the API can. It is recorded in `ARCHITECTURE.md` Known issues and needs a backend change. *(2026-11-07: fixed in the compiler by the known-issues PR; the unwrap now goes where the `soft_delete` is.)*
 - **Accepted: older specs keep their order.** A saved chain is drawn by section and numbered in drawn order, but never reordered. Server messages still count steps in chain order.
 - **Revert:** reverting the PR restores today's client. It would again flag chains the server accepts, such as `[soft_delete, rename]`, and hide Keep deleted rows. No data changes either way.
 

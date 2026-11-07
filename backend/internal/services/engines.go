@@ -97,6 +97,9 @@ func enforceEnginePolicy(ctx context.Context, q db.Querier, projectID uuid.UUID,
 	if err != nil {
 		return err
 	}
+	if pol.Unreadable {
+		return UnreadablePolicies()
+	}
 	if c := domain.EngineViolation(pol, string(id)); c != nil {
 		return problem.New(422, "policy_violation", c.Message).WithErrors([]map[string]any{{"loc": []string{c.Code}, "message": c.Message}})
 	}

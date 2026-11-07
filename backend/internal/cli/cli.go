@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -116,6 +117,9 @@ func apiCmd() *cobra.Command {
 			logging.Logger("bezisync.http").Info(fmt.Sprintf("api %s listening on %s", version.Version, srv.Addr))
 			if retired := config.Get().Retired; len(retired) > 0 {
 				logging.Logger("bezisync.http").Warn("These settings are no longer read; set up single sign-on in Settings → Sign-in instead: " + strings.Join(retired, ", "))
+			}
+			if slices.Contains(config.Get().CORSOrigins, "*") {
+				logging.Logger("bezisync.http").Warn("CORS origins include \"*\": any site may read the API without credentials, but sign-in cookies are sent only to the origins listed by name. List each browser origin that signs in.")
 			}
 			select {
 			case err := <-errc:
