@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/table"
 
@@ -171,21 +172,29 @@ func TestIcebergPartitionWrittenKinds(t *testing.T) {
 		mutate func(*domain.PipelineSpec)
 		want   string // "" passes
 	}{
-		"E15 bucket of a boolean":             {false, []any{field("flag", "bucket", 4)}, nil, "can't take true/false"},
-		"E15 bucket of a float":               {true, []any{field("score", "bucket", 4)}, nil, "can't take a floating-point number"},
-		"identity of a boolean":               {false, []any{field("flag", "identity", 0)}, nil, ""},
-		"truncate of a decimal":               {false, []any{field("total", "truncate", 10)}, nil, ""},
-		"decimals sent as double":             {false, []any{field("total", "truncate", 10)}, func(s *domain.PipelineSpec) { s.Values.Decimals = "double" }, "written as a floating-point number"},
-		"decimals as double, Flink CDC":       {true, []any{field("total", "truncate", 10)}, func(s *domain.PipelineSpec) { s.Values.Decimals = "double" }, ""},
-		"uuid is text":                        {false, []any{field("ref", "truncate", 4)}, nil, ""},
-		"time of day on Debezium is a number": {false, []any{field("at", "hour", 0)}, nil, "written as a whole number"},
-		"time of day on Flink CDC":            {true, []any{field("at", "bucket", 4)}, nil, ""},
-		"R3 time of the change on Debezium":   {false, []any{field("__source_ts_ms", "day", 0)}, nil, ""},
-		"E19 no time of the change on Flink":  {true, []any{field("__source_ts_ms", "day", 0)}, nil, "no column __source_ts_ms"},
-		"X4 one column, two transforms":       {false, []any{field("__source_ts_ms", "day", 0), field("__source_ts_ms", "hour", 0)}, nil, ""},
-		"chained renames": {true, []any{field("c", "identity", 0)}, func(s *domain.PipelineSpec) {
+		"E15 bucket of a boolean":              {false, []any{field("flag", "bucket", 4)}, nil, "can't take true/false"},
+		"E15 bucket of a float":                {true, []any{field("score", "bucket", 4)}, nil, "can't take a floating-point number"},
+		"identity of a boolean":                {false, []any{field("flag", "identity", 0)}, nil, ""},
+		"a PostgreSQL NUMERIC on Debezium":     {false, []any{field("total", "truncate", 10)}, nil, "total can't be partitioned"},
+		"a PostgreSQL NUMERIC on Flink CDC":    {true, []any{field("total", "truncate", 10)}, nil, ""},
+		"decimals sent as text":                {false, []any{field("total", "truncate", 10)}, func(s *domain.PipelineSpec) { s.Values.Decimals = "string" }, ""},
+		"decimals sent as double":              {false, []any{field("total", "truncate", 10)}, func(s *domain.PipelineSpec) { s.Values.Decimals = "double" }, "written as a floating-point number"},
+		"decimals as double, Flink CDC":        {true, []any{field("total", "truncate", 10)}, func(s *domain.PipelineSpec) { s.Values.Decimals = "double" }, ""},
+		"uuid: no truncate on Debezium":        {false, []any{field("ref", "truncate", 4)}, nil, "written as a UUID"},
+		"uuid: buckets on Debezium":            {false, []any{field("ref", "bucket", 4)}, nil, ""},
+		"uuid is text on Flink CDC":            {true, []any{field("ref", "truncate", 4)}, nil, ""},
+		"time of day on Debezium is a number":  {false, []any{field("at", "hour", 0)}, nil, "written as a whole number"},
+		"time of day on Flink CDC":             {true, []any{field("at", "bucket", 4)}, nil, ""},
+		"R3 time of the change on Debezium":    {false, []any{field("__source_ts_ms", "day", 0)}, nil, ""},
+		"E19 no time of the change on Flink":   {true, []any{field("__source_ts_ms", "day", 0)}, nil, "no column __source_ts_ms"},
+		"X4 two time transforms of one column": {false, []any{field("__source_ts_ms", "day", 0), field("__source_ts_ms", "hour", 0)}, nil, "redundant"},
+		"a time and a bucket of one column":    {false, []any{field("__source_ts_ms", "day", 0), field("__source_ts_ms", "bucket", 4)}, nil, ""},
+		"chained renames on Debezium": {false, []any{field("c", "identity", 0)}, func(s *domain.PipelineSpec) {
 			s.Transforms = []domain.Transform{{Type: "rename", Renames: []domain.Rename{{From: "id", To: "b"}}}, {Type: "rename", Renames: []domain.Rename{{From: "b", To: "c"}}}}
 		}, ""},
+		"Flink CDC renames once": {true, []any{field("c", "identity", 0)}, func(s *domain.PipelineSpec) {
+			s.Transforms = []domain.Transform{{Type: "rename", Renames: []domain.Rename{{From: "id", To: "b"}}}, {Type: "rename", Renames: []domain.Rename{{From: "b", To: "c"}}}}
+		}, "no column c"},
 	} {
 		got := run(c.flink, c.by, c.mutate)
 		switch {
@@ -204,8 +213,11 @@ type fakeTables struct {
 }
 
 func (f fakeTables) LoadTable(_ context.Context, id table.Identifier) (*table.Table, error) {
-	if t, ok := f.tables[strings.Join(id, ".")]; ok {
+	if t, ok := f.tables[id[len(id)-1]]; ok {
 		return t, nil
+	}
+	if f.err == nil {
+		return nil, catalog.ErrNoSuchTable
 	}
 	return nil, f.err
 }
@@ -240,5 +252,199 @@ func TestIcebergPartitionFailsClosed(t *testing.T) {
 	blind := partitionChecks(context.Background(), nil, icebergConfig{}, CompileContext{Spec: spec}, facts)
 	if c := find(blind, "iceberg_partition_column"); c == nil || c.Status != checks.Warn {
 		t.Fatalf("no discovery: %+v", c)
+	}
+}
+
+// liveTable is an Iceberg table with columns id (identity when identity is true), created_at and
+// status, partitioned by the given transforms of those columns.
+func liveTable(t *testing.T, identity bool, parts ...[2]string) *table.Table {
+	t.Helper()
+	var ids []int
+	if identity {
+		ids = []int{1}
+	}
+	sc := iceberg.NewSchemaWithIdentifiers(0, ids,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+		iceberg.NestedField{ID: 2, Name: "created_at", Type: iceberg.PrimitiveTypes.TimestampTz},
+		iceberg.NestedField{ID: 3, Name: "status", Type: iceberg.PrimitiveTypes.String})
+	col := map[string]int{"id": 1, "created_at": 2, "status": 3}
+	var fields []iceberg.PartitionField
+	for i, p := range parts {
+		tr, err := iceberg.ParseTransform(p[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields = append(fields, iceberg.PartitionField{SourceIDs: []int{col[p[1]]}, FieldID: 1000 + i, Name: fmt.Sprintf("p%d", i), Transform: tr})
+	}
+	spec := iceberg.NewPartitionSpec(fields...)
+	meta, err := table.NewMetadata(sc, &spec, table.UnsortedSortOrder, "s3://lake/t", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return table.New(table.Identifier{"lake", "cdc_shop_orders"}, meta, "s3://lake/t/metadata.json", nil, nil)
+}
+
+// ADR 0005 R5: on an upserted table every partition column is one the upsert deletes by — for a
+// table to create, its key; for one that exists, its identifier fields.
+func TestIcebergPartitionKey(t *testing.T) {
+	cols := []Column{{Name: "id", Type: "integer"}, {Name: "tenant_id", Type: "integer"}, {Name: "created_at", Type: "timestamp with time zone"}, {Name: "status", Type: "text"}}
+	orders := TableInfo{Schema: "shop", Name: "orders", PrimaryKey: []string{"id"}, Columns: cols}
+	keyless := TableInfo{Schema: "shop", Name: "orders", Columns: cols}
+	missing := fakeTables{err: catalog.ErrNoSuchTable}
+	type tc struct {
+		flink  bool
+		info   TableInfo
+		opts   map[string]any
+		mutate func(*domain.PipelineSpec)
+		cat    icebergTables
+		source string
+		want   string // "" passes, "-" no check, else a blocking message part; "warn:" prefix a warning
+	}
+	by := func(fields ...any) map[string]any {
+		return map[string]any{"partition_by": map[string]any{"shop.orders": fields}}
+	}
+	with := func(m map[string]any, kv ...any) map[string]any {
+		out := map[string]any{}
+		for k, v := range m {
+			out[k] = v
+		}
+		for i := 0; i < len(kv); i += 2 {
+			out[kv[i].(string)] = kv[i+1]
+		}
+		return out
+	}
+	recorded := func(col string) map[string]any {
+		return map[string]any{"partitions": map[string]any{"shop.orders": col}}
+	}
+	cases := map[string]tc{
+		"E1 automatic bucket of the key":             {info: orders, opts: recorded("id"), cat: missing, want: ""},
+		"E2 recorded keyless, now keyed":             {info: orders, opts: recorded(""), cat: missing, want: "shop.orders by day(__source_ts_ms) (its key: id)"},
+		"stale recorded key":                         {info: orders, opts: recorded("status"), cat: missing, want: "bucket[16](status)"},
+		"E3 change log by the day of the change":     {info: orders, opts: with(recorded("id"), "write_mode", "append"), cat: missing, want: ""},
+		"E4 listed bucket of the key":                {info: orders, opts: by(field("id", "bucket", 8)), cat: missing, want: ""},
+		"E5 listed day of a non-key column":          {info: orders, opts: by(field("created_at", "day", 0)), cat: missing, want: "day(created_at) (its key: id)"},
+		"E6 change log by any column":                {info: orders, opts: with(by(field("status", "identity", 0)), "write_mode", "append"), cat: missing, want: ""},
+		"E7 keyless upsert is appended":              {info: keyless, opts: by(field("created_at", "day", 0)), cat: missing, want: ""},
+		"E8 none turns the automatic default off":    {info: orders, opts: with(recorded(""), "partitioning", "none"), cat: missing, want: "-"},
+		"E12 Flink CDC bucket of the key":            {flink: true, info: orders, opts: by(field("id", "bucket", 4)), cat: missing, want: ""},
+		"E13 Flink CDC day of a non-key column":      {flink: true, info: orders, opts: by(field("created_at", "day", 0)), cat: missing, want: "day(created_at)"},
+		"Flink CDC has no automatic default":         {flink: true, info: orders, opts: recorded(""), cat: missing, want: "-"},
+		"E22 a leading key column and the key":       {info: orders, opts: by(field("tenant_id", "identity", 0), field("id", "bucket", 16)), mutate: func(s *domain.PipelineSpec) { s.Keys = map[string][]string{"shop.orders": {"tenant_id", "id"}} }, cat: missing, want: ""},
+		"chosen key columns replace the primary key": {info: orders, opts: by(field("id", "bucket", 16)), mutate: func(s *domain.PipelineSpec) { s.Keys = map[string][]string{"shop.orders": {"tenant_id"}} }, cat: missing, want: "(its key: tenant_id)"},
+		"Debezium ignores chosen keys it lacks":      {info: orders, opts: by(field("id", "bucket", 16)), mutate: func(s *domain.PipelineSpec) { s.Keys = map[string][]string{"shop.orders": {"nope"}} }, cat: missing, want: ""},
+		"E20 a renamed key on Debezium: appended": {info: orders, opts: by(field("order_id", "bucket", 8)), mutate: func(s *domain.PipelineSpec) {
+			s.Transforms = []domain.Transform{{Type: "rename", Renames: []domain.Rename{{From: "id", To: "order_id"}}}}
+		}, cat: missing, want: ""},
+		"a renamed key on Flink CDC": {flink: true, info: orders, opts: by(field("order_id", "bucket", 8)), mutate: func(s *domain.PipelineSpec) {
+			s.Transforms = []domain.Transform{{Type: "rename", Renames: []domain.Rename{{From: "id", To: "order_id"}}}}
+		}, cat: missing, want: ""},
+		"E17 a routed table's automatic default": {info: orders, opts: recorded(""), mutate: func(s *domain.PipelineSpec) {
+			s.Transforms = []domain.Transform{{Type: "route", Routes: []domain.Route{{Match: "shop.orders", To: "all"}}}}
+		}, cat: missing, want: "-"},
+		"E18 MongoDB":                              {info: orders, opts: recorded(""), source: "mongodb", cat: missing, want: "-"},
+		"E10 live table off its identity":          {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: "may already hold duplicate rows"},
+		"E14 live Flink table off its identity":    {flink: true, info: orders, opts: by(field("created_at", "day", 0)), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: "identity id"},
+		"live table bucketed by its identity":      {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"bucket[16]", "id"})}}, want: ""},
+		"X9 live table without identifier fields":  {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, false, [2]string{"day", "created_at"})}}, want: ""},
+		"live table, change log":                   {info: orders, opts: with(recorded("id"), "write_mode", "append"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: ""},
+		"live table: what is asked doesn't matter": {info: orders, opts: by(field("created_at", "day", 0)), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"bucket[16]", "id"})}}, want: ""},
+		"E11 unreadable table":                     {info: orders, opts: recorded("id"), cat: fakeTables{err: errors.New("403")}, want: "warn:Couldn't read"},
+		"no catalog: checked as new":               {info: orders, opts: by(field("created_at", "day", 0)), want: "day(created_at)"},
+	}
+	for name, c := range cases {
+		spec := partitionSpec([]string{"shop.orders"}, nil)
+		spec.Sink.Options = map[string]any{"write_mode": "upsert"}
+		for k, v := range c.opts {
+			spec.Sink.Options[k] = v
+		}
+		if c.mutate != nil {
+			c.mutate(&spec)
+		}
+		opts, err := SinkOptions("iceberg", spec)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		source := c.source
+		if source == "" {
+			source = "postgresql"
+		}
+		facts := PipelineFacts{Tables: []TableInfo{c.info}, Options: opts, FlinkCDC: c.flink, SourceType: source, Destinations: map[string]string{"shop.orders": "lake.cdc_shop_orders"}}
+		got := partitionKeyChecks(context.Background(), c.cat, icebergConfig{}, CompileContext{Spec: spec}, facts)
+		switch {
+		case c.want == "-":
+			if len(got) != 0 {
+				t.Errorf("%s: %+v", name, got)
+			}
+		case c.want == "":
+			if len(got) != 1 || got[0].Status != checks.Pass {
+				t.Errorf("%s: %+v", name, got)
+			}
+		case strings.HasPrefix(c.want, "warn:"):
+			if len(got) != 1 || got[0].Status != checks.Warn || !strings.Contains(got[0].Message, strings.TrimPrefix(c.want, "warn:")) {
+				t.Errorf("%s: %+v", name, got)
+			}
+		default:
+			if len(got) != 1 || !got[0].Blocking || !strings.Contains(got[0].Message, c.want) {
+				t.Errorf("%s: %+v", name, got)
+			}
+		}
+	}
+	// E21: no discovery, partitioning asked for: unverified.
+	spec := partitionSpec([]string{"shop.orders"}, map[string]any{"shop.orders": []any{field("id", "bucket", 8)}})
+	opts, _ := SinkOptions("iceberg", spec)
+	got := partitionKeyChecks(context.Background(), missing, icebergConfig{}, CompileContext{Spec: spec}, PipelineFacts{Options: opts, SourceType: "postgresql"})
+	if len(got) != 1 || got[0].Status != checks.Warn {
+		t.Fatalf("no discovery: %+v", got)
+	}
+}
+
+// iceberg_key_columns: on Debezium a key column renamed or left out of the row drops out of the
+// table's identity.
+func TestIcebergKeyColumns(t *testing.T) {
+	cols := []Column{{Name: "tenant_id", Type: "integer"}, {Name: "id", Type: "integer"}, {Name: "note", Type: "text"}}
+	info := TableInfo{Schema: "shop", Name: "orders", PrimaryKey: []string{"tenant_id", "id"}, Columns: cols}
+	rename := func(from, to string) domain.Transform {
+		return domain.Transform{Type: "rename", Renames: []domain.Rename{{From: from, To: to}}}
+	}
+	for name, c := range map[string]struct {
+		steps   []domain.Transform
+		exclude []string
+		want    string
+	}{
+		"kept":          {nil, nil, ""},
+		"one renamed":   {[]domain.Transform{rename("id", "order_id")}, nil, "fail:shop.orders (id)"},
+		"one left out":  {nil, []string{"tenant_id"}, "fail:shop.orders (tenant_id)"},
+		"all renamed":   {[]domain.Transform{rename("id", "a"), rename("tenant_id", "b")}, nil, "warn:appended"},
+		"other renamed": {[]domain.Transform{rename("note", "memo")}, nil, ""},
+	} {
+		spec := partitionSpec([]string{"shop.orders"}, nil, c.steps...)
+		if c.exclude != nil {
+			spec.Source.Columns = map[string]domain.ColumnRules{"shop.orders": {Exclude: c.exclude, Mask: []string{}}}
+		}
+		got := icebergKeyColumnChecks(spec, PipelineFacts{Tables: []TableInfo{info}, SourceType: "postgresql"})
+		switch {
+		case c.want == "":
+			if len(got) != 0 {
+				t.Errorf("%s: %+v", name, got)
+			}
+		case strings.HasPrefix(c.want, "fail:"):
+			if len(got) != 1 || !got[0].Blocking || !strings.Contains(got[0].Message, strings.TrimPrefix(c.want, "fail:")) {
+				t.Errorf("%s: %+v", name, got)
+			}
+		default:
+			if len(got) != 1 || got[0].Status != checks.Warn || !strings.Contains(got[0].Message, strings.TrimPrefix(c.want, "warn:")) {
+				t.Errorf("%s: %+v", name, got)
+			}
+		}
+	}
+}
+
+// R8: MongoDB collections have no fixed columns to partition by.
+func TestIcebergPartitionMongo(t *testing.T) {
+	spec := partitionSpec([]string{"shop.orders"}, map[string]any{"shop.orders": []any{field("_id", "bucket", 8)}})
+	opts, _ := SinkOptions("iceberg", spec)
+	got := partitionChecks(context.Background(), nil, icebergConfig{}, CompileContext{Spec: spec}, PipelineFacts{Options: opts, SourceType: "mongodb"})
+	if len(got) != 1 || !got[0].Blocking || !strings.Contains(got[0].Message, "MongoDB") {
+		t.Fatal(got)
 	}
 }

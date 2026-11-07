@@ -1,6 +1,9 @@
 package domain
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 // Iceberg partitioning rules shared by preflight and (mirrored) the wizard's Partition by editor
 // (ADR 0005). The frontend keeps a copy in wizard/PartitionBy.tsx; the vectors in
@@ -11,8 +14,8 @@ import "slices"
 // boolean or floating point value; truncate only numbers, text and bytes; the time transforms a
 // date or a timestamp, hour a timestamp only.
 var PartitionTransforms = map[string][]string{
-	"identity": {"int", "decimal", "float", "bool", "text", "date", "time", "timestamp", "timestamptz", "binary"},
-	"bucket":   {"int", "decimal", "text", "date", "time", "timestamp", "timestamptz", "binary"},
+	"identity": {"int", "decimal", "float", "bool", "text", "uuid", "date", "time", "timestamp", "timestamptz", "binary"},
+	"bucket":   {"int", "decimal", "text", "uuid", "date", "time", "timestamp", "timestamptz", "binary"},
 	"truncate": {"int", "decimal", "text", "binary"},
 	"year":     {"date", "timestamp", "timestamptz"},
 	"month":    {"date", "timestamp", "timestamptz"},
@@ -27,23 +30,36 @@ func PartitionFits(transform, kind string) bool {
 
 // PartitionKind is the kind of value an engine writes into the Iceberg table for a source column:
 // ColumnKind, then what the engine's own type mapping and (on Debezium) the spec's value formats
-// make of it. "" for a value no transform takes (a document or a list).
+// make of it. "" for a value no transform takes (a document, a list, a struct), or one BeziSync
+// can't tell apart from such a value.
 //
 //   - Debezium (the Iceberg build's StructSchemaConverter): decimals as the decimal mode says
-//     (double → float, string → text), CockroachDB, Vitess and Spanner decimals always as text;
-//     binary as text unless sent as bytes; TIME as a number (int); JSON and UUID as strings;
-//     Spanner TIMESTAMP as ISO text; dates and timestamps (ISO strings or Kafka Connect's types)
-//     as Iceberg dates and timestamps.
-//   - Flink CDC: JSON and UUID as strings; the rest as its type.
+//     (double → float, string → text); CockroachDB, Vitess and Spanner decimals always as text; a
+//     PostgreSQL NUMERIC in the precise mode is "" (discovery doesn't say whether it has a scale,
+//     and one without is written as a struct); PostgreSQL arrays and user-defined types are "";
+//     binary as text unless sent as bytes; a time of day as a number (int); JSON as a string;
+//     UUID as Iceberg's uuid; Spanner TIMESTAMP as ISO text; dates and timestamps (ISO strings or
+//     Kafka Connect's types) as Iceberg dates and timestamps.
+//   - Flink CDC: JSON and UUID as strings; a MySQL TINYINT may be a boolean (TINYINT(1)), so it
+//     counts as one.
 func PartitionKind(engine, sourceType, dbType string, formats ValueFormats) string {
+	t := strings.ToLower(strings.TrimSpace(dbType))
 	kind := ColumnKind(sourceType, dbType)
-	switch kind {
-	case "document", "list":
+	switch {
+	case kind == "document" || kind == "list":
 		return ""
-	case "json", "uuid":
+	case kind == "json":
 		return "text"
+	case sourceType == "postgresql" && (t == "array" || t == "user-defined" || strings.HasPrefix(t, "_") || strings.HasSuffix(t, "[]")):
+		return ""
 	}
 	if engine == "flink-cdc" {
+		switch {
+		case kind == "uuid":
+			return "text"
+		case sourceType == "mysql" && strings.HasPrefix(t, "tinyint"):
+			return "bool"
+		}
 		return kind
 	}
 	switch {
@@ -53,6 +69,8 @@ func PartitionKind(engine, sourceType, dbType string, formats ValueFormats) stri
 		return "float"
 	case kind == "decimal" && formats.Decimals == "string":
 		return "text"
+	case kind == "decimal" && sourceType == "postgresql":
+		return ""
 	case kind == "binary" && formats.Binary != "" && formats.Binary != "bytes":
 		return "text"
 	case kind == "time":

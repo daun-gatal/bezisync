@@ -604,6 +604,8 @@ func (s *icebergSink) CheckPipeline(ctx context.Context, conn Resolved, c Compil
 	// On Flink CDC a table without a key fails preflight (flink_primary_key), and tables are not
 	// partitioned.
 	if facts.Tables != nil && upsert && !facts.FlinkCDC {
+		// Partition by replaces the recorded key for the tables it lists.
+		listedPartitions, _ := facts.Options["partition_by"].(map[string]any)
 		var keyless, stale []string
 		for _, t := range facts.Tables {
 			key := t.PrimaryKey
@@ -613,7 +615,7 @@ func (s *icebergSink) CheckPipeline(ctx context.Context, conn Resolved, c Compil
 			if len(key) == 0 {
 				keyless = append(keyless, t.Identifier())
 			}
-			if Str(facts.Options, "partitioning") != "none" {
+			if _, listed := listedPartitions[t.Identifier()]; !listed && Str(facts.Options, "partitioning") != "none" {
 				want := ""
 				if len(key) > 0 {
 					want = key[0]
@@ -632,6 +634,7 @@ func (s *icebergSink) CheckPipeline(ctx context.Context, conn Resolved, c Compil
 			out = append(out, checks.Check{Code: "iceberg_no_key", Title: "Row identity", Status: checks.Pass, Category: checks.CatDestination,
 				Message: "Every table has a key: rows are upserted by it."})
 		}
+		out = append(out, icebergKeyColumnChecks(c.Spec, facts)...)
 		if len(stale) > 0 {
 			out = append(out, checks.Check{Code: "iceberg_partitioning", Title: "Partitioning", Status: checks.Warn, Category: checks.CatDestination,
 				Message: fmt.Sprintf("The recorded partition keys of %s do not match their keys: new tables would be unpartitioned or bucketed by the wrong column.",
@@ -645,9 +648,11 @@ func (s *icebergSink) CheckPipeline(ctx context.Context, conn Resolved, c Compil
 	}
 	cat, ctx, err := cfg.open(ctx)
 	if err != nil {
-		return append(out, partitionChecks(ctx, nil, cfg, c, facts)...)
+		out = append(out, partitionChecks(ctx, unreachableCatalog{err}, cfg, c, facts)...)
+		return append(out, partitionKeyChecks(ctx, unreachableCatalog{err}, cfg, c, facts)...)
 	}
 	out = append(out, partitionChecks(ctx, cat, cfg, c, facts)...)
+	out = append(out, partitionKeyChecks(ctx, cat, cfg, c, facts)...)
 	var existing, noIdentity []string
 	for _, dest := range sortedUnique(facts.Destinations) {
 		tbl, err := cat.LoadTable(ctx, icebergTableIdent(cfg, dest))

@@ -2528,6 +2528,35 @@
    "section": "Apache Iceberg"
   },
   {
+   "code": "iceberg_partition_key",
+   "titles": [
+    "Partitioning"
+   ],
+   "whys": [
+    "Both engines upsert by writing equality deletes on the table's key, and Iceberg applies a delete only to rows in its own partition. On a table partitioned by a column outside its key, an update that changes that column writes the new row in another partition and never deletes the old one, so readers see both. For a table that already exists, its own identifier fields and partitioning are what count: they were fixed when it was created. A table the catalog can't read is left unchecked (a warning)."
+   ],
+   "fixes": [
+    "In the Destination step, partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned.",
+    "Drop and recreate them (Positions → Start over, dropping destinations). Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates (SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1).",
+    "Check the catalog connection's access to the namespace, then run preflight again.",
+    "Run preflight again once the source is reachable."
+   ],
+   "section": "Apache Iceberg"
+  },
+  {
+   "code": "iceberg_key_columns",
+   "titles": [
+    "Row identity"
+   ],
+   "whys": [
+    "Debezium's Iceberg build makes a column part of a table's identity only when the event's key and its row both carry it under that name. A rename changes the row, not the key, so a key column renamed or left out drops out of the identity: with some key columns left, an upsert replaces every row sharing them (rows are lost); with none, the table gets every change appended."
+   ],
+   "fixes": [
+    "Keep key columns under their own names: remove them from the rename steps and the left-out columns, or choose other key columns in the Transform step."
+   ],
+   "section": "Apache Iceberg"
+  },
+  {
    "code": "iceberg_partition_existing",
    "titles": [
     "Partitioning"

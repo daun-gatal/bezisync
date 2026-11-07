@@ -1465,6 +1465,19 @@ Fix:
 ALTER TABLE … SET IDENTIFIER FIELDS <key columns> (Spark), or drop the table so the pipeline creates it.
 ```
 
+<a id="iceberg-key-columns"></a>
+### `iceberg_key_columns`
+
+**Row identity**
+
+- Why: Debezium's Iceberg build makes a column part of a table's identity only when the event's key and its row both carry it under that name. A rename changes the row, not the key, so a key column renamed or left out drops out of the identity: with some key columns left, an upsert replaces every row sharing them (rows are lost); with none, the table gets every change appended.
+
+Fix:
+
+```
+Keep key columns under their own names: remove them from the rename steps and the left-out columns, or choose other key columns in the Transform step.
+```
+
 <a id="iceberg-namespace"></a>
 ### `iceberg_namespace`
 
@@ -1521,6 +1534,37 @@ Fix:
 
 ```
 Check the catalog connection's access to the namespace, then run preflight again.
+```
+
+<a id="iceberg-partition-key"></a>
+### `iceberg_partition_key`
+
+**Partitioning**
+
+- Why: Both engines upsert by writing equality deletes on the table's key, and Iceberg applies a delete only to rows in its own partition. On a table partitioned by a column outside its key, an update that changes that column writes the new row in another partition and never deletes the old one, so readers see both. For a table that already exists, its own identifier fields and partitioning are what count: they were fixed when it was created. A table the catalog can't read is left unchecked (a warning).
+
+Fix:
+
+```
+In the Destination step, partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned.
+```
+
+Fix:
+
+```
+Drop and recreate them (Positions → Start over, dropping destinations). Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates (SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1).
+```
+
+Fix:
+
+```
+Check the catalog connection's access to the namespace, then run preflight again.
+```
+
+Fix:
+
+```
+Run preflight again once the source is reachable.
 ```
 
 <a id="iceberg-partitioning"></a>

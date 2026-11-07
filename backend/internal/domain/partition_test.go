@@ -43,7 +43,7 @@ func TestPartitionFits(t *testing.T) {
 	if len(v.Fits) != len(PartitionTransforms) {
 		t.Fatalf("transforms: %d in the vectors, %d in PartitionTransforms", len(v.Fits), len(PartitionTransforms))
 	}
-	kinds := []string{"int", "decimal", "float", "bool", "text", "date", "time", "timestamp", "timestamptz", "binary", ""}
+	kinds := []string{"int", "decimal", "float", "bool", "text", "uuid", "date", "time", "timestamp", "timestamptz", "binary", ""}
 	for tr, fits := range v.Fits {
 		for _, k := range kinds {
 			if got := PartitionFits(tr, k); got != slices.Contains(fits, k) {
@@ -52,7 +52,7 @@ func TestPartitionFits(t *testing.T) {
 		}
 	}
 	// Iceberg: no bucket of a boolean or a float, no truncate of a date, hour needs a time of day.
-	for _, bad := range [][2]string{{"bucket", "bool"}, {"bucket", "float"}, {"truncate", "timestamp"}, {"hour", "date"}, {"day", "int"}} {
+	for _, bad := range [][2]string{{"bucket", "bool"}, {"bucket", "float"}, {"truncate", "timestamp"}, {"hour", "date"}, {"day", "int"}, {"truncate", "uuid"}} {
 		if PartitionFits(bad[0], bad[1]) {
 			t.Errorf("%s takes %s", bad[0], bad[1])
 		}
