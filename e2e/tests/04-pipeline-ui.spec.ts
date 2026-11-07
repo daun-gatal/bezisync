@@ -63,7 +63,10 @@ test('create, deploy, observe and delete a pipeline entirely in the UI', async (
   await expect(page.getByText(/Ready/).first()).toBeVisible();
   // Every step and every autosave updated the one draft version.
   await expect(page.getByText('Draft saved · v1')).toBeVisible();
+  // Deploy names the version the final checks ran on, so it never deploys a later one.
+  const deployRequest = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/deploy'));
   await page.getByRole('button', { name: 'Deploy', exact: true }).click();
+  expect((await deployRequest).postDataJSON()).toMatchObject({ version: 1 });
 
   // Operate
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();

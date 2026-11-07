@@ -223,9 +223,13 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
     commit: async () => (!dirty ? true : invalid ? false : autosave.attempt()),
   }));
 
-  // The final checks run against exactly what is saved: after each save.
+  // The final checks run against exactly what is saved: after each save, on the version saved.
+  // Deploy then sends that version, so it deploys what was checked here, never a version someone
+  // else saved after (Known issue 17).
+  const check = () => preflight.mutate({ id: pipeline.id, version: pipeline.current_version ?? undefined });
+  const checkedVersion = preflight.variables?.version;
   useEffect(() => {
-    if (pipeline.runtime && pipeline.sink) preflight.mutate({ id: pipeline.id });
+    if (pipeline.runtime && pipeline.sink) check();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipeline.version]);
 
@@ -238,7 +242,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
 
   function doDeploy(forceReason?: string) {
     deploy.mutate(
-      { id: pipeline.id, forceReason },
+      { id: pipeline.id, version: checkedVersion, forceReason },
       {
         onSuccess: (p) => {
           if (p.pending_change) toast.success(`Sent ${p.name} v${p.pending_change.version} for approval`);
@@ -611,12 +615,12 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             <Skeleton lines={4} />
           </div>
         ) : preflight.error ? (
-          <InlineError error={preflight.error} doing="Couldn’t run the final checks" onRetry={() => preflight.mutate({ id: pipeline.id })} />
+          <InlineError error={preflight.error} doing="Couldn’t run the final checks" onRetry={check} />
         ) : report ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <Pill tone={report.ok ? 'ok' : 'bad'}>{report.summary}</Pill>
-              <Button size="sm" variant="ghost" onClick={() => preflight.mutate({ id: pipeline.id })}>
+              <Button size="sm" variant="ghost" onClick={check}>
                 Re-run
               </Button>
             </div>
@@ -667,7 +671,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
             </Button>
           ) : null}
           <Button variant="primary" disabled={Boolean(deployWhy)} why={deployWhy} loading={deploy.isPending} onClick={() => doDeploy()}>
-            {pipeline.approval_required ? 'Request approval' : deployed ? `Deploy v${pipeline.current_version}` : 'Deploy'}
+            {pipeline.approval_required ? 'Request approval' : deployed ? `Deploy v${checkedVersion ?? pipeline.current_version}` : 'Deploy'}
           </Button>
         </div>
       </div>
