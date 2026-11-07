@@ -375,8 +375,61 @@ func jobNotify(ctx context.Context, q db.Querier, j *models.Job) (map[string]any
 	return services.RunNotifyJob(ctx, q, *j.ResourceID, stringList(j.Payload["targets"], []string{}))
 }
 
-// RunJobs claims and runs up to limit due jobs.
+// ReclaimGrace is how long a claimed job may wait for runJob's row lock before a running job
+// whose row nobody holds counts as abandoned (ADR 0003). The gap is normally microseconds.
+var ReclaimGrace = time.Minute
+
+// reclaimJobs takes back jobs a controller left running when it died (ADR 0003): runJob holds
+// its job's row lock for the whole handler and Postgres drops it with the connection, so a
+// running row that can be locked has no live owner. The lost run counts as the attempt; a
+// snapshot is never sent again on its own (the signal may already have gone out).
+func (c *Controller) reclaimJobs(ctx context.Context) {
+	err := db.Tx(ctx, func(tx pgx.Tx) error {
+		stale, err := db.Select[models.Job](ctx, tx, `SELECT * FROM jobs WHERE state = 'running' AND locked_at < $1 ORDER BY locked_at FOR UPDATE SKIP LOCKED`,
+			db.Now().Add(-ReclaimGrace))
+		if err != nil {
+			return err
+		}
+		for i := range stale {
+			j := &stale[i]
+			now := db.Now()
+			owner := ""
+			if j.LockedBy != nil {
+				owner = *j.LockedBy
+			}
+			var msg string
+			switch {
+			case j.Kind == "snapshot":
+				msg = "Interrupted: the controller stopped while sending this snapshot. Check the pipeline, then request it again."
+				j.State, j.FinishedAt = "failed", &now
+			case j.Attempts >= j.MaxAttempts:
+				msg = "Interrupted: the controller stopped while running this, and it has no attempts left."
+				j.State, j.FinishedAt = "failed", &now
+			default:
+				msg = "Interrupted: the controller stopped while running this; retrying."
+				j.State, j.RunAfter = "queued", now
+			}
+			j.Error, j.LockedBy, j.LockedAt = &msg, nil, nil
+			if err := db.Update(ctx, tx, "jobs", j); err != nil {
+				return err
+			}
+			log.Warn(fmt.Sprintf("reclaimed %s job %s from %s: %s", j.Kind, j.ID, owner, j.State))
+			if _, err := services.Record(ctx, tx, services.AuditEvent{Kind: "job.reclaimed", ProjectID: j.ProjectID, Actor: "controller",
+				Summary:      fmt.Sprintf("Took back a %s job the controller %s left running (%s)", j.Kind, owner, j.State),
+				ResourceType: "job", ResourceID: &j.ID, Details: map[string]any{"kind": j.Kind, "owner": owner, "state": j.State, "attempts": j.Attempts}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Error("cannot reclaim jobs", "exc", err.Error())
+	}
+}
+
+// RunJobs reclaims abandoned jobs, then claims and runs up to limit due jobs.
 func (c *Controller) RunJobs(ctx context.Context, limit int) {
+	c.reclaimJobs(ctx)
 	for range limit {
 		var id uuid.UUID
 		err := db.Tx(ctx, func(tx pgx.Tx) error {
@@ -412,7 +465,9 @@ func backoff(attempts int) time.Duration {
 
 func (c *Controller) runJob(ctx context.Context, id uuid.UUID) {
 	err := db.Tx(ctx, func(tx pgx.Tx) error {
-		j, err := db.Find[models.Job](ctx, tx, `SELECT * FROM jobs WHERE id = $1`, id)
+		// The row lock is the job's lease (ADR 0003): held until this transaction ends, and
+		// released by Postgres if this controller dies, so reclaimJobs can tell the two apart.
+		j, err := db.Find[models.Job](ctx, tx, `SELECT * FROM jobs WHERE id = $1 FOR UPDATE`, id)
 		if err != nil || j == nil {
 			return err
 		}
