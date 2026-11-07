@@ -549,3 +549,26 @@ func TestComputedFlink(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A connection setting holding "${" is refused before anything compiles: the helper (and
+// Debezium Server) would read it as a variable that can name another secret.
+func TestCompileRefusesConfigExpressions(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}}})
+	bad := mysqlConn
+	bad.Name = "orders db"
+	bad.Config = map[string]any{"host": "db.internal", "port": 3306, "user": "${BZ_STATE_PASSWORD}", "ssl_mode": "required"}
+	_, err := compiler.CompileFlink(flinkCtx(spec), bad, testSink, "acme/flink-cdc:3.7.0", secrets)
+	var p *problem.Problem
+	if !errors.As(err, &p) || p.Code != "connection_config" || !strings.Contains(p.Detail, "orders db") {
+		t.Fatalf("Flink CDC: %v", err)
+	}
+	linked := testSink
+	linked.Linked = map[string]connectors.Resolved{"kafka": {Type: "kafka", Name: "bus", Config: map[string]any{"nested": []any{map[string]any{"x": "a${HOME}"}}}}}
+	if _, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, linked, "acme/flink-cdc:3.7.0", secrets); !errors.As(err, &p) || p.Code != "connection_config" {
+		t.Fatalf("linked: %v", err)
+	}
+	if _, err := compiler.Compile(flinkCtx(spec), bad, testSink, "debezium/server:3.7.0.Final"); !errors.As(err, &p) || p.Code != "connection_config" {
+		t.Fatalf("Debezium: %v", err)
+	}
+}

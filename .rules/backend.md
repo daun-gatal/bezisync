@@ -98,7 +98,9 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   `TestEveryDriverDialsThroughTheGuard`.
 - Secrets: `services.ValidateConnection` validates, `services.MergeSecrets` applies write-only patches,
   `services.EncryptOrNil` encrypts, and `services.ScrubReport` removes known secret values from every
-  check message. API responses expose only `secret_fields_set` (and `secret_refs`).
+  check message. API responses expose only `secret_fields_set` (and `secret_refs`). Connection settings
+  (not secrets) never hold `${`: refused on save and again at compile (`connectors.ConfigExpressions`),
+  because Debezium Server and the Flink CDC helper would fill it from an environment holding credentials.
 - Connection edits need `If-Match: "<version>"` (412 on conflict, 428 when missing).
 - Copy to project (`services/copy.go`, `POST …/connections:copy` with `dry_run` for the plan,
   `POST …/secret-stores/{id}/copy`): never a move; `connection.manage` in both projects; saved secrets
@@ -244,7 +246,7 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
 - Flink CDC compile (`compiler/flinkcdc.go`, `compiler/flinktransforms.go`, pure): `CompileFlink` renders
   `pipeline.yaml` (sources and destinations implement `connectors.FlinkSource` / `FlinkSink`; every value
   is a JSON-quoted YAML scalar and secrets are bare `${BZ_…}` placeholders the helper fills as quoted
-  scalars), `flink-conf.yaml` (BeziSync's keys first, then `engine.FlinkDefaults` and the pipeline's
+  scalars, only where one is a whole value: `flinkhelper.RenderSecrets` leaves every other `$` as written), `flink-conf.yaml` (BeziSync's keys first, then `engine.FlinkDefaults` and the pipeline's
   catalogue keys, `engine.FlinkSettings`, which never include anything BeziSync depends on) and
   `settings.json`. Internal TLS uses the pipeline's ECDSA keystore, so the ECDHE-ECDSA suites are set;
   its passwords go in the secret file `flink-secrets.conf`, which the helper appends to its private

@@ -10,8 +10,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -266,6 +268,9 @@ func merge(dst, src map[string]string) {
 
 // Compile compiles a pipeline; image "" means the install default.
 func Compile(c connectors.CompileContext, source, sink connectors.Resolved, image string) (*Compiled, error) {
+	if err := noConfigExpressions(source, sink); err != nil {
+		return nil, err
+	}
 	src, err := connectors.GetSource(source.Type)
 	if err != nil {
 		return nil, err
@@ -523,4 +528,20 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 		HealthPort:   connectors.HealthPort(sink.Type, image),
 		Managed:      managed,
 	}, nil
+}
+
+// noConfigExpressions refuses a connection (or one it links to) whose settings hold "${"
+// (connectors.ConfigExpressions): stored before the rule, it must not reach a runtime.
+func noConfigExpressions(conns ...connectors.Resolved) error {
+	for _, r := range conns {
+		if err := connectors.RefuseConfigExpressions(r.Name, r.Config); err != nil {
+			return err
+		}
+		for _, field := range slices.Sorted(maps.Keys(r.Linked)) {
+			if err := noConfigExpressions(r.Linked[field]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

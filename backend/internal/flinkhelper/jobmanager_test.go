@@ -521,6 +521,26 @@ func TestJobManagerExitsWhenFlinkDies(t *testing.T) {
 	}
 }
 
+// Only whole-value placeholders are filled: a "$" inside a quoted value (a transform literal, a
+// name) reaches Flink CDC as written and never names a secret.
+func TestRenderSecretsOnlyWholeValues(t *testing.T) {
+	tmpl := "source:\n  password: ${BZ_PW}\ntransform:\n" +
+		"- source-table: \"a.b\"\n  projection: \"*, 'US$5' AS `p`, '$BZ_PW' AS `q`, '${BZ_PW}' AS `r`\"\n" +
+		"  filter: \"(`c` = '$HOME')\"\nsink:\n  name: \"${BZ_PW}\"\n  user: \"x\" ${BZ_PW}\n"
+	out := RenderSecrets(tmpl, func(k string) string {
+		if k == "BZ_PW" {
+			return "s3cr3t"
+		}
+		return "leaked"
+	})
+	if strings.Count(out, "s3cr3t") != 1 || strings.Contains(out, "leaked") || !strings.Contains(out, "  password: \"s3cr3t\"\n") {
+		t.Fatalf("filled more than the whole-value placeholder:\n%s", out)
+	}
+	if want := strings.Replace(tmpl, "${BZ_PW}", `"s3cr3t"`, 1); out != want {
+		t.Fatalf("changed other text:\n%s", out)
+	}
+}
+
 // A secret can't end its YAML value or add keys, whatever it contains.
 func TestRenderSecretsQuotesValues(t *testing.T) {
 	tmpl := "source:\n  password: ${BZ_PW}\n  user: \"u\"\nsink:\n  token: ${BZ_EMPTY}\n"

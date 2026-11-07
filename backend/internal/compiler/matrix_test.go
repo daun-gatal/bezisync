@@ -15,6 +15,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/compiler"
 	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
+	"github.com/daun-gatal/bezisync/backend/internal/flinkhelper"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pyjson"
@@ -345,6 +346,17 @@ func TestCompileMatrixUnchanged(t *testing.T) {
 				if err != nil {
 					got[key] = outcome(nil, err)
 					continue
+				}
+				// The helper fills every placeholder the compiler writes, and nothing else.
+				rendered := flinkhelper.RenderSecrets(f.Pipeline, func(k string) string {
+					if _, ok := f.Env[k]; ok {
+						return "filled:" + k
+					}
+					t.Errorf("%s: %s is not in the environment", key, k)
+					return ""
+				})
+				if strings.Contains(rendered, "${BZ_") || strings.Count(rendered, "filled:") != strings.Count(f.Pipeline, "${BZ_") {
+					t.Errorf("%s: placeholders not all filled:\n%s", key, rendered)
 				}
 				got[key] = outcome(compiler.FromFlink(f), nil)
 			}

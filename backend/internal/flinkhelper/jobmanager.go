@@ -335,15 +335,22 @@ func (m *JobManager) extract(ctx context.Context, id int64) (string, error) {
 	return dir, nil
 }
 
-// RenderSecrets replaces each ${BZ_…} placeholder (always a whole YAML value) with the
-// variable's value as a double-quoted scalar, so no value can end the scalar or add keys.
+// placeholderLine is a line whose whole value is a bare ${BZ_…} placeholder, as the compiler
+// writes them (`key: ${BZ_X}` or `- key: ${BZ_X}`). Every other value is a quoted scalar.
+var placeholderLine = regexp.MustCompile(`^(\s*(?:- )?[A-Za-z0-9_.\-]+: )\$\{(BZ_[A-Za-z0-9_]+)\}$`)
+
+// RenderSecrets replaces each whole-value ${BZ_…} placeholder with the variable's value as a
+// double-quoted scalar, so no value can end the scalar or add keys. Nothing else is touched: a
+// "$" or "${…}" inside a quoted value (a literal in a transform, say) reaches Flink CDC as written,
+// and can never name a secret.
 func RenderSecrets(tmpl string, getenv func(string) string) string {
-	return os.Expand(tmpl, func(name string) string {
-		if strings.HasPrefix(name, "BZ_") {
-			return quoteScalar(getenv(name))
+	lines := strings.Split(tmpl, "\n")
+	for i, line := range lines {
+		if m := placeholderLine.FindStringSubmatch(line); m != nil {
+			lines[i] = m[1] + quoteScalar(getenv(m[2]))
 		}
-		return "${" + name + "}"
-	})
+	}
+	return strings.Join(lines, "\n")
 }
 
 // quoteScalar is s as a YAML double-quoted scalar (JSON string escapes are valid YAML).
