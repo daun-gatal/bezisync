@@ -183,6 +183,9 @@ func SettingLimitViolations(rules domain.ProjectPolicies, id engine.ID, spec dom
 
 // RefuseSettingLimits is SettingLimitViolations as a 422 for a save.
 func RefuseSettingLimits(rules domain.ProjectPolicies, id engine.ID, spec domain.PipelineSpec, prev *domain.PipelineSpec) error {
+	if rules.Unreadable { // every spec save passes here (create and edit): fail closed, ADR 0002
+		return UnreadablePolicies()
+	}
 	v := SettingLimitViolations(rules, id, spec, prev)
 	if len(v) == 0 {
 		return nil

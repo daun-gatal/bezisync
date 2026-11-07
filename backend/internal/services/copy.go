@@ -253,7 +253,9 @@ func CopyConnections(ctx context.Context, q db.Querier, src, dst *auth.ProjectAc
 		if c.Kind == "sink" {
 			allowed = pol.AllowedSinkTypes
 		}
-		if !typeAllowed(allowed, c.Type) {
+		if pol.Unreadable {
+			item.Problems = append(item.Problems, fmt.Sprintf("%s's policies can't be read; an Admin must fix them in Settings → Policies first.", dst.Project.Name))
+		} else if !typeAllowed(allowed, c.Type) {
 			what := "sources"
 			if c.Kind == "sink" {
 				what = "destinations"

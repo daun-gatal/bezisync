@@ -2057,6 +2057,19 @@
    ]
   },
   {
+   "code": "policy_unreadable",
+   "fixes": [
+    "Ask an Admin to open Settings → Policies, fix the fields it lists and save."
+   ],
+   "section": "Project policies",
+   "titles": [
+    "Project policies"
+   ],
+   "whys": [
+    "This project's policies can't be read, so changes are blocked until an Admin fixes them."
+   ]
+  },
+  {
    "code": "policy_runtime",
    "fixes": [],
    "section": "Project policies",

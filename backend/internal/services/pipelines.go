@@ -21,6 +21,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
+	"github.com/daun-gatal/bezisync/backend/internal/logging"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
@@ -274,7 +275,20 @@ func PoliciesOf(ctx context.Context, q db.Querier, projectID uuid.UUID) (domain.
 	if proj == nil || len(proj.Policies) == 0 {
 		return domain.DefaultPolicies(), nil
 	}
-	return domain.LoadPolicies(proj.Policies), nil
+	p := domain.LoadPolicies(proj.Policies)
+	if p.Unreadable {
+		policyLog.Warn("project policies can't be read: changes are blocked until an Admin saves them",
+			"project_id", projectID.String(), "problems", len(p.Problems))
+	}
+	return p, nil
+}
+
+var policyLog = logging.Logger("bezisync.services.policies")
+
+// UnreadablePolicies is the refusal of a change in a project whose policies can't be read.
+func UnreadablePolicies() error {
+	c := domain.UnreadableCheck()
+	return problem.New(409, c.Code, c.Message).WithErrors([]map[string]any{{"loc": []string{c.Code}, "message": c.Message}})
 }
 
 // EnforceSavePolicies refuses building blocks the project does not allow.
@@ -546,6 +560,17 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 		}
 		if err := refuseDriverProps(ctx, q, p.SourceID, prev, *e.Spec); err != nil {
 			return nil, err
+		}
+		// A changed spec in a project whose policies can't be read is refused (ADR 0002); saving
+		// the same spec again (an autosave) is not a change.
+		if current == nil || current.SpecHash != domain.SpecHash(*e.Spec) {
+			rules, err := PoliciesOf(ctx, q, p.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if rules.Unreadable {
+				return nil, UnreadablePolicies()
+			}
 		}
 		if len(e.Spec.Tuning) > 0 {
 			src, err := GetConnection(ctx, q, p.SourceID)
@@ -1754,6 +1779,9 @@ func PolicyChecks(ctx context.Context, q db.Querier, p *models.Pipeline, spec do
 		}
 	}
 	out := domain.EvaluatePolicies(rules, spec, p.RuntimeID, sourceConn.Type, sinkType, int(others))
+	if rules.Unreadable {
+		return out, nil // the one check that says why; the strict values would only add noise
+	}
 	if c := settingLimitCheck(rules, EngineOf(p), spec); c != nil {
 		kept := out[:0]
 		for _, x := range out {

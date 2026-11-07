@@ -52,6 +52,12 @@ type ProjectPolicies struct {
 	// read leniently, so a key a later registry drops is kept (shown obsolete) and ignored.
 	// Dumped only when set.
 	SettingLimits map[string]SettingLimit `json:"setting_limits"`
+	// Unreadable: the stored policies failed to parse (ADR 0002). The fields that failed hold
+	// their strictest value, the others what was stored, and every policy-gated change is
+	// refused (UnreadableCheck) until an Admin saves valid policies. Problems are the parse
+	// errors (location and message, never a value). Neither is stored.
+	Unreadable bool     `json:"-"`
+	Problems   []string `json:"-"`
 }
 
 // SettingLimit is one setting's project limit (each part optional).
@@ -139,6 +145,10 @@ func (p ProjectPolicies) Dump() *om.Map {
 	}
 	if p.ShrinkAfterCopy == "suggest" {
 		out.Set("shrink_after_copy", "suggest")
+	}
+	if p.Unreadable {
+		out.Set("unreadable", true)
+		out.Set("problems", strList(p.Problems))
 	}
 	if len(p.SettingLimits) > 0 {
 		m := om.New()
@@ -231,6 +241,8 @@ func ParsePolicies(v *val.V, loc val.Loc, raw any) (ProjectPolicies, bool) {
 	if f := o.Get("require_pii_masking"); f.Present {
 		v.Bool(f.Loc, f.Raw)
 	}
+	// Read-only answers of GET (an unreadable project's form sends them back): ignored.
+	_, _ = o.Get("unreadable"), o.Get("problems")
 	if f := o.Get("allow_force_deploy"); f.Present {
 		if b, ok := v.Bool(f.Loc, f.Raw); ok {
 			p.AllowForceDeploy = b
@@ -309,6 +321,10 @@ func engineIDs() []string {
 // EngineViolation is the policy failure of a pipeline on an engine the project does not allow
 // (nil when allowed).
 func EngineViolation(p ProjectPolicies, id string) *checks.Check {
+	if p.Unreadable {
+		c := UnreadableCheck()
+		return &c
+	}
 	if id == "" || p.AllowedEngines == nil || slices.Contains(p.AllowedEngines, id) {
 		return nil
 	}
@@ -316,17 +332,68 @@ func EngineViolation(p ProjectPolicies, id string) *checks.Check {
 	return &c
 }
 
-// LoadPolicies reads stored policies; invalid stored data falls back to defaults, as
-// Python's model_validate would have raised (callers there never stored invalid data).
+// LoadPolicies reads stored policies. Stored policies that fail to parse fail closed (ADR 0002):
+// the result is Unreadable, keeps every field that parsed, and holds the strictest value in each
+// field that didn't, never the allow-everything defaults.
 func LoadPolicies(raw map[string]any) ProjectPolicies {
 	if raw == nil {
 		return DefaultPolicies()
 	}
-	p, ok := ParsePolicies(&val.V{}, nil, raw)
-	if !ok {
-		return DefaultPolicies()
+	v := &val.V{}
+	p, ok := ParsePolicies(v, nil, raw)
+	if ok {
+		return p
 	}
+	failed := map[string]bool{}
+	for _, e := range v.Errors {
+		key := ""
+		if len(e.Loc) > 0 {
+			key = fmt.Sprint(e.Loc[0])
+		}
+		failed[key] = true
+		where := strings.Trim(fmt.Sprint(e.Loc), "[]")
+		if where == "" {
+			where = "policies"
+		}
+		p.Problems = append(p.Problems, where+": "+e.Message)
+	}
+	if failed[""] {
+		failed = nil // not an object: nothing parsed
+	}
+	strict := func(key string) bool { return failed == nil || failed[key] }
+	small := "small"
+	one := 1
+	for key, apply := range map[string]func(){
+		"allowed_runtime_ids":       func() { p.AllowedRuntimeIDs = []uuid.UUID{} },
+		"allowed_source_types":      func() { p.AllowedSourceTypes = []string{} },
+		"allowed_sink_types":        func() { p.AllowedSinkTypes = []string{} },
+		"allowed_snapshot_modes":    func() { p.AllowedSnapshotModes = []string{} },
+		"allowed_transforms":        func() { p.AllowedTransforms = []string{} },
+		"allowed_engines":           func() { p.AllowedEngines = []string{} },
+		"max_resources":             func() { p.MaxResources = &small },
+		"max_pipelines_per_source":  func() { p.MaxPipelinesPerSource = &one },
+		"allow_force_deploy":        func() { p.AllowForceDeploy = false },
+		"require_approval":          func() { p.RequireApproval = true },
+		"allow_scripted_transforms": func() { p.AllowScriptedTransforms = false },
+		"allow_custom_transforms":   func() { p.AllowCustomTransforms = false },
+		"allow_advanced_properties": func() { p.AllowAdvancedProperties = false },
+		"shrink_after_copy":         func() { p.ShrinkAfterCopy = "suggest" },
+	} {
+		if strict(key) {
+			apply()
+		}
+	}
+	p.Unreadable = true
 	return p
+}
+
+// UnreadableCheck is the one policy failure of a project whose policies can't be read.
+func UnreadableCheck() checks.Check {
+	c := policyFail("policy_unreadable", "Project policies",
+		"This project's policies can't be read, so changes are blocked until an Admin fixes them.",
+		"Ask an Admin to open Settings → Policies, fix the fields it lists and save.")
+	c.Fix.Who = "Admin"
+	return c
 }
 
 func policyFail(code, title, message, fix string) checks.Check {
@@ -345,6 +412,9 @@ func policyFail(code, title, message, fix string) checks.Check {
 
 // SaveViolations is what may not even be saved: the building blocks themselves.
 func SaveViolations(p ProjectPolicies, runtimeID *uuid.UUID, sourceType, sinkType string) []checks.Check {
+	if p.Unreadable {
+		return []checks.Check{UnreadableCheck()}
+	}
 	var out []checks.Check
 	if runtimeID != nil && p.AllowedRuntimeIDs != nil && !slices.Contains(p.AllowedRuntimeIDs, *runtimeID) {
 		out = append(out, policyFail("policy_runtime", "Runtime", "This project does not allow pipelines on that runtime.", AskAdmin))
@@ -367,6 +437,9 @@ func EvaluatePolicies(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UUID
 // EvaluatePoliciesOn returns the policy preflight section of a pipeline on an engine.
 func EvaluatePoliciesOn(p ProjectPolicies, spec PipelineSpec, runtimeID *uuid.UUID, sourceType, sinkType, engineID string,
 	otherPipelinesOnSource int) []checks.Check {
+	if p.Unreadable {
+		return []checks.Check{UnreadableCheck()}
+	}
 	out := SaveViolations(p, runtimeID, sourceType, sinkType)
 	if c := EngineViolation(p, engineID); c != nil {
 		out = append(out, *c)
