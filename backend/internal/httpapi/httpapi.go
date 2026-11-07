@@ -117,7 +117,10 @@ func Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// CORS adds credentialed CORS for the configured origins (like Starlette's middleware).
+// CORS adds CORS for the configured origins. A listed origin gets credentialed CORS (its own
+// Origin back with Allow-Credentials); "*" lets any other origin read without credentials (a
+// literal "*", never the caller's Origin with credentials, which would hand every site the
+// session cookie).
 func CORS(origins []string) func(http.Handler) http.Handler {
 	allowed := map[string]bool{}
 	for _, o := range origins {
@@ -131,8 +134,12 @@ func CORS(origins []string) func(http.Handler) http.Handler {
 				return
 			}
 			h := w.Header()
-			h.Set("Access-Control-Allow-Origin", origin)
-			h.Set("Access-Control-Allow-Credentials", "true")
+			if allowed[origin] && origin != "*" {
+				h.Set("Access-Control-Allow-Origin", origin)
+				h.Set("Access-Control-Allow-Credentials", "true")
+			} else {
+				h.Set("Access-Control-Allow-Origin", "*")
+			}
 			h.Add("Vary", "Origin")
 			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
 				h.Set("Access-Control-Allow-Methods", "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT")
