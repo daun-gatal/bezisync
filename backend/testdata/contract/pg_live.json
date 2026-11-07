@@ -392,11 +392,11 @@
       "status": "warn",
       "category": "tables",
       "message": "BeziSync's user does not own some tables, so it cannot add them to the publication itself.",
-      "technical": "Not owned: public.nokey, public.ident, app.users, public.orders. A table owner must create the publication.",
+      "technical": "Not owned: public.orders, public.nokey, public.ident, app.users. A table owner must create the publication.",
       "why": "",
       "fix": {
        "kind": "sql",
-       "code": "CREATE PUBLICATION <pipeline-publication> FOR TABLE \"public\".\"nokey\", \"public\".\"ident\", \"app\".\"users\", \"public\".\"orders\";",
+       "code": "CREATE PUBLICATION <pipeline-publication> FOR TABLE \"public\".\"orders\", \"public\".\"nokey\", \"public\".\"ident\", \"app\".\"users\";",
        "restart_required": false,
        "who": "table owner"
       },
