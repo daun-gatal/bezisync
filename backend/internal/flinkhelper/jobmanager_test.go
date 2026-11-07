@@ -492,8 +492,10 @@ func TestJobManagerReportsAnImageThatCantRunThePipeline(t *testing.T) {
 
 func TestJobManagerRecordsStoreFailures(t *testing.T) {
 	h := start(t, []string{"mysql", "starrocks"}, func(_ *JobManager, _ *fakeFlink, s *memStore) { s.fail = true })
-	st := h.waitFor(t, "store error", func(s Status) bool { return s.StoreError != "" })
-	if !strings.Contains(st.StoreError, "size") || st.Phase != PhaseRunning {
+	// The store error can be recorded a moment before the phase moves on from submitting: wait
+	// for both, then check the error and that the job kept running.
+	st := h.waitFor(t, "store error while running", func(s Status) bool { return s.StoreError != "" && s.Phase == PhaseRunning })
+	if !strings.Contains(st.StoreError, "size") {
 		t.Fatalf("%+v", st)
 	}
 }
