@@ -253,7 +253,7 @@ export function PartitionByEditor({ value, onChange, tables, discovered, spec, e
   const written = writtenByTable(tables, discovered, spec, engine, sourceType, options.write_mode);
   const routed = routeTargets(spec.transforms, tables);
   return (
-    <section aria-label="Partition by" className="flex min-w-0 flex-col gap-3">
+    <section aria-label="Partition fields" className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-col gap-0.5">
         <Meta>
           How Iceberg splits each table’s files. Applied when the table is created; a table that already exists keeps its partitioning. Rows upserted by key can be

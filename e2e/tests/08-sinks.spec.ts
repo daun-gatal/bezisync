@@ -139,9 +139,9 @@ test('Postgres → Apache Iceberg (REST catalog): upserts, updates and deletes',
   );
 });
 
-// ADR 0005: Partition by on Debezium, picked in the wizard. Rows are upserted by key, so only the
-// key partitions them; the build creates the table with that spec, and preflight blocks
-// partitioning by a column outside the key.
+// ADR 0005: Partition by on Debezium, picked in the wizard's Transform step (ADR 0007). Rows are
+// upserted by key, so only the key partitions them; the build creates the table with that spec,
+// and preflight blocks partitioning by a column outside the key.
 test('Postgres → Apache Iceberg on Debezium: Partition by from the wizard, applied when the table is created', async ({ page }) => {
   test.setTimeout(900_000);
   const api = await Api.signIn();
@@ -163,7 +163,13 @@ test('Postgres → Apache Iceberg on Debezium: Partition by from the wizard, app
   const check = (pre: Pre, code: string) => pre.sections.flatMap((s) => s.report.checks).find((c) => c.code === code);
 
   await signIn(page);
+  // Destination no longer edits Partition by: it says where it is.
   await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=sink`);
+  await expect(page.getByText('Partition by is chosen in Transform, after the key and renames.')).toBeVisible();
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+  const partRow = page.getByRole('region', { name: 'Partition by' });
+  await expect(partRow.getByText('Automatic', { exact: true })).toBeVisible();
+  await partRow.getByRole('button', { name: 'Edit' }).click();
   const part = page.getByRole('group', { name: 'Partition shop.orders' });
   // Without fields the table gets the automatic default.
   await expect(part.getByText('Automatic: 16 buckets of id')).toBeVisible();
@@ -182,14 +188,15 @@ test('Postgres → Apache Iceberg on Debezium: Partition by from the wizard, app
     for (const width of [390, 768, 1280]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await layoutProblems(page), `${scheme} ${width}px`).toEqual([]);
-      await page.locator('[aria-label="Partition by"]').screenshot({ path: test.info().outputPath(`partition-by-${scheme}-${width}.png`) });
+      await page.locator('[aria-label="Partition fields"]').screenshot({ path: test.info().outputPath(`partition-by-${scheme}-${width}.png`) });
     }
-    const axe = await new AxeBuilder({ page }).include('[aria-label="Partition by"]').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+    const axe = await new AxeBuilder({ page }).include('[aria-label="Partition fields"]').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
     expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id), scheme).toEqual([]);
   }
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.getByRole('button', { name: 'Continue to transform →' }).click();
-  await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
+  await expect(partRow.getByText('shop.orders: Buckets of id (8)')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+  await expect(page).toHaveURL(/step=review/);
   expect((await api.get<Saved>(url)).spec.sink.options.partition_by).toEqual({ 'shop.orders': [{ n: 8, column: 'id', transform: 'bucket' }] });
   await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
 

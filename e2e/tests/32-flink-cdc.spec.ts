@@ -309,28 +309,17 @@ test('Flink CDC: an editor adds a computed column and partitions the Iceberg tab
   type Saved = { spec: { transforms: Record<string, unknown>[]; sink: { options: { partition_by?: unknown } } } };
   await signIn(page);
 
-  // Destination: rows are upserted by key, so only the key partitions them (ADR 0005): a column
-  // outside it is offered disabled, with the reason. The leading part of an increasing key gives
-  // insert-ordered ranges; then buckets of it.
+  // Destination: Flink CDC can't write an Iceberg change log; the choice says why (ADR 0007 P4),
+  // and Partition by has moved to Transform.
   await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=sink`);
-  const part = page.getByRole('group', { name: 'Partition shop.orders' });
-  await part.getByRole('button', { name: 'Add a partition field' }).click();
-  await part.getByLabel('shop.orders field 1 column').click();
-  const createdAt = page.getByRole('listbox').getByRole('option', { name: 'created_at', exact: true });
-  await expect(createdAt).toHaveAttribute('aria-disabled', 'true');
-  await expect(createdAt).toHaveAttribute('title', /Not part of the key/);
-  await page.getByRole('listbox').getByRole('option', { name: 'id', exact: true }).click();
-  await choose(part.getByLabel('shop.orders field 1 transform'), 'Leading part');
-  await part.getByLabel('shop.orders field 1 width').fill('100000');
-  await part.getByRole('button', { name: 'Add a partition field' }).click();
-  await choose(part.getByLabel('shop.orders field 2 column'), 'id');
-  await choose(part.getByLabel('shop.orders field 2 transform'), 'Buckets of a hash');
-  await part.getByLabel('shop.orders field 2 buckets').fill('2000');
-  await expect(page.getByRole('button', { name: 'Continue to transform →' })).toBeDisabled();
-  await part.getByLabel('shop.orders field 2 buckets').fill('8');
+  await expect(page.getByText('Partition by is chosen in Transform, after the key and renames.')).toBeVisible();
+  await page.getByLabel('Rows').click();
+  const append = page.getByRole('listbox').getByRole('option', { name: /Every change appended/ });
+  await expect(append).toHaveAttribute('aria-disabled', 'true');
+  await expect(append).toContainText("always writes rows by the table's key");
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Continue to transform →' }).click();
   await expect(page.getByRole('heading', { name: 'Which rows and columns reach each table?' })).toBeVisible();
-  expect((await api.get<Saved>(url)).spec.sink.options.partition_by).toEqual({ 'shop.orders': [{ n: 100000, column: 'id', transform: 'truncate' }, { n: 8, column: 'id', transform: 'bucket' }] });
 
   // Transform: a computed column joining the status and the customer, picked, never typed as SQL.
   await page.getByRole('button', { name: 'Add transform' }).click();
@@ -348,9 +337,37 @@ test('Flink CDC: an editor adds a computed column and partitions the Iceberg tab
   await choose(cc.getByLabel(/^Argument 3:/), 'customer_id');
   await cc.getByRole('button', { name: 'Done' }).click();
   await expect(page.getByText('shop.orders: order_label = Join(status, "/", customer_id)')).toBeVisible();
+
+  // Partition by, on the same screen (ADR 0007): the computed column is offered at once, but rows
+  // are upserted by key, so only the key partitions them (ADR 0005): a column outside it is offered
+  // disabled, with the reason. The leading part of an increasing key gives insert-ordered ranges;
+  // then buckets of it.
+  const row = page.getByRole('region', { name: 'Partition by' });
+  await expect(row.getByText('Not partitioned', { exact: true })).toBeVisible();
+  await row.getByRole('button', { name: 'Edit' }).click();
+  const part = page.getByRole('group', { name: 'Partition shop.orders' });
+  await part.getByRole('button', { name: 'Add a partition field' }).click();
+  await part.getByLabel('shop.orders field 1 column').click();
+  for (const name of ['created_at', 'order_label']) {
+    const option = page.getByRole('listbox').getByRole('option', { name, exact: true });
+    await expect(option).toHaveAttribute('aria-disabled', 'true');
+    await expect(option).toHaveAttribute('title', /Not part of the key/);
+  }
+  await page.getByRole('listbox').getByRole('option', { name: 'id', exact: true }).click();
+  await choose(part.getByLabel('shop.orders field 1 transform'), 'Leading part');
+  await part.getByLabel('shop.orders field 1 width').fill('100000');
+  await part.getByRole('button', { name: 'Add a partition field' }).click();
+  await choose(part.getByLabel('shop.orders field 2 column'), 'id');
+  await choose(part.getByLabel('shop.orders field 2 transform'), 'Buckets of a hash');
+  await part.getByLabel('shop.orders field 2 buckets').fill('2000');
+  await expect(page.getByRole('button', { name: 'Continue to review →' })).toBeDisabled();
+  await part.getByLabel('shop.orders field 2 buckets').fill('8');
+  await expect(row.getByText('shop.orders: Leading part of id (100000), Buckets of id (8)')).toBeVisible();
   await page.getByRole('button', { name: 'Continue to review →' }).click();
   await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
   const saved = await api.get<Saved>(url);
+  // One save carries the computed column and Partition by together.
+  expect(saved.spec.sink.options.partition_by).toEqual({ 'shop.orders': [{ n: 100000, column: 'id', transform: 'truncate' }, { n: 8, column: 'id', transform: 'bucket' }] });
   expect(saved.spec.transforms.find((t) => t.type === 'computed')).toMatchObject({
     table: 'shop.orders', name: 'order_label', function: 'concat', args: [{ column: 'status' }, { text: '/' }, { column: 'customer_id' }],
   });
