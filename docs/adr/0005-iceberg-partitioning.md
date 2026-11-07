@@ -1,6 +1,6 @@
 # 0005 — Iceberg partitioning that cannot lose deletes, the same on both engines
 
-- **Status:** Accepted
+- **Status:** Accepted; its *Editor* section (where the editor sits and who saves it) is superseded by [ADR 0007](0007-partition-by-in-transform.md)
 - **Date:** 2026-11-07
 - **Scope:** `backend/internal/connectors` (`iceberg_partition.go`, `iceberg.go`, `iceberg_flink.go`,
   `descriptors.json`), `backend/internal/domain` (a partition transform table), `backend/internal/compiler`

@@ -13,6 +13,8 @@ import {
   partitionError,
   partitionFits,
   partitionKind,
+  partitionSummary,
+  withPartitionBy,
   writtenByTable,
   writtenColumns,
   type PartitionTransform,
@@ -120,5 +122,44 @@ describe('written columns and keys', () => {
     const full = { source: { tables: { include: ['shop.orders'] }, columns: {} }, sink: { naming: '', format: {}, options: { write_mode: 'upsert', partition_by: by } }, snapshot: {}, transforms: [], policies: {}, advanced: {} } as unknown as FullSpec;
     expect(specForEngine(full, 'flink-cdc').sink.options).toEqual({ write_mode: 'upsert', partition_by: { 'shop.items': by['shop.items'] } });
     expect(specForEngine(full, 'debezium').sink.options.partition_by).toBe(by);
+  });
+});
+
+describe('Partition by saved from the Transform step (ADR 0007)', () => {
+  const bucket = { n: 16, column: 'id', transform: 'bucket' as const };
+  it('P-1: an unchanged Partition by returns the same options object (no save)', () => {
+    const options = { write_mode: 'upsert', partition_by: { 'shop.orders': [bucket] } };
+    expect(withPartitionBy(options, { 'shop.orders': [bucket], 'shop.empty': [] }, 'flink-cdc')).toBe(options);
+    const none = { write_mode: 'upsert' };
+    expect(withPartitionBy(none, {}, 'debezium')).toBe(none);
+  });
+  it('stores what Destination stored: no empty tables, JSONB order, no time of the change on Flink CDC', () => {
+    const out = withPartitionBy({ write_mode: 'upsert', format_version: '2' }, {
+      'shop.orders': [{ n: 9, column: '__source_ts_ms', transform: 'day' }, { n: 7, column: 'id', transform: 'identity' }],
+      'shop.items': [],
+    }, 'flink-cdc');
+    expect(JSON.stringify(out)).toBe(JSON.stringify({ write_mode: 'upsert', partition_by: { 'shop.orders': [{ n: 0, column: 'id', transform: 'identity' }] }, format_version: '2' }));
+    expect(withPartitionBy({ write_mode: 'upsert', partition_by: { 'shop.orders': [bucket] } }, {}, 'debezium')).toEqual({ write_mode: 'upsert' });
+  });
+  it('P-14: summarises in the editor’s words, by name up to two tables, then counts', () => {
+    const tables = Array.from({ length: 30 }, (_, i) => `shop.t${i}`);
+    const recorded = { partitions: Object.fromEntries(tables.map((t) => [t, 'id'])) };
+    expect(partitionSummary({}, tables, 'flink-cdc', {})).toBe('Not partitioned');
+    expect(partitionSummary({}, tables, 'debezium', recorded)).toBe('Automatic');
+    expect(partitionSummary({}, ['shop.t0'], 'debezium', recorded)).toBe('Automatic: 16 buckets of id');
+    expect(partitionSummary({}, ['shop.t0'], 'debezium', { ...recorded, write_mode: 'append' })).toBe('Automatic: by the day of the change');
+    expect(partitionSummary({}, tables, 'debezium', { ...recorded, partitioning: 'none' })).toBe('Not partitioned');
+    expect(partitionSummary({ 'shop.t0': [bucket], 'shop.t1': [{ n: 0, column: 'region', transform: 'identity' }] }, ['shop.t0', 'shop.t1'], 'flink-cdc', {}))
+      .toBe('shop.t0: Buckets of id (16) · shop.t1: Each value of region');
+    expect(partitionSummary({ 'shop.t0': [bucket] }, tables, 'debezium', recorded)).toBe('shop.t0: Buckets of id (16) · 29 automatic');
+    const three = { 'shop.t0': [bucket], 'shop.t1': [bucket], 'shop.t2': [bucket] };
+    expect(partitionSummary(three, tables, 'flink-cdc', {})).toBe('3 tables partitioned · 27 not partitioned');
+    expect(partitionSummary(three, tables, 'debezium', { partitions: { 'shop.t3': 'id' } })).toBe('3 tables partitioned · 1 automatic · 26 not partitioned');
+  });
+  it('refuses tables routed together with different fields (icebergPartitionKey)', () => {
+    const routed = new Map([['shop.a', 'all'], ['shop.b', 'all']]);
+    expect(partitionError({ 'shop.a': [bucket], 'shop.b': [{ ...bucket, n: 8 }] }, undefined, routed)).toBe('shop.a and shop.b are routed to all with different partitioning: give them the same.');
+    expect(partitionError({ 'shop.a': [bucket], 'shop.b': [bucket] }, undefined, routed)).toBeNull();
+    expect(partitionError({ 'shop.a': [bucket] }, undefined, routed)).toBeNull();
   });
 });

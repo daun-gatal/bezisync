@@ -10,7 +10,7 @@ import { useConnectorTypes, useDiscovery } from '@/lib/connections';
 import { formatBytes, formatCount } from '@/lib/format';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { fullSpec, pruneToTables, type FullSpec } from '../spec';
+import { fullSpec, inServerOrder, pruneToTables, type FullSpec } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { PersonalDataCard } from './PersonalDataCard';
 import { canMask as canMaskType, defaultsFor, personalProblem, personalRows, rulesToSave, setChoice, type ColumnRulesMap } from './personal';
@@ -80,7 +80,7 @@ export function TablesStep({
   function nextSpec(): FullSpec {
     const columns = rulesToSave(rules, include, spec.source.columns);
     const { keys, ...rest } = { ...spec, ...pruneToTables(spec, include) };
-    return { ...rest, ...(keys ? { keys } : {}), source: { tables: { include }, columns } };
+    return inServerOrder({ ...rest, ...(keys ? { keys } : {}), source: { tables: { include }, columns } });
   }
   const dirty = () => discovery.isSuccess && JSON.stringify(nextSpec()) !== JSON.stringify(spec);
   useImperativeHandle(handle, () => ({

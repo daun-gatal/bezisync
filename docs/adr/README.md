@@ -42,5 +42,6 @@ The other options, and why they lost.
 | [0002](0002-policies-fail-closed.md) | Project policies that can't be read fail closed | Accepted |
 | [0003](0003-job-reclaim.md) | Reclaiming jobs a crashed controller left running | Accepted |
 | [0004](0004-ssrf-on-every-dial.md) | The SSRF guard holds on every dial, not just the probe | Accepted |
-| [0005](0005-iceberg-partitioning.md) | Iceberg partitioning that cannot lose deletes, the same on both engines | Accepted |
+| [0005](0005-iceberg-partitioning.md) | Iceberg partitioning that cannot lose deletes, the same on both engines | Accepted (Editor section superseded by 0007) |
 | [0006](0006-flink-cdc-oracle-source.md) | Flink CDC reads Oracle; MongoDB, Vitess, TiDB and OceanBase stay on Debezium | Accepted |
+| [0007](0007-partition-by-in-transform.md) | Partition by in the Transform step; no Iceberg change log on Flink CDC | Accepted |

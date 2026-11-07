@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
@@ -123,5 +124,25 @@ func TestIcebergRustFSTakesChangeLogsOnly(t *testing.T) {
 	}
 	if !found(map[string]any{"write_mode": "upsert_keep_deletes"}) || found(map[string]any{"write_mode": "append"}) {
 		t.Fatal("RustFS: upserts blocked, change logs allowed")
+	}
+}
+
+// ADR 0007 P5 (P-13): the fix names a choice the pipeline's engine has.
+func TestIcebergRustFSFixPerEngine(t *testing.T) {
+	sink := &icebergSink{}
+	conn := Resolved{Type: "iceberg", Provider: "rustfs", Config: map[string]any{"catalog_type": "rest", "warehouse": "lake"}}
+	fix := func(flink bool) string {
+		for _, c := range sink.CheckPipeline(t.Context(), conn, CompileContext{}, PipelineFacts{Options: map[string]any{"write_mode": "upsert"}, FlinkCDC: flink}) {
+			if c.Code == "iceberg_rustfs_upsert" {
+				return c.Fix.Code
+			}
+		}
+		return ""
+	}
+	if got := fix(false); got != "Choose \"Every change appended\" in the Destination step." {
+		t.Errorf("Debezium: %q", got)
+	}
+	if got := fix(true); !strings.HasPrefix(got, "Flink CDC can only upsert into Iceberg") || !strings.Contains(got, "run it on Debezium") {
+		t.Errorf("Flink CDC: %q", got)
 	}
 }

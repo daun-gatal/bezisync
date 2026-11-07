@@ -25,6 +25,18 @@ function Harness({ expert = false }: { expert?: boolean }) {
 }
 
 describe('SchemaForm', () => {
+  it('shows an unavailable choice disabled, with its reason, and never picks it', async () => {
+    const rows: JsonSchema = { properties: { write_mode: { enum: ['upsert', 'append'], type: 'string', default: 'upsert', title: 'Rows', ui: { labels: { append: 'Every change appended' }, unavailable: { append: 'Not on this engine.' } } } } };
+    const seen: unknown[] = [];
+    render(<SchemaForm idPrefix="u" schema={rows} values={{ write_mode: 'upsert' }} onChange={(v) => seen.push(v)} expert={false} />);
+    await userEvent.click(screen.getByLabelText('Rows'));
+    const option = screen.getByRole('option', { name: /Every change appended/ });
+    expect(option).toHaveAttribute('aria-disabled', 'true');
+    expect(option).toHaveTextContent('Not on this engine.');
+    await userEvent.click(option);
+    expect(seen).toEqual([]);
+  });
+
   it('derives field kinds including nullable enums', () => {
     const kinds = Object.fromEntries(fieldsOf(schema).map((f) => [f.name, [f.kind, f.nullable]]));
     expect(kinds).toEqual({ host: ['string', false], port: ['integer', false], ssl_mode: ['enum', false], sasl: ['enum', true], create_topics: ['boolean', false] });
