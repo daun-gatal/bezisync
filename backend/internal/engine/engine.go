@@ -2,8 +2,8 @@
 //
 // Debezium Server streams change events to every destination BeziSync supports. Flink CDC keeps
 // tables in sync in analytics and lakehouse stores (Iceberg, StarRocks, Doris, Fluss), reading
-// MySQL/MariaDB, PostgreSQL and SQL Server. A pipeline's engine is chosen when its destination is
-// chosen and fixed once it is deployed.
+// MySQL/MariaDB, PostgreSQL, SQL Server and Oracle. A pipeline's engine is chosen when its
+// destination is chosen and fixed once it is deployed.
 //
 // The package is pure: capabilities come from these tables, never from the destination type
 // alone, so the API, the UI, the CLI and MCP all offer the same actions for a pipeline.
@@ -38,9 +38,10 @@ func (id ID) Title() string {
 	return string(id)
 }
 
-// flinkSources are the source types Flink CDC reads in BeziSync (its pipeline sources; MongoDB
-// and Oracle stay on Debezium).
-var flinkSources = []string{"mysql", "postgresql", "sqlserver"}
+// flinkSources are the source types Flink CDC reads in BeziSync: those with a Flink CDC pipeline
+// source (ADR 0006). Flink CDC 3.7 has none for MongoDB, Vitess or TiDB (only Flink SQL readers),
+// so they stay on Debezium.
+var flinkSources = []string{"mysql", "postgresql", "sqlserver", "oracle"}
 
 // flinkSinks are the destination types Flink CDC writes in BeziSync.
 var flinkSinks = []string{"iceberg", "starrocks", "doris", "fluss"}

@@ -739,6 +739,9 @@ func DriverPropertyRefusal(sourceType, key string) string {
 	if strings.HasPrefix(key, "debezium.source.driver.") && slices.Contains(NoJDBC, sourceType) {
 		return "this source has no JDBC driver, so driver.* properties do nothing"
 	}
+	if option, ok := strings.CutPrefix(key, "source."); ok {
+		return connectors.FlinkSourceIgnores(sourceType, option)
+	}
 	return ""
 }
 
@@ -769,10 +772,17 @@ func refuseDriverProps(ctx context.Context, q db.Querier, sourceID uuid.UUID, pr
 // advancedCheck blocks a deploy whose advanced properties BeziSync can't pass on, including ones
 // that would change what it compiled for this pipeline. It is a configuration check, so a forced
 // deploy can't skip it.
-func advancedCheck(spec domain.PipelineSpec, managed map[string]bool, flink bool) *checks.Check {
+func advancedCheck(spec domain.PipelineSpec, managed map[string]bool, flink bool, sourceType string) *checks.Check {
 	refused := compiler.AdvancedRefusals(spec.Advanced, managed)
 	if flink {
 		refused = compiler.FlinkAdvancedRefusals(spec.Advanced, managed)
+		for _, k := range sortedStrings(spec.Advanced) {
+			if block, option, _ := strings.Cut(k, "."); block == "source" && !slices.ContainsFunc(refused, func(v compiler.AdvancedVerdict) bool { return v.Key == k }) {
+				if why := connectors.FlinkSourceIgnores(sourceType, option); why != "" {
+					refused = append(refused, compiler.AdvancedVerdict{Key: k, Class: compiler.AdvancedInvalid, Message: why})
+				}
+			}
+		}
 	}
 	if len(refused) == 0 {
 		return nil
@@ -1279,7 +1289,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 			if c, err := CompileFor(ctx, q, p, clean, ""); err == nil {
 				managed = c.Managed
 			}
-			if c := advancedCheck(spec, managed, EngineOf(p) == engine.FlinkCDC); c != nil {
+			if c := advancedCheck(spec, managed, EngineOf(p) == engine.FlinkCDC, sourceConn.Type); c != nil {
 				cfgCheck = *c
 			}
 		}
@@ -1288,7 +1298,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	}
 	configChecks := []checks.Check{cfgCheck}
 	if compiled != nil {
-		if c := advancedCheck(spec, compiled.Managed, compiled.Flink != nil); c != nil {
+		if c := advancedCheck(spec, compiled.Managed, compiled.Flink != nil, sourceConn.Type); c != nil {
 			configChecks = append(configChecks, *c)
 		} else if c := unverifiedCheck(spec); c != nil {
 			configChecks = append(configChecks, *c)

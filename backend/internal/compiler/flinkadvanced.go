@@ -20,6 +20,9 @@ var (
 		"write.folder-storage.path": true, "write.object-storage.path": true}
 )
 
+// debezium19Forbidden are Debezium 1.9 options (as source.debezium.<option>) no pipeline may set.
+var debezium19Forbidden = []string{"debezium.database.history", "debezium.rac.nodes", "debezium.database.connection.adapter"}
+
 // ClassifyFlinkAdvanced is what BeziSync makes of one raw key of a Flink CDC pipeline, and its
 // value: allowed through one of the pass-through prefixes, or refused with why. Keys BeziSync sets
 // (managed: "block.option") are owned.
@@ -52,6 +55,14 @@ func ClassifyFlinkAdvanced(key, value string, managed map[string]bool) AdvancedV
 			}
 			return v
 		case strings.HasPrefix(option, "debezium."):
+			// Flink CDC embeds Debezium 1.9, whose own names for these load a class, send the
+			// schema history to another system or open sessions with the source's credentials to
+			// other hosts; Debezium 3's rules don't know them (ADR 0006).
+			for _, p := range debezium19Forbidden {
+				if strings.HasPrefix(option, p) {
+					return refuse(AdvancedForbidden, "Flink CDC's embedded Debezium would load code, send data elsewhere or connect with the source's credentials to other hosts.", "")
+				}
+			}
 			// The embedded Debezium engine: Debezium's own rules (F6).
 			if d := ClassifyAdvanced("debezium.source."+strings.TrimPrefix(option, "debezium."), value, nil); d.Refused() {
 				return refuse(d.Class, d.Message, d.Fix)

@@ -856,6 +856,18 @@ func (s *oracleSource) Prepare(ctx context.Context, conn Resolved, c CompileCont
 	if err != nil {
 		return nil, err
 	}
+	if c.Engine == "flink-cdc" {
+		// No signal or canary table (Flink CDC reads neither); on a multitenant database the flush
+		// table its Debezium 1.9 needs in the CDB root (ADR 0006).
+		if cfg.PDB == "" {
+			return nil, nil
+		}
+		r, err := s.prepareFlush(ctx, conn, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return []ArtifactResult{r}, nil
+	}
 	db, done, err := oraConnect(ctx, conn, cfg.tableService(), 6*time.Second)
 	if err != nil {
 		return nil, err
@@ -880,6 +892,11 @@ func (s *oracleSource) Cleanup(ctx context.Context, conn Resolved, c CompileCont
 	cfg, _, err := oraCfg(conn)
 	if err != nil {
 		return nil, err
+	}
+	if c.Engine == "flink-cdc" {
+		// It created no table of its own; the flush table is the connector user's, shared by every
+		// pipeline (either engine) that mines as that user.
+		return nil, nil
 	}
 	db, done, err := oraConnect(ctx, conn, cfg.tableService(), 6*time.Second)
 	if err != nil {

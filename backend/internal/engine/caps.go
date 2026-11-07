@@ -10,7 +10,8 @@ type Caps struct {
 	EditPosition bool `json:"edit_position"`
 	// RecopyTable: one table can be copied again while the others keep streaming.
 	RecopyTable bool `json:"recopy_table"`
-	// AddTables: tables can be added to a deployed pipeline without copying the others again.
+	// AddTables: tables can be added to a deployed pipeline without copying the others again
+	// (Flink CDC on Oracle: only after Start over).
 	AddTables bool `json:"add_tables"`
 	// StartFromTime: Start over can begin at a point in time.
 	StartFromTime bool `json:"start_from_time"`
@@ -42,10 +43,16 @@ func CapsFor(id ID, sourceType string) Caps {
 			"resize_parallelism": "A Flink CDC pipeline keeps the number of readers it was deployed with. Change memory, or Start over to change readers.",
 		}
 		c := Caps{Engine: id, AddTables: true, SavedPositions: true, SchemaChanges: true, ParallelCopy: true, Why: why}
-		// MySQL and SQL Server can start from a time; a PostgreSQL slot can't go back.
-		if sourceType == "mysql" || sourceType == "sqlserver" {
+		switch sourceType {
+		case "mysql", "sqlserver":
 			c.StartFromTime = true
-		} else {
+		case "oracle":
+			// Flink CDC's Oracle reader has no timestamp start and never copies a table added to a
+			// pipeline that restores a saved position (ADR 0006).
+			why["start_from_time"] = "Flink CDC's Oracle reader starts only from a full copy or from now."
+			c.AddTables = false
+			why["add_tables"] = "Flink CDC's Oracle reader doesn't copy a table added to a running pipeline. Pause it, use Positions → Start over, then deploy."
+		default:
 			why["start_from_time"] = "A PostgreSQL replication slot can't go back in time."
 		}
 		return c

@@ -188,13 +188,13 @@ var DebeziumSettings = []Setting{
 // tune; their keys carry the YAML block they go in (source., sink., pipeline.).
 var FlinkPipelineSettings = []Setting{
 	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.connection.pool.size",
-		Title: "Connection pool size", Type: "int", Default: "20", Min: "2", Max: "100", Connectors: []string{"mysql", "postgresql"},
+		Title: "Connection pool size", Type: "int", Default: "20", Min: "2", Max: "100", Connectors: []string{"mysql", "postgresql", "oracle"},
 		Why: "Connections the readers share. Each one counts against the database's connection limit."},
 	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.connect.timeout",
-		Title: "Connect timeout", Type: "duration", Default: "30 s", Min: "5s", Max: "5m", Connectors: []string{"mysql", "postgresql"},
+		Title: "Connect timeout", Type: "duration", Default: "30 s", Min: "5s", Max: "5m", Connectors: []string{"mysql", "postgresql", "oracle"},
 		Why: "How long a reader waits for the database when it connects."},
 	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.connect.max-retries",
-		Title: "Connect attempts", Type: "int", Default: "3", Min: "0", Max: "100", Connectors: []string{"mysql", "postgresql"},
+		Title: "Connect attempts", Type: "int", Default: "3", Min: "0", Max: "100", Connectors: []string{"mysql", "postgresql", "oracle"},
 		Why: "How often a reader tries to connect again before the job fails."},
 	{Engine: FlinkCDC, Scope: ScopeSource, Stage: StageStreaming, Impact: ImpactRestart, Key: "source.scan.lsn-commit.checkpoints-num-delay",
 		Title: "WAL release delay", Type: "int", Default: "3", Min: "0", Max: "100", Connectors: []string{"postgresql"},

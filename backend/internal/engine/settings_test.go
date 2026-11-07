@@ -106,3 +106,24 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("bools are true or false")
 	}
 }
+
+// E9 (ADR 0006): Oracle on Flink CDC gets the connection options its reader has (pool, timeout,
+// attempts), not PostgreSQL's WAL delay or the open-ended chunk option it doesn't accept.
+func TestSettingsForFlinkOracle(t *testing.T) {
+	has := func(key string) bool {
+		return slices.ContainsFunc(SettingsFor(FlinkCDC, "oracle", "starrocks"), func(st Setting) bool { return st.Key == key })
+	}
+	for _, key := range []string{"source.connection.pool.size", "source.connect.timeout", "source.connect.max-retries"} {
+		if !has(key) {
+			t.Errorf("oracle lacks %s", key)
+		}
+	}
+	for _, key := range []string{"source.scan.lsn-commit.checkpoints-num-delay", "source.scan.incremental.snapshot.unbounded-chunk-first.enabled"} {
+		if has(key) {
+			t.Errorf("oracle offers %s", key)
+		}
+	}
+	if msg := CheckSetting(*SettingOf(FlinkCDC, "source.connect.timeout"), "45 s"); msg != "" {
+		t.Errorf("connect timeout: %s", msg)
+	}
+}

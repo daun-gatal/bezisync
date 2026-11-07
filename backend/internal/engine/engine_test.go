@@ -2,6 +2,7 @@ package engine
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -23,7 +24,9 @@ func TestSupports(t *testing.T) {
 		{FlinkCDC, "sqlserver", "doris", true},
 		{FlinkCDC, "mysql", "kafka", false},
 		{FlinkCDC, "mongodb", "iceberg", false},
-		{FlinkCDC, "oracle", "starrocks", false},
+		{FlinkCDC, "oracle", "starrocks", true},
+		{FlinkCDC, "oracle", "kafka", false},
+		{FlinkCDC, "vitess", "starrocks", false},
 		{FlinkCDC, "mysql", "paimon", false},
 		{FlinkCDC, "postgresql", "", true},
 		{FlinkCDC, "cockroachdb", "", false},
@@ -47,6 +50,9 @@ func TestChoicesAndDefault(t *testing.T) {
 		{"mongodb", "iceberg", []ID{Debezium}, Debezium},
 		{"postgresql", "starrocks", []ID{FlinkCDC}, FlinkCDC},
 		{"mongodb", "starrocks", nil, ""},
+		{"oracle", "iceberg", []ID{Debezium, FlinkCDC}, Debezium},
+		{"oracle", "doris", []ID{FlinkCDC}, FlinkCDC},
+		{"vitess", "fluss", nil, ""},
 	}
 	for _, c := range cases {
 		if got := Choices(c.source, c.sink); !slices.Equal(got, c.choices) {
@@ -93,5 +99,31 @@ func TestCaps(t *testing.T) {
 		if c := CapsFor(FlinkCDC, src); !c.StartFromTime || c.Why["start_from_time"] != "" {
 			t.Errorf("flink %s should start from a time: %+v", src, c)
 		}
+	}
+}
+
+// E7 (ADR 0006): Flink CDC's Oracle reader can't start from a time or copy added tables; the other
+// sources keep their capabilities and their own reasons.
+func TestCapsFlinkOracle(t *testing.T) {
+	o := CapsFor(FlinkCDC, "oracle")
+	if o.StartFromTime || o.AddTables || !o.SavedPositions || !o.ParallelCopy || !o.SchemaChanges {
+		t.Fatalf("oracle caps: %+v", o)
+	}
+	for _, action := range []string{"start_from_time", "add_tables"} {
+		if o.Why[action] == "" || !strings.Contains(o.Why[action], "Oracle") {
+			t.Errorf("oracle: reason for %s = %q", action, o.Why[action])
+		}
+	}
+	if pg := CapsFor(FlinkCDC, "postgresql"); !pg.AddTables || !strings.Contains(pg.Why["start_from_time"], "PostgreSQL") || pg.Why["add_tables"] != "" {
+		t.Errorf("postgresql caps changed: %+v", pg)
+	}
+	for _, src := range []string{"mysql", "sqlserver"} {
+		if c := CapsFor(FlinkCDC, src); !c.AddTables || c.Why["add_tables"] != "" {
+			t.Errorf("%s caps changed: %+v", src, c)
+		}
+	}
+	// Debezium on Oracle is unchanged.
+	if d := CapsFor(Debezium, "oracle"); !d.AddTables || !d.RecopyTable || d.StartFromTime {
+		t.Errorf("debezium oracle caps: %+v", d)
 	}
 }

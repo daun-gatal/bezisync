@@ -102,6 +102,9 @@ func settingsRoutes(r chi.Router) {
 			if id == engine.FlinkCDC {
 				v := compiler.ClassifyFlinkAdvanced(it.Key, it.Value, nil)
 				res.Class, res.Message, res.Fix = string(v.Class), v.Message, v.Fix
+				if why := services.DriverPropertyRefusal(sourceType, it.Key); !v.Refused() && why != "" {
+					res.Class, res.Message, res.Fix = string(compiler.AdvancedInvalid), why, ""
+				}
 			} else if why := services.DriverPropertyRefusal(sourceType, it.Key); why != "" {
 				res.Class, res.Message = string(compiler.AdvancedInvalid), why
 			} else {
