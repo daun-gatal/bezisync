@@ -2,11 +2,13 @@ package connectors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/table"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
@@ -131,59 +133,69 @@ func keysSorted[V any](m map[string]V) []string {
 	return out
 }
 
-// partitionChecks: each partition column is one the table sends, of a kind its transform takes
-// (T17, blocking: Flink CDC would fail creating the table), and a destination table that
-// already exists is partitioned as asked (T18: Iceberg keeps a table's partitioning).
-func partitionChecks(ctx context.Context, cat interface {
+// icebergTables is what partitionChecks reads from the catalog.
+type icebergTables interface {
 	LoadTable(context.Context, table.Identifier) (*table.Table, error)
-}, cfg icebergConfig, c CompileContext, facts PipelineFacts) []checks.Check {
+}
+
+// partitionChecks (ADR 0005): each partition column is one the table writes, of a kind its
+// transform takes (iceberg_partition_column, blocking: the engine fails creating the table — on
+// Debezium the per-table setting is strict), and a destination table that already exists is
+// partitioned as asked (iceberg_partition_existing: Iceberg keeps a table's partitioning). Only a
+// table the catalog says doesn't exist is one the pipeline will create; any other error leaves
+// the check unverified (Warn), never passed.
+func partitionChecks(ctx context.Context, cat icebergTables, cfg icebergConfig, c CompileContext, facts PipelineFacts) []checks.Check {
 	byTable, err := IcebergPartitionBy(c.Spec, facts.Options)
 	if err != nil || len(byTable) == 0 {
 		return nil
 	}
-	var bad []string
-	for _, t := range facts.Tables {
-		fields, ok := byTable[t.Identifier()]
-		if !ok {
-			continue
-		}
-		out := outputColumns(c.Spec, t, facts.SourceType)
-		for _, f := range fields {
-			kind, found := out[f.Column]
-			switch {
-			case !found:
-				bad = append(bad, fmt.Sprintf("%s has no column %s", t.Identifier(), f.Column))
-			case (f.Transform == "year" || f.Transform == "month" || f.Transform == "day") && kind != "timestamp" && kind != "timestamptz" && kind != "date":
-				bad = append(bad, fmt.Sprintf("%s(%s) needs a date or a timestamp", f.Transform, f.Column))
-			case f.Transform == "hour" && kind != "timestamp" && kind != "timestamptz":
-				bad = append(bad, fmt.Sprintf("hour(%s) needs a timestamp", f.Column))
-			case f.Transform == "truncate" && kind != "text" && kind != "int" && kind != "decimal":
-				bad = append(bad, fmt.Sprintf("truncate(%s) needs text, a whole number or a decimal", f.Column))
-			}
-		}
+	engine := "debezium"
+	if facts.FlinkCDC {
+		engine = "flink-cdc"
 	}
 	var out []checks.Check
-	if facts.Tables != nil {
+	if facts.Tables == nil {
+		out = append(out, checks.Check{Code: "iceberg_partition_column", Title: "Partitioning", Status: checks.Warn, Category: checks.CatDestination,
+			Message: "Couldn't check the partition columns: the source's tables couldn't be read.",
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Run preflight again once the source is reachable."}})
+	} else {
+		var bad []string
+		for _, t := range facts.Tables {
+			fields, ok := byTable[t.Identifier()]
+			if !ok {
+				continue
+			}
+			cols := writtenColumns(c.Spec, t, facts.SourceType, engine)
+			for _, f := range fields {
+				if msg := partitionFieldProblem(t.Identifier(), f, cols); msg != "" {
+					bad = append(bad, msg)
+				}
+			}
+		}
 		if len(bad) > 0 {
 			out = append(out, checks.Check{Code: "iceberg_partition_column", Title: "Partitioning", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
 				Message: "Partitioning that can't be applied: " + strings.Join(bad, "; ") + ".",
 				Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Change Partition by in the Destination step."}})
 		} else {
 			out = append(out, checks.Check{Code: "iceberg_partition_column", Title: "Partitioning", Status: checks.Pass, Category: checks.CatDestination,
-				Message: "Every partition column is one the tables send, of a kind its transform takes."})
+				Message: "Every partition column is one the tables write, of a kind its transform takes."})
 		}
 	}
 	if cat == nil {
 		return out
 	}
-	var differ []string
+	var differ, unread []string
 	for _, t := range keysSorted(byTable) {
 		dest, ok := facts.Destinations[t]
 		if !ok {
 			continue
 		}
 		tbl, err := cat.LoadTable(ctx, icebergTableIdent(cfg, dest))
+		if errors.Is(err, catalog.ErrNoSuchTable) {
+			continue
+		}
 		if err != nil {
+			unread = append(unread, fmt.Sprintf("%s (%v)", dest, err))
 			continue
 		}
 		have := TablePartitioning(tbl)
@@ -199,13 +211,54 @@ func partitionChecks(ctx context.Context, cat interface {
 			differ = append(differ, fmt.Sprintf("%s (partitioned by %s)", dest, now))
 		}
 	}
-	if len(differ) > 0 {
+	switch {
+	case len(differ) > 0:
 		out = append(out, checks.Check{Code: "iceberg_partition_existing", Title: "Partitioning", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
 			Message: "These tables already exist partitioned otherwise, and Iceberg keeps a table's partitioning: " + strings.Join(differ, "; ") + ".",
 			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again."}})
+	case len(unread) > 0:
+		out = append(out, checks.Check{Code: "iceberg_partition_existing", Title: "Partitioning", Status: checks.Warn, Category: checks.CatDestination,
+			Message: "Couldn't read these tables from the catalog, so their partitioning is unchecked: " + strings.Join(unread, "; ") + ".",
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Check the catalog connection's access to the namespace, then run preflight again."}})
 	}
 	return out
 }
+
+// partitionFieldProblem is why a field can't be applied to a table writing cols (name → written
+// kind), or "".
+func partitionFieldProblem(table string, f PartitionField, cols map[string]string) string {
+	kind, found := cols[f.Column]
+	switch {
+	case !found:
+		return fmt.Sprintf("%s has no column %s", table, f.Column)
+	case domain.PartitionFits(f.Transform, kind):
+		return ""
+	case kind == "":
+		return fmt.Sprintf("%s is a document or a list: no transform takes it", f.Column)
+	}
+	switch f.Transform {
+	case "year", "month", "day":
+		return fmt.Sprintf("%s needs a date or a timestamp (%s is written as %s)", f.Expr(), f.Column, kindLabel(kind))
+	case "hour":
+		return fmt.Sprintf("%s needs a timestamp (%s is written as %s)", f.Expr(), f.Column, kindLabel(kind))
+	case "truncate":
+		return fmt.Sprintf("%s needs text, a whole number, a decimal or bytes (%s is written as %s)", f.Expr(), f.Column, kindLabel(kind))
+	case "bucket":
+		return fmt.Sprintf("%s can't take %s (Iceberg hashes no true/false or floating-point value)", f.Expr(), kindLabel(kind))
+	}
+	return fmt.Sprintf("%s can't take %s", f.Expr(), kindLabel(kind))
+}
+
+// kindLabel is a written kind in words.
+func kindLabel(kind string) string {
+	if l, ok := kindLabels[kind]; ok {
+		return l
+	}
+	return kind
+}
+
+var kindLabels = map[string]string{"int": "a whole number", "decimal": "a decimal", "float": "a floating-point number", "bool": "true/false", "text": "text",
+	"date": "a date", "time": "a time of day", "timestamp": "a timestamp", "timestamptz": "a timestamp with time zone", "binary": "bytes"}
 
 // TablePartitioning is an Iceberg table's partition fields as partition.key would write them.
 func TablePartitioning(tbl *table.Table) []string {
@@ -226,41 +279,46 @@ func TablePartitioning(tbl *table.Table) []string {
 	return out
 }
 
-// outputColumns are the columns a table's rows carry into the destination on Flink CDC, with
-// their kinds: the source's, minus those left out, renamed, plus
-// added and computed ones.
-func outputColumns(spec domain.PipelineSpec, t TableInfo, sourceType string) map[string]string {
+// writtenColumns are the columns a table's rows carry into the Iceberg table on an engine, with
+// the kind the engine writes (domain.PartitionKind): the source's, minus those left out, renamed
+// (in step order, so a rename of a rename lands on the last name), plus added and computed
+// columns and the engine's own: Debezium's __op, __deleted and __source_ts_ms (the time of the
+// change), Flink CDC's soft-delete __op.
+func writtenColumns(spec domain.PipelineSpec, t TableInfo, sourceType, engine string) map[string]string {
 	id := t.Identifier()
 	rules := spec.Source.Columns[id]
 	out := map[string]string{}
-	renamed := map[string]string{}
-	for _, step := range spec.Transforms {
-		if step.Tables != nil && !slices.Contains(step.Tables, id) {
-			continue
-		}
-		for _, r := range step.Renames {
-			renamed[r.From] = r.To
-		}
-	}
 	for _, col := range t.Columns {
 		if slices.Contains(rules.Exclude, col.Name) {
 			continue
 		}
 		name := col.Name
-		if to, ok := renamed[name]; ok {
-			name = to
+		for _, step := range spec.Transforms {
+			if step.Type != "rename" || (step.Tables != nil && !slices.Contains(step.Tables, id)) {
+				continue
+			}
+			for _, r := range step.Renames {
+				if r.From == name {
+					name = r.To
+					break
+				}
+			}
 		}
-		out[name] = domain.ColumnKind(sourceType, col.Type)
+		out[name] = domain.PartitionKind(engine, sourceType, col.Type, spec.Values)
 	}
 	for _, step := range spec.Transforms {
 		switch {
 		case step.Type == "add_field" && (step.Tables == nil || slices.Contains(step.Tables, id)):
 			out[step.Name] = "text"
-		case step.Type == "computed" && step.Table == id:
+		case step.Type == "computed" && step.Table == id && engine == "flink-cdc":
 			out[step.Name] = domain.ComputedFunctions[step.Function].Out
 		case step.Type == "soft_delete":
-			out[domain.SoftDeleteField["flink-cdc"]] = "text"
+			out[domain.SoftDeleteField[engine]] = "text"
 		}
+	}
+	if engine != "flink-cdc" {
+		out["__op"], out["__deleted"] = "text", "text"
+		out[domain.SourceTimestampField] = "timestamptz"
 	}
 	return out
 }

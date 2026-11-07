@@ -1490,7 +1490,7 @@ Choose key columns for them in the Transform step (Message key).
 
 **Partitioning**
 
-- Why: Flink CDC fails creating a table partitioned by a column its rows don't carry, or by a transform the column's type can't take.
+- Why: The engine fails creating a table partitioned by a column its rows don't carry, or by a transform the column's written type can't take (Iceberg hashes no true/false or floating-point value; truncate takes text, numbers and bytes; the time transforms a date or a timestamp). On Debezium the failure stops the pipeline when the table's first change arrives.
 
 Fix:
 
@@ -1498,17 +1498,29 @@ Fix:
 Change Partition by in the Destination step.
 ```
 
+Fix:
+
+```
+Run preflight again once the source is reachable.
+```
+
 <a id="iceberg-partition-existing"></a>
 ### `iceberg_partition_existing`
 
 **Partitioning**
 
-- Why: Flink CDC sets a table's partitioning when it creates the table; Iceberg keeps it, so other partitioning asked for later never applies.
+- Why: The engine sets a table's partitioning when it creates the table; Iceberg keeps it, so other partitioning asked for later never applies. A table the catalog can't read is left unchecked (a warning), never passed.
 
 Fix:
 
 ```
 Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again.
+```
+
+Fix:
+
+```
+Check the catalog connection's access to the namespace, then run preflight again.
 ```
 
 <a id="iceberg-partitioning"></a>
