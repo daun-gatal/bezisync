@@ -43,6 +43,13 @@ func withSinkUnwrap(steps []domain.Transform, rule *connectors.UnwrapRule, optio
 	if len(rule.DeleteHandling) > 0 {
 		step.DeleteHandling = rule.DeleteHandling[0]
 	}
+	// A Keep deleted rows step stands in for the event shape: field steps after it read rows, so
+	// the unwrap goes where it is (withSoftDelete then drops it), not after them. Every other
+	// chain keeps the unwrap at the end, so its config_hash is unchanged.
+	if at := slices.IndexFunc(out, func(t domain.Transform) bool { return t.Type == "soft_delete" }); at >= 0 &&
+		slices.ContainsFunc(out[at:], func(t domain.Transform) bool { return t.Stage() == 2 }) {
+		return slices.Insert(out, at, step)
+	}
 	return append(out, step)
 }
 
