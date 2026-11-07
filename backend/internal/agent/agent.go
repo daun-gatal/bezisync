@@ -100,8 +100,10 @@ func (a *Agent) Report(ctx context.Context) *om.Map {
 	a.mu.Lock()
 	owner := a.owner
 	ids := map[string]bool{}
-	for id := range a.desired {
+	desired := make(map[string]runtime.Workload, len(a.desired))
+	for id, w := range a.desired {
 		ids[id] = true
+		desired[id] = w
 	}
 	results := append([]map[string]any{}, a.results...)
 	a.mu.Unlock()
@@ -135,7 +137,7 @@ func (a *Agent) Report(ctx context.Context) *om.Map {
 		}
 		if obs.Phase == "running" {
 			healthPort, flink := 8080, false
-			if w, ok := a.desired[id]; ok {
+			if w, ok := desired[id]; ok {
 				healthPort, flink = w.Health(), w.IsFlink()
 			}
 			item.Set("health_port", healthPort)
