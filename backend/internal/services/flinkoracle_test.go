@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
+	"github.com/daun-gatal/bezisync/backend/internal/connectors"
 	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 )
@@ -64,5 +65,18 @@ func TestRestoreBelowTablesFloor(t *testing.T) {
 	}
 	if err := restoreBelowFloor(&models.Pipeline{Artifacts: map[string]any{}}, 1); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// E23: the delivery canary runs only on Debezium, where its row can reach the destination.
+func TestCanaryRunsOnlyOnDebezium(t *testing.T) {
+	src, _ := connectors.Describe("source", "postgresql")
+	snk, _ := connectors.Describe("sink", "iceberg")
+	if !CanaryRuns(engine.Debezium, src, snk) || CanaryRuns(engine.FlinkCDC, src, snk) {
+		t.Fatal("canary engine rule")
+	}
+	ms, _ := connectors.Describe("source", "sqlserver")
+	if CanaryRuns(engine.Debezium, ms, snk) || CanaryRuns(engine.Debezium, nil, snk) {
+		t.Fatal("canary source rule")
 	}
 }

@@ -1350,10 +1350,14 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	if c := MinimumDebeziumCheck(image, srcDesc); c != nil && !flink {
 		configChecks = append(configChecks, *c)
 	}
-	if spec.Policies.DeliveryCanary && !(srcDesc != nil && srcDesc.SupportsCanary && sinkDesc != nil && sinkDesc.Canary) {
+	if spec.Policies.DeliveryCanary && !CanaryRuns(EngineOf(p), srcDesc, sinkDesc) {
+		msg := "The delivery canary needs a source BeziSync can write a canary row to (" +
+			connectors.CanarySources() + ") and a destination where BeziSync can find it again (not SQS or HTTP); it stays off for this pipeline."
+		if flink {
+			msg = "Flink CDC pipelines have no delivery canary: they capture only the pipeline's tables, so a canary row would never arrive. It stays off; health comes from the job and its saved positions."
+		}
 		configChecks = append(configChecks, checks.Check{Code: "delivery_canary_unavailable", Title: "Delivery canary", Status: checks.Warn,
-			Category: checks.CatResilience, Message: "The delivery canary needs a source BeziSync can write a canary row to (" +
-				connectors.CanarySources() + ") and a destination where BeziSync can find it again (not SQS or HTTP); it stays off for this pipeline."})
+			Category: checks.CatResilience, Message: msg})
 	}
 	if srcDesc != nil && !srcDesc.Capture.Incremental && p.DeployedVersionID != nil {
 		deployed, err := SpecOf(ctx, q, p.DeployedVersionID)
@@ -1926,3 +1930,10 @@ func writePins(ctx context.Context, q db.Querier, p *models.Pipeline, v *models.
 
 // flinkConfigChecks are Flink CDC checks a forced deploy can't skip: the job could only fail.
 var flinkConfigChecks = []string{"flink_oracle_version"}
+
+// CanaryRuns reports whether the delivery canary can run for a pipeline: a source BeziSync writes a
+// canary row to, a destination it reads it back from, and Debezium (Flink CDC captures only the
+// spec's tables, so the canary row never reaches the destination).
+func CanaryRuns(id engine.ID, srcDesc, sinkDesc *connectors.Descriptor) bool {
+	return id != engine.FlinkCDC && srcDesc != nil && srcDesc.SupportsCanary && sinkDesc != nil && sinkDesc.Canary
+}

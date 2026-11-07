@@ -663,7 +663,7 @@ func (c *Controller) canary(ctx context.Context, tx pgx.Tx, p *models.Pipeline, 
 	}
 	srcDesc, _ := connectors.Describe("source", sourceConn.Type)
 	sinkDesc, _ := connectors.Describe("sink", sinkConn.Type)
-	if srcDesc == nil || sinkDesc == nil || !srcDesc.SupportsCanary || !sinkDesc.Canary {
+	if !services.CanaryRuns(services.EngineOf(p), srcDesc, sinkDesc) {
 		return
 	}
 	source, _ := connectors.GetSource(sourceConn.Type)

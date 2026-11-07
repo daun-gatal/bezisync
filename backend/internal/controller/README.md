@@ -38,7 +38,7 @@
 - DB writes: `pipelines` (status, lifecycle, health, artifacts via `services.SavePipeline`; `desired_state`/`deleted_at` in uninstall), `metric_samples` (resolution 0), `schema_changes`, `jobs` (claim, result, superseded snapshots), `runtimes.last_seen_at`, events via `services.Record` (`NotAudit` lifecycle, cleanup and snapshot events; audited Flink CDC resize events with actor `controller`); reads offsets (`services.ReadOffsets`) and clears them (`services.ClearOffsets`, `services.DropSavedPositions`).
 - Maintenance every 10 min: `services.EnforceMetricRetention`, `services.MaybeSendTelemetry` (may call out), `services.ExpireSavedPositions`.
 - Runtimes: `Apply`/`Delete`/`Observe`/`Logs`/`HTTPGet` on Docker, Kubernetes or agent drivers.
-- Sources and sinks over the network: `Prepare`/`PrepareSink`, `Discover`, source impact probes, canary writes (`WriteCanary`) and reads (`Tail`), snapshot `Signal`, cleanup.
+- Sources and sinks over the network: `Prepare`/`PrepareSink`, `Discover`, source impact probes, canary writes (`WriteCanary`) and reads (`Tail`, only where `services.CanaryRuns`: never on Flink CDC pipelines), snapshot `Signal`, cleanup.
 - Separate connections: the leader-lock connection to `DatabaseURL` and, at start, one to the state database (`EffectiveStateDatabaseURL`); env via `config.Get()` only.
 - Goroutines: up to 8 reconcilers per tick; logs via `bezisync.controller`.
 
