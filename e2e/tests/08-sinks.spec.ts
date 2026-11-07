@@ -168,7 +168,7 @@ test('Postgres → Apache Iceberg on Debezium: Partition by from the wizard, app
   await expect(page.getByText('Partition by is chosen in Transform, after the key and renames.')).toBeVisible();
   await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
   const partRow = page.getByRole('region', { name: 'Partition by' });
-  await expect(partRow.getByText('Automatic', { exact: true })).toBeVisible();
+  await expect(partRow.getByText('Automatic: 16 buckets of id').first()).toBeVisible();
   await partRow.getByRole('button', { name: 'Edit' }).click();
   const part = page.getByRole('group', { name: 'Partition shop.orders' });
   // Without fields the table gets the automatic default.
