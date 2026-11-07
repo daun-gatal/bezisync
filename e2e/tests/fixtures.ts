@@ -76,3 +76,7 @@ export const VITESS_FROM_RUNNER = { host: 'bezisync-e2e-k3s', port: 32306, user:
 /** Cloud Spanner emulator (18-source-spanner.yaml): instance "shop", database "orders". */
 export const SPANNER = { project_id: 'bezisync-e2e', instance_id: 'shop', database_id: 'orders', emulator_host: `spanner.${DATA}:9010` };
 export const SPANNER_REST_FROM_RUNNER = 'http://bezisync-e2e-k3s:30920/v1/projects/bezisync-e2e/instances/shop/databases/orders';
+/** Flink CDC-only destinations (49-flink-sinks.yaml) and Paimon on the lakehouse S3. */
+export const ELASTICSEARCH = { hosts: `http://elasticsearch.${DATA}:9200`, version: '8', username: 'elastic', password: 'es-pw' };
+export const OCEANBASE = { host: `oceanbase.${DATA}`, query_port: 2881, database: 'cdc', user: 'root@test', password: 'ob-pw' };
+export const PAIMON = { warehouse: 's3://warehouse/paimon', s3_endpoint: `http://rustfs.${DATA}:9000`, region: 'us-east-1', path_style: true, access_key_id: 'lake-admin', secret_access_key: 'lake-secret-123' };

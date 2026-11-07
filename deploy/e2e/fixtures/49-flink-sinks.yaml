@@ -1,0 +1,58 @@
+# Destinations only Flink CDC writes (ADR 0009): elasticsearch:9200 (Elasticsearch 8, security on,
+# plain HTTP; user elastic / es-pw) and oceanbase:2881 (OceanBase CE, MySQL tenant "test", user
+# root@test / ob-pw). Paimon uses the lakehouse fixture's S3 (rustfs, bucket warehouse); Kafka the
+# kafka fixture.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: elasticsearch }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: elasticsearch } }
+  template:
+    metadata: { labels: { app: elasticsearch, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+          env:
+            - { name: discovery.type, value: single-node }
+            - { name: ELASTIC_PASSWORD, value: es-pw }
+            - { name: xpack.security.enabled, value: "true" }
+            - { name: xpack.security.http.ssl.enabled, value: "false" }
+            - { name: ES_JAVA_OPTS, value: "-Xms512m -Xmx512m" }
+          ports: [{ containerPort: 9200 }]
+          resources: { requests: { memory: 1Gi } }
+          readinessProbe: { exec: { command: [sh, -c, "curl -sf -u elastic:es-pw http://localhost:9200/_cluster/health"] }, periodSeconds: 5, failureThreshold: 60 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: elasticsearch }
+spec:
+  selector: { app: elasticsearch }
+  ports: [{ port: 9200, targetPort: 9200 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: oceanbase }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: oceanbase } }
+  template:
+    metadata: { labels: { app: oceanbase, app.bezisync.io/fixture: "true" } }
+    spec:
+      containers:
+        - name: oceanbase
+          image: oceanbase/oceanbase-ce:4.3.5-lts
+          env:
+            - { name: MODE, value: mini }
+            - { name: OB_TENANT_PASSWORD, value: ob-pw }
+          ports: [{ containerPort: 2881 }]
+          resources: { requests: { memory: 6Gi } }
+          readinessProbe: { exec: { command: [sh, -c, "obclient -h127.0.0.1 -P2881 -uroot@test -pob-pw -e 'select 1'"] }, periodSeconds: 10, failureThreshold: 90 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: oceanbase }
+spec:
+  selector: { app: oceanbase }
+  ports: [{ port: 2881, targetPort: 2881 }]
