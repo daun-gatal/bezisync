@@ -901,6 +901,9 @@ func pipelineRoutes(r chi.Router) {
 			if !capture.Incremental {
 				return 0, problem.New(422, "snapshot_unsupported", title+" cannot copy tables again while streaming.")
 			}
+			if caps := engine.CapsFor(services.EngineOf(p), ""); !caps.RecopyTable {
+				return 0, problem.New(422, "snapshot_unsupported", caps.Why["recopy_table"])
+			}
 			captured := map[string]bool{}
 			for _, t := range spec.Source.Tables.Include {
 				captured[t] = true

@@ -1548,8 +1548,10 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 	if err != nil {
 		return nil, nil, err
 	}
-	// Tables added to a running pipeline are copied while it streams, where the source can.
-	if previous != nil && *previous != v.ID && len(report.Change.TablesAdded) > 0 && capture.Incremental {
+	// Tables added to a running pipeline are copied while it streams, where the source can. Only
+	// Debezium needs a snapshot signal for that; Flink CDC copies added tables itself (AddTables).
+	if previous != nil && *previous != v.ID && len(report.Change.TablesAdded) > 0 && capture.Incremental &&
+		engine.CapsFor(EngineOf(p), "").RecopyTable {
 		tables := make([]any, len(report.Change.TablesAdded))
 		for i, t := range report.Change.TablesAdded {
 			tables[i] = t

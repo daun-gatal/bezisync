@@ -272,6 +272,11 @@ func jobSnapshot(ctx context.Context, q db.Querier, j *models.Job) (map[string]a
 	if err != nil {
 		return nil, err
 	}
+	// A snapshot is a Debezium signal; Flink CDC copies added tables itself (one queued before
+	// the engine check, or by an older release, is dropped).
+	if caps := engine.CapsFor(services.EngineOf(p), ""); !caps.RecopyTable {
+		return map[string]any{"skipped": caps.Why["recopy_table"]}, nil
+	}
 	if p.Lifecycle != domain.LifecycleStreaming && p.Lifecycle != domain.LifecycleSnapshotting {
 		return nil, &services.Retry{Msg: fmt.Sprintf("waiting for the pipeline to stream (now %s)", p.Lifecycle)}
 	}
