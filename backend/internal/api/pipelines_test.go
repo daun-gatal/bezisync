@@ -369,6 +369,9 @@ func TestRuntimeAPI(t *testing.T) {
 	admin.post(base+"/runtimes", map[string]any{"name": "bad", "kind": "kubernetes", "config": map[string]any{"namespace": "Bad_NS"}}).expect(422)
 	editor := member(t, srv, admin, pid, "editor")
 	editor.post(base+"/runtimes", map[string]any{"name": "x", "kind": "docker", "config": map[string]any{}}).expect(403)
+	// Testing calls the runtime and rewrites its result and capacity: runtime.manage (Known issue 9).
+	editor.post(base+"/runtimes/"+rt.Str("id")+"/test", nil).expect(403)
+	editor.post(base+"/runtimes/"+db0+"/test", nil).expect(404)
 	// Renaming, cordoning and the version check.
 	u := base + "/runtimes/" + rt.Str("id")
 	admin.patch(u, map[string]any{"enabled": false}, ifMatch(9)...).expect(412)

@@ -380,7 +380,7 @@ func buildCatalog() []*Tool {
 				}
 				return cl.do(http.MethodPost, p+"/positions/"+cl.intArg("position_id")+"/restore", cl.body("confirm"))
 			}},
-		{Name: "delete_pipeline", Title: "Delete a pipeline", Kind: Destructive, Project: true, Perm: auth.PipelineEdit,
+		{Name: "delete_pipeline", Title: "Delete a pipeline", Kind: Destructive, Project: true, Perm: auth.PipelineDeploy,
 			Description: "Stops the connector and removes the replication slot and its artifacts.",
 			Params:      []Param{pipelineArg, opt("drop_destinations", flag("Also delete the topics/tables it wrote to."))},
 			Call: func(cl *call) (any, error) {
@@ -491,7 +491,7 @@ func buildCatalog() []*Tool {
 			Description: "Where connectors run (Kubernetes, Docker, agents), with reachability and capacity.", Call: get(at("/runtimes"))},
 		{Name: "get_runtime", Title: "Get a runtime", Kind: Read, Project: true, Perm: auth.PipelineView,
 			Description: "A runtime's details and last test (credentials never shown).", Params: []Param{runtimeArg}, Call: get(onRuntime(""))},
-		{Name: "test_runtime", Title: "Test a runtime", Kind: Read, Project: true, Perm: auth.RuntimeManage,
+		{Name: "test_runtime", Title: "Test a runtime", Kind: Write, Project: true, Perm: auth.RuntimeManage,
 			Description: "Checks that BeziSync can reach the runtime and run connectors there.", Params: []Param{runtimeArg}, Call: send(http.MethodPost, onRuntime("/test"))},
 		{Name: "update_runtime", Title: "Rename or cordon a runtime", Kind: Write, Project: true, Perm: auth.RuntimeManage,
 			Description: "Renames a runtime, turns it off for new pipelines (running ones keep running) or sets its default Debezium image. Credentials are changed in the UI.",

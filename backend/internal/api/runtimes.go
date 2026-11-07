@@ -705,6 +705,13 @@ func runtimeRoutes(r chi.Router) {
 			return err
 		}
 		ctx := r.Context()
+		if _, err := projectRuntime(ctx, pool(ctx), a, id); err != nil {
+			return err
+		}
+		// A test calls the runtime and rewrites its last result and capacity.
+		if err := a.Require(auth.RuntimeManage); err != nil {
+			return err
+		}
 		var out RuntimeTest
 		err = tx(ctx, func(q db.Querier) error {
 			rt, err := projectRuntime(ctx, q, a, id)
