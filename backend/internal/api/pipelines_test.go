@@ -39,7 +39,7 @@ func shop(t *testing.T) string {
 	t.Cleanup(func() {
 		exec(t, `DROP SCHEMA IF EXISTS shop CASCADE`)
 		exec(t, `DROP SCHEMA IF EXISTS bezisync CASCADE`)
-		exec(t, `SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name LIKE 'bz_%' AND NOT active`)
+		exec(t, `SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name LIKE 'bz_%' AND NOT active AND database = current_database()`) // slots are server-wide: only this test database's
 		exec(t, `DROP PUBLICATION IF EXISTS dummy`)
 	})
 	return role
