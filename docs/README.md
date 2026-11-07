@@ -443,6 +443,46 @@ canary (`examinemessage`: no subscription, your consumers are untouched). Sign i
 or a StreamNative API key). A send that does not complete within 30 seconds fails the batch, which
 Debezium retries, rather than being lost.
 
+### Elasticsearch
+
+**Flink CDC only.** One index per source table (the naming pattern, lower-cased), one document per row
+whose id is the primary key: an update replaces it and a delete removes it. Indexes are created by
+their first document with dynamic mappings (decimals arrive as text, NULL fields are left out); create
+an index template beforehand for other mappings. The connection takes the hosts (`http(s)://host:port`),
+the version (6, 7 or 8, matching the server) and an optional user and password. Preflight signs in,
+compares the version, and writes and deletes a test index (the user needs `create_index`, `index` and
+`delete_index`, and automatic index creation must be allowed). The sink takes no CA: use `https` only
+with a certificate from a public CA, otherwise keep the cluster in a network you trust. The Events tab
+reads documents, and deleting a pipeline with "drop destinations" deletes its indexes.
+
+### Apache Paimon
+
+**Flink CDC only.** One primary-key Paimon table per source table in a filesystem catalog on S3 or an
+S3-compatible store (MinIO, RustFS, Ceph): the warehouse (`s3://bucket/path`), the database, the endpoint
+and path-style access for S3-compatible stores, and an access key (or the runtime's own credentials).
+Rows are written on each Flink checkpoint. Preflight writes and deletes a test object under the warehouse.
+BeziSync has no Paimon reader: the Events tab has nothing to show and health stays Unknown (read the
+tables with Flink SQL, Spark or Trino), and deleting a pipeline leaves its tables in place (the report says
+how to drop them). Tables are not partitioned.
+
+### OceanBase
+
+**Flink CDC only.** One table per source table in a database of a MySQL tenant, created by Flink CDC over
+JDBC with OceanBase Connector/J (in the reference image; no MySQL driver needed). The connection takes the
+host and port (2881, or 2883 through OBProxy), the database (created if missing), the user as
+`user@tenant` (`#cluster` through OBProxy) and its password. Times are written in UTC. Only new and renamed
+columns are applied as schema changes; others stop the pipeline. Preflight signs in and creates and drops a
+test table; the Events tab reads rows; "drop destinations" drops the tables.
+
+### Kafka on Flink CDC
+
+Kafka runs on either engine (Debezium is the default). On Flink CDC each table goes to the topic its naming
+pattern gives, created at deploy with the connection's partitions and replication factor; records are keyed
+by the primary key (`{"TableId": …, "id": …}`) and spread by it, and the value is Flink CDC's
+Debezium-style JSON: `before`, `after` and `op`, with a short `source` and no schema or `ts_ms`. Consumers
+written for Debezium's records need to accept that shape; switching a pipeline's engine changes it.
+Only JSON without the schema is available on Flink CDC.
+
 ## Databases behind a bastion (SSH)
 
 PostgreSQL, MySQL/MariaDB, SQL Server, Oracle, CockroachDB and Vitess connections can reach a database through an SSH bastion
@@ -656,8 +696,8 @@ it, a renamed one moves to its new key, and raw properties are listed as not che
 
 Every pipeline runs on an engine. **Debezium** runs every pipeline unless you choose otherwise and
 is always available. **Flink CDC** keeps database tables in sync in analytics and lakehouse stores:
-it reads MySQL/MariaDB, PostgreSQL, SQL Server and Oracle and writes Iceberg, StarRocks, Doris and Fluss
-(StarRocks, Doris and Fluss only through Flink CDC). It copies large tables in parallel chunks and
+it reads MySQL/MariaDB, PostgreSQL, SQL Server and Oracle and writes Iceberg, StarRocks, Doris, Fluss,
+Kafka, Elasticsearch, Apache Paimon and OceanBase (all but Iceberg and Kafka only through Flink CDC). It copies large tables in parallel chunks and
 applies schema changes to the destination tables. Each pipeline runs its own small Flink cluster (a
 JobManager and TaskManagers), so it needs more memory than a Debezium pipeline.
 
@@ -665,13 +705,13 @@ Flink CDC is **off until an Admin registers a Flink CDC image** under **Settings
 → Flink CDC** (or `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`). BeziSync publishes no Flink CDC image: build
 one on the official Flink image (`flink:2.2.1-java17`) with Flink CDC 3.7.0 in this layout, and push
 it to a registry your runtimes can pull from. Until an image is registered the wizard shows
-StarRocks, Doris and Fluss as unavailable with the reason, and Iceberg pipelines run on Debezium.
+the Flink CDC-only destinations as unavailable with the reason, and Iceberg pipelines run on Debezium.
 
 | Path | What |
 |---|---|
 | `/opt/flink` | Flink 2.2.1 (the base image); add `flink-shaded-guava-31.1-jre-17.0.jar` to `/opt/flink/lib` (Flink CDC on Flink 2.2 needs it) |
 | `/opt/flink-cdc/lib/flink-cdc-dist-3.7.0-2.2.jar` | Flink CDC's runtime, from the Flink CDC 3.7.0 release |
-| `/opt/flink-cdc/connectors/<name>.jar` | Flink CDC's pipeline connectors (`flink-cdc-pipeline-connector-*-3.7.0-2.2.jar`), renamed: `mysql`, `postgresql`, `sqlserver`, `oracle`, `iceberg`, `starrocks`, `doris`, `fluss`; for Iceberg also `iceberg-aws` (`iceberg-aws-bundle` 1.10.1), `hadoop-client-api` and `hadoop-client-runtime` (3.3.6) and `commons-logging` (1.3.5) |
+| `/opt/flink-cdc/connectors/<name>.jar` | Flink CDC's pipeline connectors (`flink-cdc-pipeline-connector-*-3.7.0-2.2.jar`), renamed: `mysql`, `postgresql`, `sqlserver`, `oracle`, `iceberg`, `starrocks`, `doris`, `fluss`, `kafka`, `elasticsearch`, `paimon`, `oceanbase`; for Paimon also `paimon-s3` (Paimon 2.0.0) and the Hadoop JARs below; for OceanBase also `oceanbase-client` (OceanBase Connector/J 2.4.14, LGPL); for Iceberg also `iceberg-aws` (`iceberg-aws-bundle` 1.10.1), `hadoop-client-api` and `hadoop-client-runtime` (3.3.6) and `commons-logging` (1.3.5) |
 | `/opt/flink-cdc/drivers/` | JDBC drivers the connectors leave out (see below) |
 
 Only the connectors your pipelines use have to be there: a pipeline whose connector is missing
@@ -694,8 +734,8 @@ tools: Flink CDC's connector JARs bundle libraries (Jackson, Netty, protobuf and
 published vulnerabilities that only a Flink CDC release can update. Projects can limit which
 engines their pipelines use (**Policies → Allowed engines**).
 
-**Choosing it.** The wizard's destination step shows the engine: StarRocks, Doris and Fluss run on
-Flink CDC; Iceberg offers both (Debezium is the default). The engine can change until the pipeline's
+**Choosing it.** The wizard's destination step shows the engine: StarRocks, Doris, Fluss, Elasticsearch,
+Paimon and OceanBase run on Flink CDC; Iceberg and Kafka offer both (Debezium is the default). The engine can change until the pipeline's
 first deploy; after that, create a new pipeline. On Flink CDC:
 
 - **Tables** need a primary key, or key columns picked in the Tables step (`flink_primary_key`);
