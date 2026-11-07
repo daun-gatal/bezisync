@@ -3,11 +3,13 @@ package api_test
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/daun-gatal/bezisync/backend/internal/controller"
 	"github.com/daun-gatal/bezisync/backend/internal/db"
 	"github.com/daun-gatal/bezisync/backend/internal/models"
 	"github.com/daun-gatal/bezisync/backend/internal/services"
@@ -92,5 +94,43 @@ func TestStuckJobsAreReclaimed(t *testing.T) {
 	e.runJobs()
 	if j := jobRow(t, held); j.State != "done" {
 		t.Fatalf("held, after its owner went: %s", j.State)
+	}
+}
+
+// A job still running in another controller holds its row lock (runJob's FOR UPDATE), so a
+// reclaim pass leaves it alone however long it runs (ADR 0003): it is never run twice.
+func TestRunningJobIsNotReclaimed(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
+	pid := pipe.Str("id")
+	e.admin.post("/api/v1/projects/"+e.pid+"/pipelines/"+pid+"/deploy", map[string]any{}).expect(200)
+	e.tick()
+	prev := controller.ReclaimGrace
+	controller.ReclaimGrace = 0
+	t.Cleanup(func() { controller.ReclaimGrace = prev })
+	id := stuckJob(t, pid, "restart", 0, 0)
+	exec(t, `UPDATE jobs SET state = 'queued', locked_at = NULL, locked_by = NULL WHERE id = '`+id.String()+`'`)
+	gate := make(chan struct{})
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(gate) }) }) // never leave the handler blocked
+	e.driver.mu.Lock()
+	e.driver.DeleteGate = gate
+	e.driver.mu.Unlock()
+	done := make(chan struct{})
+	go func() { defer close(done); e.ctrl.RunJobs(context.Background(), 1) }() // runs the restart; Delete blocks
+	deadline := time.Now().Add(5 * time.Second)
+	for jobRow(t, id).State != "running" && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // past the grace (0), inside the handler
+	other := controller.New()
+	other.RunJobs(context.Background(), 0) // a second controller's reclaim pass
+	if j := jobRow(t, id); j.State != "running" || j.Error != nil || j.Attempts != 1 {
+		t.Fatalf("a live job was reclaimed: %s attempts %d %v", j.State, j.Attempts, j.Error)
+	}
+	release.Do(func() { close(gate) })
+	<-done
+	if j := jobRow(t, id); j.State != "done" || j.Attempts != 1 {
+		t.Fatalf("after the handler: %s attempts %d", j.State, j.Attempts)
 	}
 }

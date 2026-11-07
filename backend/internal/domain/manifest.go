@@ -118,9 +118,6 @@ func FromDocument(doc map[string]any) (*ParsedPipeline, error) {
 			}
 			if g := m.Get("labels"); g.Present {
 				if l, ok := v.StrDict(g.Loc, g.Raw); ok {
-					if !LabelsValid(l) {
-						v.Fail(g.Loc, "value_error", LabelsMessage)
-					}
 					meta.labels = l
 				}
 			}

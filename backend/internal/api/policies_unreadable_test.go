@@ -47,8 +47,9 @@ func TestUnreadablePoliciesFailClosed(t *testing.T) {
 		t.Fatal(string(pre.Raw))
 	}
 	admin.post(u+"/deploy", map[string]any{}).expect(409)
-	if c := admin.post(u+"/deploy", map[string]any{"force_reason": "ship it"}).Code(); c == "" || c == "ok" {
-		t.Fatal("a forced deploy went through")
+	// Forcing never skips the policy section: refused although allow_force_deploy parsed as true.
+	if r := admin.post(u+"/deploy", map[string]any{"force_reason": "ship it anyway, please"}); r.Status != 409 || r.Code() != "preflight_failed" {
+		t.Fatal("a forced deploy:", r.Status, string(r.Raw))
 	}
 
 	// P4: spec saves and new pipelines are refused.

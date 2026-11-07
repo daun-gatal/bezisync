@@ -277,13 +277,27 @@ func PoliciesOf(ctx context.Context, q db.Querier, projectID uuid.UUID) (domain.
 	}
 	p := domain.LoadPolicies(proj.Policies)
 	if p.Unreadable {
-		policyLog.Warn("project policies can't be read: changes are blocked until an Admin saves them",
-			"project_id", projectID.String(), "problems", len(p.Problems))
+		warnUnreadable(projectID, len(p.Problems))
 	}
 	return p, nil
 }
 
-var policyLog = logging.Logger("bezisync.services.policies")
+var (
+	policyLog      = logging.Logger("bezisync.services.policies")
+	policyWarnedAt sync.Map // project id → time of the last warning
+)
+
+// warnUnreadable logs unreadable policies at most every 10 minutes per project (the controller
+// reads policies on every tick).
+func warnUnreadable(projectID uuid.UUID, problems int) {
+	now := time.Now()
+	if last, ok := policyWarnedAt.Load(projectID); ok && now.Sub(last.(time.Time)) < 10*time.Minute {
+		return
+	}
+	policyWarnedAt.Store(projectID, now)
+	policyLog.Warn("project policies can't be read: changes are blocked until an Admin saves them",
+		"project_id", projectID.String(), "problems", problems)
+}
 
 // UnreadablePolicies is the refusal of a change in a project whose policies can't be read.
 func UnreadablePolicies() error {
@@ -315,6 +329,9 @@ func EnforceSavePolicies(ctx context.Context, q db.Querier, projectID uuid.UUID,
 	pol, err := PoliciesOf(ctx, q, projectID)
 	if err != nil {
 		return err
+	}
+	if pol.Unreadable {
+		return UnreadablePolicies()
 	}
 	violations := domain.SaveViolations(pol, runtimeID, sourceType, sinkType)
 	if len(violations) == 0 {

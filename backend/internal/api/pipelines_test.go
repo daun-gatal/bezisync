@@ -334,6 +334,12 @@ func TestPipelinePermissionsAndValidation(t *testing.T) {
 	exec(t, `UPDATE pipelines SET labels = '{"Old Key": "v"}' WHERE id = '`+pipe.Str("id")+`'`)
 	cur = e.admin.get(u).expect(200)
 	e.admin.patch(u, map[string]any{"owner": "ops", "labels": map[string]any{"Old Key": "v"}}, ifMatch(cur.At("version"))...).expect(200)
+	// Its exported manifest re-applies too; a manifest that changes them to bad ones doesn't.
+	exported := e.admin.get(u + "/manifest").expect(200).Str("yaml")
+	apply(e.admin, e.pid, exported, nil).expect(200)
+	if r := apply(e.admin, e.pid, strings.Replace(exported, "Old Key", "Other Key", 1), nil); r.Status != 422 || !strings.Contains(string(r.Raw), "up to 20 labels") {
+		t.Fatal(r.Status, string(r.Raw))
+	}
 }
 
 func TestRuntimeAPI(t *testing.T) {
