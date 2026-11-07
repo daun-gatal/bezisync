@@ -140,6 +140,45 @@ var flinkMatrixSpecs = map[string]map[string]any{
 			"flink_conf": map[string]any{"execution.checkpointing.timeout": "15 min"}}},
 }
 
+// Iceberg-only shapes (Debezium, PostgreSQL and MySQL sources): how tables are partitioned. The
+// automatic default reads the keys the wizard records; a route sends tables to one destination.
+var icebergMatrixSpecs = map[string]map[string]any{
+	"ice-auto": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders", "public.customers"}}},
+		"sink": map[string]any{"options": map[string]any{"partitions": map[string]any{"public.orders": "id", "public.customers": ""}}}},
+	"ice-buckets": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders"}}},
+		"sink": map[string]any{"options": map[string]any{"buckets": "64", "write_mode": "upsert", "partitions": map[string]any{"public.orders": "id"}}}},
+	"ice-append": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders", "public.customers"}}},
+		"sink": map[string]any{"options": map[string]any{"write_mode": "append", "partitions": map[string]any{"public.orders": "id"}}}},
+	"ice-none": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders"}}},
+		"sink": map[string]any{"options": map[string]any{"partitioning": "none", "partitions": map[string]any{"public.orders": "id"}}}},
+	"ice-route": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders", "public.orders_archive"}}},
+		"sink":       map[string]any{"options": map[string]any{"partitions": map[string]any{"public.orders": "id", "public.orders_archive": "id"}}},
+		"transforms": []any{map[string]any{"type": "route", "id": "rt01", "routes": []any{map[string]any{"match": "public.orders*", "to": "all_orders"}}}}},
+	// Partition by on Debezium (ADR 0005): listed tables get their fields, the others the default.
+	"ice-partition-by": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders", "public.customers"}}},
+		"sink": map[string]any{"options": map[string]any{"partitions": map[string]any{"public.orders": "id", "public.customers": "id"}, "partition_by": map[string]any{
+			"public.orders": []any{map[string]any{"column": "id", "transform": "bucket", "n": 8}, map[string]any{"column": "region", "transform": "identity"}}}}}},
+	"ice-partition-by-append": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders"}}},
+		"sink": map[string]any{"options": map[string]any{"write_mode": "append", "partitioning": "none", "partition_by": map[string]any{
+			"public.orders": []any{map[string]any{"column": "__source_ts_ms", "transform": "hour"}, map[string]any{"column": "name", "transform": "truncate", "n": 4}}}}}},
+	"ice-partition-by-route": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders", "public.orders_archive"}}},
+		"sink": map[string]any{"options": map[string]any{"partition_by": map[string]any{
+			"public.orders":         []any{map[string]any{"column": "id", "transform": "bucket", "n": 4}},
+			"public.orders_archive": []any{map[string]any{"column": "id", "transform": "bucket", "n": 4}}}}},
+		"transforms": []any{map[string]any{"type": "route", "id": "rt01", "routes": []any{map[string]any{"match": "public.orders*", "to": "all_orders"}}}}},
+}
+
+// Iceberg-only shapes on Flink CDC: Partition by, with a route.
+var icebergFlinkMatrixSpecs = map[string]map[string]any{
+	"ice-partition-by": {"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders", "shop.customers"}}},
+		"sink": map[string]any{"options": map[string]any{"partition_by": map[string]any{
+			"shop.orders":    []any{map[string]any{"column": "id", "transform": "bucket", "n": 8}, map[string]any{"column": "created_at", "transform": "day"}},
+			"shop.customers": []any{map[string]any{"column": "id", "transform": "truncate", "n": 1000}}}}}},
+	"ice-partition-route": {"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"sink":       map[string]any{"options": map[string]any{"partition_by": map[string]any{"shop.orders": []any{map[string]any{"column": "id", "transform": "bucket", "n": 4}}}}},
+		"transforms": []any{map[string]any{"type": "route", "id": "rt01", "routes": []any{map[string]any{"match": "shop.orders", "to": "r_orders"}}}}},
+}
+
 // matrixFlinkInput gives Flink CDC the tables' columns, as a deploy does.
 var matrixFlinkInput = func() compiler.FlinkInput {
 	in := secrets
@@ -236,10 +275,31 @@ func TestCompileMatrixUnchanged(t *testing.T) {
 				}
 				got[key] = outcome(compiler.Compile(ctx(spec), matrixConn(t, src), matrixConn(t, snk), ""))
 			}
+			if snk.Type == "iceberg" && (src.Type == "postgresql" || src.Type == "mysql") {
+				for name, raw := range icebergMatrixSpecs {
+					key := "debezium/" + src.Type + "/" + snk.Type + "/" + name
+					spec, err := matrixSpec(t, raw)
+					if err != nil {
+						got[key] = err.Error()
+						continue
+					}
+					got[key] = outcome(compiler.Compile(ctx(spec), matrixConn(t, src), matrixConn(t, snk), ""))
+				}
+			}
 			if !slices.Contains([]string{"mysql", "postgresql", "sqlserver"}, src.Type) || !slices.Contains([]string{"iceberg", "starrocks", "doris", "fluss"}, snk.Type) {
 				continue
 			}
-			for name, raw := range flinkMatrixSpecs {
+			flinkSpecs := flinkMatrixSpecs
+			if snk.Type == "iceberg" {
+				flinkSpecs = map[string]map[string]any{}
+				for k, v := range flinkMatrixSpecs {
+					flinkSpecs[k] = v
+				}
+				for k, v := range icebergFlinkMatrixSpecs {
+					flinkSpecs[k] = v
+				}
+			}
+			for name, raw := range flinkSpecs {
 				key := "flink-cdc/" + src.Type + "/" + snk.Type + "/" + name
 				spec, err := matrixSpec(t, raw)
 				if err != nil {

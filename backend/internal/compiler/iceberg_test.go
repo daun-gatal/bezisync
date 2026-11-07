@@ -3,6 +3,7 @@ package compiler_test
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -177,5 +178,36 @@ func TestCompileIcebergRefuses(t *testing.T) {
 			b, _ := json.Marshal(err)
 			t.Errorf("%s: got %v %s, want %s", c.name, err, b, c.code)
 		}
+	}
+}
+
+// A routed table's automatic partitioning is keyed by its destination after the route, where the
+// build looks it up (ADR 0005); tables merged into one destination share it when they agree, and
+// leave it unpartitioned when they don't. (Before, it was keyed by the pre-route topic and never
+// applied: such pipelines restart once on upgrade.)
+func TestCompileIcebergRoutedAutomaticKey(t *testing.T) {
+	sink := icebergSink(map[string]any{"catalog_type": "rest", "uri": "https://catalog.example.com/api/catalog", "warehouse": "lake"}, map[string]any{})
+	keys := func(partitions map[string]any) []string {
+		got, err := compilePipeline(t, "pg", sink, func(s *domain.PipelineSpec) {
+			s.Sink.Options = map[string]any{"partitions": partitions}
+			s.Transforms = []domain.Transform{{Type: "route", ID: "rt01", Routes: []domain.Route{{Match: "shop.*", To: "all_rows"}}}}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for k, v := range got.Properties {
+			if strings.HasPrefix(k, "debezium.sink.iceberg.partition-by") {
+				out = append(out, k+"="+v)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got, want := keys(map[string]any{"shop.orders": "id", "shop.events": "id"}), []string{`debezium.sink.iceberg.partition-by.all_rows=bucket(id\,16)`}; !slices.Equal(got, want) {
+		t.Errorf("agreeing tables: %v, want %v", got, want)
+	}
+	if got := keys(map[string]any{"shop.orders": "id", "shop.events": ""}); len(got) != 0 {
+		t.Errorf("tables that disagree: %v, want none", got)
 	}
 }
