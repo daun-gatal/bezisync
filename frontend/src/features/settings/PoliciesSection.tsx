@@ -156,8 +156,9 @@ export function PoliciesSection() {
       toast.success('Policies saved');
     },
   });
-  // Unreadable policies always need saving: what is stored isn't what the form shows.
-  const dirty = Boolean(draft && stored && (unreadable || JSON.stringify(draft) !== JSON.stringify(stored)));
+  const dirty = Boolean(draft && stored && JSON.stringify(draft) !== JSON.stringify(stored));
+  // Unreadable policies can be saved as shown: what is stored isn't what the form shows.
+  const saveable = dirty || (unreadable && manage);
   const blocker = useBlocker({ shouldBlockFn: () => dirty, enableBeforeUnload: () => dirty, withResolver: true });
 
   return (
@@ -441,13 +442,15 @@ export function PoliciesSection() {
                   dirty && 'sticky bottom-0 z-10 shadow-lg',
                 )}
               >
-                <Meta className="mr-auto">{empty ? 'An allow-list can’t be empty.' : dirty ? 'You have unsaved changes.' : 'No changes to save.'}</Meta>
+                <Meta className="mr-auto">
+                  {empty ? 'An allow-list can’t be empty.' : dirty ? 'You have unsaved changes.' : saveable ? 'Save to store valid policies.' : 'No changes to save.'}
+                </Meta>
                 {dirty ? (
                   <Button variant="ghost" onClick={() => setDraft(stored ?? saved)}>
                     Discard
                   </Button>
                 ) : null}
-                <Button variant="primary" disabled={!dirty || empty} loading={save.isPending} onClick={() => save.mutate(draft)}>
+                <Button variant="primary" disabled={!saveable || empty} loading={save.isPending} onClick={() => save.mutate(draft)}>
                   Save policies
                 </Button>
               </div>
