@@ -17,7 +17,10 @@ func NeedsColumns(spec domain.PipelineSpec) bool {
 	}
 	for _, t := range spec.Transforms {
 		switch {
-		case t.Typed() && len(t.Rules) > 0, t.Type == "rename", t.Type == "add_field", t.Type == "flatten", t.Type == "soft_delete":
+		// Computed columns and expressions (ADR 0008) read columns too: their checks, and the drift
+		// alert, need them.
+		case t.Typed() && len(t.Rules) > 0, t.Type == "rename", t.Type == "add_field", t.Type == "flatten", t.Type == "soft_delete",
+			t.Type == "computed", t.Expression != "":
 			return true
 		}
 	}

@@ -1284,6 +1284,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/expressions:check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an expression
+         * @description Checks a Flink CDC expression (a computed column or a filter) as it is typed: its canonical text, the kind of its value, whether it is deterministic and the columns it reads, or why it is refused and where (offset and length in UTF-16 code units). Pure: reads the pipeline's current spec for masked and left-out columns and the columns sent, never the source (ADR 0008).
+         */
+        post: operations["check_expression_api_v1_projects__project_id__pipelines__pipeline_id__expressions_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/logs": {
         parameters: {
             query?: never;
@@ -2810,11 +2830,21 @@ export interface components {
         };
         /**
          * ComputedArg
-         * @description Exactly one of column, text or number.
+         * @description Exactly one of column, text, number, integer or decimal (the function decides which).
          */
         ComputedArg: {
             /** Column */
             column?: string;
+            /**
+             * Decimal
+             * @description A number as canonical text (add, subtract, multiply, divide).
+             */
+            decimal?: string;
+            /**
+             * Integer
+             * @description A whole number 0-18 (round: digits; to_decimal: scale).
+             */
+            integer?: number;
             /** Number */
             number?: number;
             /** Text */
@@ -3350,6 +3380,51 @@ export interface components {
             }[];
             /** Table */
             table: string;
+        };
+        /** ExpressionCheck */
+        ExpressionCheck: {
+            /** Canonical */
+            canonical?: string;
+            /** Columns */
+            columns?: string[];
+            /** Deterministic */
+            deterministic?: boolean;
+            error: components["schemas"]["ExpressionCheckError"] | null;
+            /** Kind */
+            kind?: string;
+        };
+        /** ExpressionCheckError */
+        ExpressionCheckError: {
+            /** Length */
+            length: number;
+            /** Message */
+            message: string;
+            /** Offset */
+            offset: number;
+        };
+        /** ExpressionCheckRequest */
+        ExpressionCheckRequest: {
+            /**
+             * Columns
+             * @description The table's columns as discovered; without them every column is accepted and preflight checks them.
+             */
+            columns?: components["schemas"]["ExpressionColumn"][] | null;
+            /** Expression */
+            expression: string;
+            /** Table */
+            table: string;
+            /**
+             * Use
+             * @enum {string}
+             */
+            use: "column" | "filter";
+        };
+        /** ExpressionColumn */
+        ExpressionColumn: {
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
         };
         /** FeedbackCreate */
         FeedbackCreate: {
@@ -6338,11 +6413,16 @@ export interface components {
              */
             delimiter?: "_" | ".";
             /**
+             * Expression
+             * @description Flink CDC only (ADR 0008). computed: the column as an expression (instead of function and args); filter: the condition as an expression (instead of operations and rules). Stored as BeziSync's canonical text.
+             */
+            expression?: string;
+            /**
              * Function
              * @description computed: the function (Flink CDC only).
              * @enum {string}
              */
-            function?: "concat" | "date_format" | "length" | "lower" | "substr" | "to_integer" | "to_text" | "trim" | "upper";
+            function?: "abs" | "add" | "ceil" | "concat" | "date_format" | "day" | "days_between" | "divide" | "first_set" | "floor" | "hour" | "join_with" | "left" | "length" | "lower" | "month" | "multiply" | "pad_left" | "pad_right" | "parse_date" | "replace" | "right" | "round" | "substr" | "subtract" | "to_decimal" | "to_float" | "to_integer" | "to_text" | "trim" | "upper" | "year";
             /**
              * Id
              * @description Stable step id; names the step t_<id> in the compiled chain. Returned only when set.
@@ -9628,6 +9708,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_expression_api_v1_projects__project_id__pipelines__pipeline_id__expressions_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpressionCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpressionCheck"];
                 };
             };
             /** @description Validation Error */

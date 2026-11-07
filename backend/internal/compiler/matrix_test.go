@@ -141,6 +141,38 @@ var flinkMatrixSpecs = map[string]map[string]any{
 		"policies": map[string]any{"resources": "large"},
 		"flink_cdc": map[string]any{"schema_changes": "ignore", "new_columns": "hold", "commit_seconds": 300,
 			"flink_conf": map[string]any{"execution.checkpointing.timeout": "15 min"}}},
+	// Pinned before ADR 0008: every computed function, every filter operator, rename, truncate,
+	// keep deleted rows and an added field, as they compiled then.
+	"transforms": {"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders", "shop.customers"}}},
+		"flink_cdc": map[string]any{"new_columns": "hold"},
+		"transforms": []any{
+			map[string]any{"type": "filter", "id": "keep01", "tables": []any{"shop.orders"}, "operations": []any{"insert", "snapshot", "update"}, "match": "any",
+				"rules": []any{
+					map[string]any{"field": "id", "op": "eq", "value": 7}, map[string]any{"field": "id", "op": "ne", "value": "it's"},
+					map[string]any{"field": "total", "op": "gt", "value": 1.5}, map[string]any{"field": "total", "op": "gte", "value": 2},
+					map[string]any{"field": "total", "op": "lt", "value": 3}, map[string]any{"field": "total", "op": "lte", "value": 4},
+					map[string]any{"field": "id", "op": "in", "values": []any{1, "x", true}}, map[string]any{"field": "id", "op": "not_in", "values": []any{2}},
+					map[string]any{"field": "created_at", "op": "is_null"}, map[string]any{"field": "created_at", "op": "is_not_null"},
+					map[string]any{"field": "id", "op": "is_true"}, map[string]any{"field": "id", "op": "is_false"}}},
+			map[string]any{"type": "filter", "id": "keep02", "operations": []any{"delete"}},
+			map[string]any{"type": "unwrap"},
+			map[string]any{"type": "soft_delete", "id": "soft01"},
+			map[string]any{"type": "rename", "id": "ren01", "tables": []any{"shop.customers"}, "renames": []any{map[string]any{"from": "email", "to": "mail"}}},
+			map[string]any{"type": "truncate", "id": "cut01", "columns": []any{map[string]any{"table": "shop.customers", "column": "email", "length": 20}}},
+			map[string]any{"type": "add_field", "id": "add01", "name": "origin", "value": map[string]any{"kind": "static", "text": "US$5 'x'"}},
+			map[string]any{"type": "computed", "id": "cc01", "table": "shop.customers", "name": "up", "function": "upper", "args": []any{map[string]any{"column": "email"}}},
+			map[string]any{"type": "computed", "id": "cc02", "table": "shop.customers", "name": "lo", "function": "lower", "args": []any{map[string]any{"column": "email"}}},
+			map[string]any{"type": "computed", "id": "cc03", "table": "shop.customers", "name": "tr", "function": "trim", "args": []any{map[string]any{"column": "email"}}},
+			map[string]any{"type": "computed", "id": "cc04", "table": "shop.customers", "name": "len", "function": "length", "args": []any{map[string]any{"column": "email"}}},
+			map[string]any{"type": "computed", "id": "cc05", "table": "shop.customers", "name": "joined", "function": "concat",
+				"args": []any{map[string]any{"column": "email"}, map[string]any{"text": "-it's-"}, map[string]any{"column": "id"}}},
+			map[string]any{"type": "computed", "id": "cc06", "table": "shop.customers", "name": "part", "function": "substr",
+				"args": []any{map[string]any{"column": "email"}, map[string]any{"number": 2}, map[string]any{"number": 5}}},
+			map[string]any{"type": "computed", "id": "cc07", "table": "shop.orders", "name": "month", "function": "date_format",
+				"args": []any{map[string]any{"column": "created_at"}, map[string]any{"text": "yyyy-MM"}}},
+			map[string]any{"type": "computed", "id": "cc08", "table": "shop.orders", "name": "total_text", "function": "to_text", "args": []any{map[string]any{"column": "total"}}},
+			map[string]any{"type": "computed", "id": "cc09", "table": "shop.customers", "name": "num", "function": "to_integer", "args": []any{map[string]any{"column": "email"}}},
+		}},
 }
 
 // Iceberg-only shapes (Debezium, PostgreSQL and MySQL sources): how tables are partitioned. The

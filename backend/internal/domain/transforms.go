@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
+	"github.com/daun-gatal/bezisync/backend/internal/expr"
 	"github.com/daun-gatal/bezisync/backend/internal/om"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
@@ -164,7 +165,7 @@ func (t Transform) Scripted() bool {
 
 // Typed reports a filter built from operations and rules (compiled by BeziSync).
 func (t Transform) Typed() bool {
-	return t.Type == "filter" && (len(t.Operations) > 0 || len(t.Rules) > 0)
+	return t.Type == "filter" && (len(t.Operations) > 0 || len(t.Rules) > 0 || t.Expression != "")
 }
 
 // Stage orders steps: 0 keep events, 1 event shape, 2 field changes. Legacy raw filters and
@@ -323,6 +324,18 @@ func decodeFilter(v *val.V, o *val.Object, out *Transform) {
 			for i, item := range items {
 				out.Rules = append(out.Rules, decodeRule(v, f.Loc.Add(i), item))
 			}
+		}
+	}
+	if f := o.Get("expression"); f.Present && !f.IsNull() {
+		out.Expression = decodeExpression(v, f, expr.UseFilter)
+		if len(out.Operations) > 0 || len(out.Rules) > 0 || out.Condition != nil {
+			v.ValueError(f.Loc, "a filter is either an expression, or operations and rules, or a raw condition")
+		}
+		if out.Match != "" {
+			v.ValueError(o.Loc().Add("match"), "match is for rules, not an expression")
+		}
+		if out.Expression != "" {
+			return
 		}
 	}
 	typed := len(out.Operations) > 0 || len(out.Rules) > 0
@@ -641,6 +654,9 @@ func validateTransforms(v *val.V, loc val.Loc, spec PipelineSpec) {
 		if t.Type == "computed" {
 			validateComputed(v, at, spec, t)
 		}
+		if t.Type == "filter" && t.Expression != "" {
+			validateFilterExpression(v, at, spec, t)
+		}
 		if t.Type == "truncate" {
 			for j, c := range t.Truncate {
 				switch {
@@ -751,6 +767,9 @@ func dumpTransform(t Transform) *om.Map {
 	case "filter":
 		if len(t.Operations) > 0 {
 			m.Set("operations", strList(t.Operations))
+		}
+		if t.Expression != "" {
+			m.Set("expression", t.Expression)
 		}
 		if len(t.Rules) > 0 {
 			rules := make([]any, len(t.Rules))

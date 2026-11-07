@@ -45,3 +45,4 @@ The other options, and why they lost.
 | [0005](0005-iceberg-partitioning.md) | Iceberg partitioning that cannot lose deletes, the same on both engines | Accepted (Editor section superseded by 0007) |
 | [0006](0006-flink-cdc-oracle-source.md) | Flink CDC reads Oracle; MongoDB, Vitess, TiDB and OceanBase stay on Debezium | Accepted |
 | [0007](0007-partition-by-in-transform.md) | Partition by in the Transform step; no Iceberg change log on Flink CDC | Accepted |
+| [0008](0008-flink-cdc-expressions.md) | Flink CDC expressions: more column functions, and custom expressions BeziSync parses | Accepted |

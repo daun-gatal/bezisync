@@ -97,6 +97,8 @@ type Transform struct {
 	Table      string            `json:"table"`      // computed
 	Function   string            `json:"function"`   // computed
 	Args       []ComputedArg     `json:"args"`       // computed
+	// Expression (ADR 0008): a computed column or a Flink CDC filter, canonical text of internal/expr.
+	Expression string `json:"expression"`
 }
 
 // Route sends the captured tables a pattern matches to one destination name (merging shards):

@@ -525,6 +525,9 @@ func TestComputedFlink(t *testing.T) {
 			step("month", "date_format", col("created_at"), map[string]any{"text": "yyyy-MM"}),
 			step("amount", "to_integer", col("total_text")),
 			step("short", "substr", col("status"), map[string]any{"number": 2}, map[string]any{"number": 3}),
+			step("scaled", "multiply", col("id"), map[string]any{"decimal": "-1.5"}),
+			map[string]any{"type": "computed", "table": "shop.orders", "name": "shout", "expression": "upper(status)"},
+			map[string]any{"type": "filter", "expression": "id > 0 and status like 'a%'"},
 		}})
 	in := secrets
 	in.Columns = map[string][]string{"shop.orders": {"id", "status", "created_at", "total_text"}}
@@ -532,8 +535,15 @@ func TestComputedFlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"CONCAT(CAST(`status` AS STRING), 'it''s', CAST(`id` AS STRING)) AS `label`", "DATE_FORMAT(`created_at`, 'yyyy-MM') AS `month`",
-		"TRY_CAST(`total_text` AS BIGINT) AS `amount`", "SUBSTR(`status`, 2, 3) AS `short`"} {
+	// The forms verified on Flink CDC 3.7.0 (ADR 0008): NULL-guarded, VARCHAR (STRING doesn't compile).
+	for _, want := range []string{
+		"(CASE WHEN TRY_CAST(`status` AS VARCHAR) IS NULL OR TRY_CAST(`id` AS VARCHAR) IS NULL THEN NULL ELSE CONCAT(TRY_CAST(`status` AS VARCHAR), 'it''s', TRY_CAST(`id` AS VARCHAR)) END) AS `label`",
+		"(CASE WHEN `created_at` IS NULL THEN NULL ELSE DATE_FORMAT(`created_at`, 'yyyy-MM') END) AS `month`",
+		"TRY_CAST(`total_text` AS BIGINT) AS `amount`", "(CASE WHEN `status` IS NULL THEN NULL ELSE SUBSTR(`status`, 2, 3) END) AS `short`",
+		"(CASE WHEN `id` IS NULL THEN NULL ELSE (TRY_CAST(`id` AS DOUBLE) * TRY_CAST(-1.5 AS DOUBLE)) END) AS `scaled`",
+		"(CASE WHEN `status` IS NULL THEN NULL ELSE UPPER(`status`) END) AS `shout`",
+		"filter: \"((TRY_CAST(`id` AS DOUBLE) > TRY_CAST(0 AS DOUBLE)) AND (`status` LIKE 'a%' ESCAPE '!'))\"",
+	} {
 		if !strings.Contains(got.Pipeline, want) {
 			t.Errorf("no %s in\n%s", want, got.Pipeline)
 		}
@@ -570,5 +580,39 @@ func TestCompileRefusesConfigExpressions(t *testing.T) {
 	}
 	if _, err := compiler.Compile(flinkCtx(spec), bad, testSink, "debezium/server:3.7.0.Final"); !errors.As(err, &p) || p.Code != "connection_config" {
 		t.Fatalf("Debezium: %v", err)
+	}
+}
+
+// A column Flink CDC reads as one of its time functions can't be used by a step (ADR 0008).
+func TestComputedRefusesJaninoNames(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{map[string]any{"type": "computed", "table": "shop.orders", "name": "x", "function": "upper", "args": []any{map[string]any{"column": "now"}}}}})
+	in := secrets
+	in.Columns = map[string][]string{"shop.orders": {"id", "now"}}
+	if _, err := compiler.CompileFlink(flinkCtx(spec), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in); code(err) != "transform_expression" {
+		t.Fatal(err)
+	}
+	// Numeric equality in a typed filter compares as DOUBLE (Flink CDC's "=" is Java equals).
+	filt := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{map[string]any{"type": "filter", "rules": []any{map[string]any{"field": "id", "op": "eq", "value": 5}, map[string]any{"field": "id", "op": "in", "values": []any{1, "x"}}}}}})
+	got, err := compiler.CompileFlink(flinkCtx(filt), mysqlConn, testSink, "acme/flink-cdc:3.7.0", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"(TRY_CAST(`id` AS DOUBLE) = TRY_CAST(5 AS DOUBLE))", "(TRY_CAST(`id` AS DOUBLE) = TRY_CAST(1 AS DOUBLE) OR `id` = 'x')"} {
+		if !strings.Contains(got.Pipeline, want) {
+			t.Errorf("no %s in\n%s", want, got.Pipeline)
+		}
+	}
+}
+
+// X-15: Debezium refuses an expression filter (Flink CDC only).
+func TestDebeziumRefusesExpressionFilter(t *testing.T) {
+	flinkConfig(t)
+	spec := flinkSpec(t, map[string]any{"source": map[string]any{"tables": map[string]any{"include": []any{"shop.orders"}}},
+		"transforms": []any{map[string]any{"type": "filter", "expression": "id > 0"}}})
+	if _, err := compiler.Compile(flinkCtx(spec), mysqlConn, connectors.Resolved{Type: "kafka", Config: map[string]any{"bootstrap_servers": "kafka:9092", "security_protocol": "PLAINTEXT"}}, "debezium/server:3.7.0.Final"); code(err) != "transform_unsupported" {
+		t.Fatal(err)
 	}
 }

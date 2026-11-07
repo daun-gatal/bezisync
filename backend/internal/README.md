@@ -38,6 +38,7 @@ PostgreSQL is the store and the job queue. `testdb/` is a test-only helper (no c
 - domain: [./domain/README.md](./domain/README.md) - The pure product rules, with no database or network access: health derivation, the pipeline spec (parsing, validation, canonical dump and hash), transform steps, project policies, personal-data checks, transform previews, maintenance windows, schema diffs and the `kind: Pipeline` manifest.
 - checks: [./checks/README.md](./checks/README.md) - The preflight check model shared by connectors, deploy preflight, secret stores and project policies: one `Check` per finding (stable code, plain message, technical detail, why, copyable fix) collected into a `Report`.
 - engine: [./engine/README.md](./engine/README.md) - Names the two change-data-capture engines (Debezium Server and Flink CDC), which source/destination pairs each can run, and what each can do for a pipeline.
+- expr: [./expr/README.md](./expr/README.md) - The expression language BeziSync accepts for Flink CDC transforms (ADR 0008): a whitelisted grammar parsed into a tree and rendered back, never passed through as typed.
 - models: [./models/README.md](./models/README.md) - Mirrors the database schema: one struct per table, with columns mapped by `db` tags.
 
 ### Connectors and compilation

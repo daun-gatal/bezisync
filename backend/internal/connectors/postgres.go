@@ -362,6 +362,7 @@ func (s *postgresSource) tableChecks(ctx context.Context, pg *pgx.Conn, run *che
                    pg_has_role(current_user, c.relowner, 'MEMBER')
               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
              WHERE n.nspname || '.' || c.relname = ANY($1)
+             ORDER BY array_position($1::text[], n.nspname || '.' || c.relname)
             `, tables)
 	if err != nil {
 		return err

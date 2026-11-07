@@ -1618,11 +1618,24 @@
       },
       "ComputedArg": {
         "additionalProperties": false,
-        "description": "Exactly one of column, text or number.",
+        "description": "Exactly one of column, text, number, integer or decimal (the function decides which).",
         "properties": {
           "column": {
             "title": "Column",
             "type": "string"
+          },
+          "decimal": {
+            "description": "A number as canonical text (add, subtract, multiply, divide).",
+            "pattern": "^-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,9})?$",
+            "title": "Decimal",
+            "type": "string"
+          },
+          "integer": {
+            "description": "A whole number 0-18 (round: digits; to_decimal: scale).",
+            "maximum": 18,
+            "minimum": 0,
+            "title": "Integer",
+            "type": "integer"
           },
           "number": {
             "maximum": 65535,
@@ -2826,6 +2839,136 @@
           "fetched_at"
         ],
         "title": "EventsRead",
+        "type": "object"
+      },
+      "ExpressionCheck": {
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "deterministic": {
+            "title": "Deterministic",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExpressionCheckError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ExpressionCheck",
+        "type": "object"
+      },
+      "ExpressionCheckError": {
+        "properties": {
+          "length": {
+            "title": "Length",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message",
+          "offset",
+          "length"
+        ],
+        "title": "ExpressionCheckError",
+        "type": "object"
+      },
+      "ExpressionCheckRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpressionColumn"
+                },
+                "maxItems": 2000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The table's columns as discovered; without them every column is accepted and preflight checks them.",
+            "title": "Columns"
+          },
+          "expression": {
+            "maxLength": 4000,
+            "title": "Expression",
+            "type": "string"
+          },
+          "table": {
+            "maxLength": 300,
+            "pattern": "^[A-Za-z0-9_$\\-]+\\.[A-Za-z0-9_$\\-]+$",
+            "title": "Table",
+            "type": "string"
+          },
+          "use": {
+            "enum": [
+              "column",
+              "filter"
+            ],
+            "title": "Use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "use",
+          "table",
+          "expression"
+        ],
+        "title": "ExpressionCheckRequest",
+        "type": "object"
+      },
+      "ExpressionColumn": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "maxLength": 200,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "ExpressionColumn",
         "type": "object"
       },
       "FeedbackCreate": {
@@ -10093,18 +10236,47 @@
             "title": "Delimiter",
             "type": "string"
           },
+          "expression": {
+            "description": "Flink CDC only (ADR 0008). computed: the column as an expression (instead of function and args); filter: the condition as an expression (instead of operations and rules). Stored as BeziSync's canonical text.",
+            "maxLength": 4000,
+            "title": "Expression",
+            "type": "string"
+          },
           "function": {
             "description": "computed: the function (Flink CDC only).",
             "enum": [
+              "abs",
+              "add",
+              "ceil",
               "concat",
               "date_format",
+              "day",
+              "days_between",
+              "divide",
+              "first_set",
+              "floor",
+              "hour",
+              "join_with",
+              "left",
               "length",
               "lower",
+              "month",
+              "multiply",
+              "pad_left",
+              "pad_right",
+              "parse_date",
+              "replace",
+              "right",
+              "round",
               "substr",
+              "subtract",
+              "to_decimal",
+              "to_float",
               "to_integer",
               "to_text",
               "trim",
-              "upper"
+              "upper",
+              "year"
             ],
             "title": "Function",
             "type": "string"
@@ -15681,6 +15853,70 @@
           }
         },
         "summary": "Events",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/expressions:check": {
+      "post": {
+        "description": "Checks a Flink CDC expression (a computed column or a filter) as it is typed: its canonical text, the kind of its value, whether it is deterministic and the columns it reads, or why it is refused and where (offset and length in UTF-16 code units). Pure: reads the pipeline's current spec for masked and left-out columns and the columns sent, never the source (ADR 0008).",
+        "operationId": "check_expression_api_v1_projects__project_id__pipelines__pipeline_id__expressions_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpressionCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpressionCheck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check an expression",
         "tags": [
           "pipelines"
         ]

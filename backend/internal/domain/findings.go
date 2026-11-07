@@ -107,6 +107,8 @@ func TransformFindings(sourceType, pipeline string, spec PipelineSpec, tables ma
 			}
 		}
 		out = append(out, computedFindings(sourceType, table, info, spec)...)
+		out = append(out, expressionFindings(sourceType, table, info, spec)...)
+		out = append(out, typedExpressionFindings(sourceType, table, info, spec)...)
 		rules := spec.Source.Columns[table]
 		for i, t := range spec.Transforms {
 			if !t.Typed() || (t.Tables != nil && !slices.Contains(t.Tables, table)) {

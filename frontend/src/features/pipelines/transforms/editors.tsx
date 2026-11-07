@@ -6,13 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Notice, Pill } from '@/components/ui/feedback';
 import { Check, Input } from '@/components/ui/form';
 import { Select } from '@/components/ui/select';
+import { Meta } from '@/components/ui/text';
 import type { ComputedArg, ComputedFn, FilterOp, FilterRule, RuleValue, TransformStep, ValueFormats } from '../spec';
 import {
   columnKind,
   fieldsBefore,
   argSlot,
   COMPUTED_FUNCTIONS,
+  COMPUTED_GROUPS,
   DATE_PATTERNS,
+  PARSE_DATE_PATTERNS,
   defaultArgs,
   kindFits,
   globMatch,
@@ -38,6 +41,7 @@ import {
 } from './model';
 import type { FullSpec } from '../spec';
 import { effectiveDeletes, type ShapeCtx } from './model';
+import { ExpressionInput } from './ExpressionInput';
 
 export interface EditorContext {
   sourceType: string;
@@ -53,6 +57,9 @@ export interface EditorContext {
   flink: boolean;
   /** What the destination says about the event shape, for what deletes really become. */
   shape?: ShapeCtx;
+  /** The pipeline, for checking expressions (ADR 0008). */
+  projectId: string;
+  pipelineId: string;
 }
 
 /** Labelled row: the label column keeps editors aligned. */
@@ -413,11 +420,51 @@ export function FilterEditor({ step, ctx, onChange }: { step: TransformStep; ctx
       </Notice>
     );
   }
+  // On Flink CDC an Expert may write the condition as an expression (ADR 0008).
+  const isExpression = step.expression !== undefined;
+  const modeSwitch =
+    ctx.flink && (ctx.expert || isExpression) ? (
+      <Row label="Written as">
+        <Segmented
+          label="Filter written as"
+          value={isExpression ? 'expression' : 'rules'}
+          options={[
+            { value: 'rules', label: 'Rules' },
+            { value: 'expression', label: 'An expression' },
+          ]}
+          onChange={(v) => {
+            const { expression: _e, operations: _o, rules: _r, match: _m, ...rest } = step;
+            void _e;
+            void _o;
+            void _r;
+            void _m;
+            onChange(v === 'expression' ? { ...rest, expression: '' } : { ...rest, operations: ['insert', 'update', 'delete', 'snapshot'], rules: [] });
+          }}
+        />
+      </Row>
+    ) : null;
+  if (isExpression) {
+    const table = ctx.tables.find((t) => t.name === (step.tables?.[0] ?? ctx.spec.source.tables.include[0]));
+    const rules = ctx.spec.source.columns[table?.name ?? ''];
+    const readable = (table?.columns ?? []).filter((c) => !rules?.exclude?.includes(c.name) && !rules?.mask?.includes(c.name)).map((c) => ({ name: c.name, type: c.type }));
+    return (
+      <div className="flex flex-col gap-3">
+        <TablesScope step={step} ctx={ctx} onChange={onChange} />
+        {modeSwitch}
+        <Row label="Keep rows where" htmlFor={`flt-expr-${ctx.index}`}>
+          <ExpressionInput id={`flt-expr-${ctx.index}`} label="Keep rows where" value={step.expression ?? ''} use="filter" projectId={ctx.projectId} pipelineId={ctx.pipelineId}
+            table={table?.name ?? ''} columns={readable} onChange={(v) => onChange({ ...step, expression: v })} />
+        </Row>
+        <Meta>The table keeps exactly the rows that match: a row an update makes match is added, one it stops matching is deleted.</Meta>
+      </div>
+    );
+  }
   const ops = step.operations ?? [];
   const rules = step.rules ?? [];
   return (
     <div className="flex flex-col gap-3">
       <TablesScope step={step} ctx={ctx} onChange={onChange} />
+      {modeSwitch}
       <Row label="Operations">
         {ctx.flink
           ? FLINK_OPERATIONS.map((o) => (
@@ -906,6 +953,7 @@ export function ComputedEditor({ step, ctx, onChange }: { step: TransformStep; c
   const args = step.args ?? [];
   const table = ctx.tables.find((t) => t.name === step.table);
   const excluded = ctx.spec.source.columns[step.table ?? '']?.exclude ?? [];
+  const masked = ctx.spec.source.columns[step.table ?? '']?.mask ?? [];
   const put = (i: number, a: ComputedArg) => onChange({ ...step, args: args.map((x, j) => (j === i ? a : x)) });
   const columns = (i: number) =>
     (table?.columns ?? [])
@@ -913,11 +961,21 @@ export function ComputedEditor({ step, ctx, onChange }: { step: TransformStep; c
       .map((c) => ({ value: c.name, label: c.name, description: c.type }));
   const taken = table ? fieldsBefore(ctx.steps, ctx.index, table, ctx.spec) : [];
   const nameErr = step.name ? nameError(step.name, taken) : null;
+  const isExpression = step.expression !== undefined;
+  // Writing an expression is for Experts (choose, don't type); a step that has one stays editable.
+  const offerExpression = ctx.expert || isExpression;
+  // Functions in their groups (Text, Numbers, …), as the picker lists them.
+  const fnOptions = COMPUTED_GROUPS.flatMap((g) =>
+    (Object.keys(COMPUTED_FUNCTIONS) as ComputedFn[])
+      .filter((k) => COMPUTED_FUNCTIONS[k].group === g)
+      .map((k) => ({ value: k, label: COMPUTED_FUNCTIONS[k].title, description: `${g} · ${COMPUTED_FUNCTIONS[k].help}` })),
+  );
+  const readable = (table?.columns ?? []).filter((c) => !excluded.includes(c.name) && !masked.includes(c.name)).map((c) => ({ name: c.name, type: c.type }));
   return (
     <div className="flex flex-col gap-3">
       <Row label="Table">
         <Select label="Table" value={step.table ?? ''} options={ctx.tables.map((t) => ({ value: t.name, label: t.name }))}
-          onChange={(v) => onChange({ ...step, table: v, args: defaultArgs(fn) })} />
+          onChange={(v) => onChange(isExpression ? { ...step, table: v } : { ...step, table: v, args: defaultArgs(fn) })} />
       </Row>
       <Row label="New column" htmlFor={`cc-name-${ctx.index}`}>
         <div className="flex flex-col gap-1">
@@ -925,51 +983,90 @@ export function ComputedEditor({ step, ctx, onChange }: { step: TransformStep; c
           {nameErr ? <span className="text-xs text-bad" role="alert">{nameErr}</span> : null}
         </div>
       </Row>
-      <Row label="Function">
-        <div className="flex flex-col gap-1">
-          <Select label="Function" value={fn}
-            options={(Object.keys(COMPUTED_FUNCTIONS) as ComputedFn[]).map((k) => ({ value: k, label: COMPUTED_FUNCTIONS[k].title, description: COMPUTED_FUNCTIONS[k].help }))}
-            onChange={(v) => onChange({ ...step, function: v as ComputedFn, args: defaultArgs(v as ComputedFn) })} />
-        </div>
-      </Row>
-      {args.map((a, i) => {
-        const slot = argSlot(fn, i);
-        const label = `Argument ${i + 1}`;
-        return (
-          <Row key={i} label={label}>
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
-              {slot === 'number' ? (
-                <Input aria-label={label} type="number" min={1} max={65535} value={a.number ?? 1}
-                  onChange={(e) => put(i, { number: Math.max(1, Math.min(65535, Math.trunc(Number(e.target.value)) || 1)) })} />
-              ) : slot === 'pattern' ? (
-                <Select label={label} value={a.text ?? 'yyyy-MM-dd'} options={DATE_PATTERNS.map((p) => ({ value: p, label: p }))} onChange={(v) => put(i, { text: v })} />
-              ) : slot === 'any|lit' ? (
-                <div className="grid min-w-0 grid-cols-[8rem_minmax(0,1fr)] gap-2">
-                  <Select label={`${label} kind`} value={a.text !== undefined ? 'text' : 'column'}
-                    options={[{ value: 'column', label: 'A column' }, { value: 'text', label: 'A text' }]}
-                    onChange={(v) => put(i, v === 'text' ? { text: '' } : { column: '' })} />
-                  {a.text !== undefined ? (
-                    <Input aria-label={label} value={a.text} maxLength={200} onChange={(e) => put(i, { text: e.target.value })} />
+      {offerExpression ? (
+        <Row label="Written as">
+          <Segmented
+            label="Written as"
+            value={isExpression ? 'expression' : 'function'}
+            options={[
+              { value: 'function', label: 'A function' },
+              { value: 'expression', label: 'An expression' },
+            ]}
+            onChange={(v) => {
+              if (v === 'expression') {
+                const { function: _f, args: _a, ...rest } = step;
+                void _f;
+                void _a;
+                onChange({ ...rest, expression: '' });
+              } else {
+                const { expression: _e, ...rest } = step;
+                void _e;
+                onChange({ ...rest, function: 'upper', args: defaultArgs('upper') });
+              }
+            }}
+          />
+        </Row>
+      ) : null}
+      {isExpression ? (
+        <Row label="Expression" htmlFor={`cc-expr-${ctx.index}`}>
+          <ExpressionInput id={`cc-expr-${ctx.index}`} label="Expression" value={step.expression ?? ''} use="column" projectId={ctx.projectId} pipelineId={ctx.pipelineId}
+            table={step.table ?? ''} columns={readable} onChange={(v) => onChange({ ...step, expression: v })} />
+        </Row>
+      ) : (
+        <>
+          <Row label="Function">
+            <div className="flex flex-col gap-1">
+              <Select label="Function" value={fn} options={fnOptions} onChange={(v) => onChange({ ...step, function: v as ComputedFn, args: defaultArgs(v as ComputedFn) })} />
+            </div>
+          </Row>
+          {args.map((a, i) => {
+            const slot = argSlot(fn, i);
+            const label = `Argument ${i + 1}`;
+            return (
+              <Row key={i} label={label}>
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+                  {slot === 'number' ? (
+                    <Input aria-label={label} type="number" min={1} max={65535} value={a.number ?? 1}
+                      onChange={(e) => put(i, { number: Math.max(1, Math.min(65535, Math.trunc(Number(e.target.value)) || 1)) })} />
+                  ) : slot === 'digits' ? (
+                    <Input aria-label={label} type="number" min={0} max={18} value={a.integer ?? 0}
+                      onChange={(e) => put(i, { integer: Math.max(0, Math.min(18, Math.trunc(Number(e.target.value)) || 0)) })} />
+                  ) : slot === 'pattern' || slot === 'date_pattern' ? (
+                    <Select label={label} value={a.text ?? 'yyyy-MM-dd'} options={(slot === 'pattern' ? DATE_PATTERNS : PARSE_DATE_PATTERNS).map((p) => ({ value: p, label: p }))}
+                      onChange={(v) => put(i, { text: v })} />
+                  ) : slot === 'lit' ? (
+                    <Input aria-label={label} value={a.text ?? ''} maxLength={200} onChange={(e) => put(i, { text: e.target.value })} />
+                  ) : slot === 'any|lit' || slot === 'num|lit' ? (
+                    <div className="grid min-w-0 grid-cols-[8rem_minmax(0,1fr)] gap-2">
+                      <Select label={`${label} kind`} value={a.column !== undefined ? 'column' : 'value'}
+                        options={[{ value: 'column', label: 'A column' }, { value: 'value', label: slot === 'num|lit' ? 'A number' : 'A text' }]}
+                        onChange={(v) => put(i, v === 'column' ? { column: '' } : slot === 'num|lit' ? { decimal: '1' } : { text: '' })} />
+                      {a.column !== undefined ? (
+                        <Select label={label} value={a.column ?? ''} options={columns(i)} onChange={(v) => put(i, { column: v })} />
+                      ) : slot === 'num|lit' ? (
+                        <Input aria-label={label} inputMode="decimal" value={a.decimal ?? ''} maxLength={30} onChange={(e) => put(i, { decimal: e.target.value.trim() })} />
+                      ) : (
+                        <Input aria-label={label} value={a.text ?? ''} maxLength={200} onChange={(e) => put(i, { text: e.target.value })} />
+                      )}
+                    </div>
                   ) : (
                     <Select label={label} value={a.column ?? ''} options={columns(i)} onChange={(v) => put(i, { column: v })} />
                   )}
+                  {f.max && args.length > (f.min ?? 0) ? (
+                    <Button size="sm" variant="ghost" icon={<X />} aria-label={`Remove argument ${i + 1}`} onClick={() => onChange({ ...step, args: args.filter((_, j) => j !== i) })} />
+                  ) : <span />}
                 </div>
-              ) : (
-                <Select label={label} value={a.column ?? ''} options={columns(i)} onChange={(v) => put(i, { column: v })} />
-              )}
-              {f.max && args.length > (f.min ?? 0) ? (
-                <Button size="sm" variant="ghost" icon={<X />} aria-label={`Remove argument ${i + 1}`} onClick={() => onChange({ ...step, args: args.filter((_, j) => j !== i) })} />
-              ) : <span />}
+              </Row>
+            );
+          })}
+          {f.max && args.length < f.max ? (
+            <div>
+              <Button size="sm" icon={<Plus />} onClick={() => onChange({ ...step, args: [...args, { column: '' }] })}>Add an argument</Button>
             </div>
-          </Row>
-        );
-      })}
-      {f.max && args.length < f.max ? (
-        <div>
-          <Button size="sm" icon={<Plus />} onClick={() => onChange({ ...step, args: [...args, { column: '' }] })}>Add an argument</Button>
-        </div>
-      ) : null}
-      {table && !columns(0).length ? <span className="text-xs text-muted">{step.table} has no column {f.title.toLowerCase()} can read.</span> : null}
+          ) : null}
+          {table && !columns(0).length && argSlot(fn, 0) !== 'lit' ? <span className="text-xs text-muted">{step.table} has no column {f.title.toLowerCase()} can read.</span> : null}
+        </>
+      )}
     </div>
   );
 }

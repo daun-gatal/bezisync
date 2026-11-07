@@ -246,7 +246,8 @@ export function stepErrors(steps: TransformStep[], tableNames: string[] = []): M
         else if (needsValues(r.op) && !(r.values?.length)) out.set(i, `Add at least one value for ${r.field}.`);
       });
     }
-    if (t.type === 'filter' && stage !== 0 && !t.condition) out.set(i, 'Choose at least one operation or add a rule.');
+    if (t.type === 'filter' && t.expression !== undefined && !t.expression.trim()) out.set(i, 'Write the condition, or switch back to rules.');
+    else if (t.type === 'filter' && stage !== 0 && !t.condition) out.set(i, 'Choose at least one operation or add a rule.');
     if (t.type === 'rename') {
       const tos = (t.renames ?? []).map((r) => r.to);
       (t.renames ?? []).forEach((r) => {
@@ -397,6 +398,7 @@ export function summarize(t: TransformStep): string {
     }
     case 'filter': {
       if (t.condition) return `Script: ${t.condition}`;
+      if (t.expression !== undefined) return `${scope(t)}: where ${t.expression || '…'}`;
       const ops = t.operations?.length && t.operations.length < 4 ? t.operations.join(' or ') : 'every operation';
       const rules = (t.rules ?? []).map(ruleText);
       return `${scope(t)}: ${ops}${rules.length ? `, where ${rules.join(t.match === 'any' ? ' or ' : ' and ')}` : ''}`;
@@ -571,23 +573,56 @@ export function flinkColumns(table: TableInfo, spec: FullSpec, steps: TransformS
 }
 
 /** Argument slots (domain.Arg*): a text column, a column of any plain kind, a timestamp or date
- *  column, a column or a text, a number 1–65535, a date pattern. */
-export type ArgSlot = 'text' | 'any' | 'time' | 'any|lit' | 'number' | 'pattern';
+ *  column, a column or a text, a number 1–65535, a date pattern; added with ADR 0008: a text, a
+ *  number column, digits 0–18, a number column or a number, a date pattern to read text with. */
+export type ArgSlot = 'text' | 'any' | 'time' | 'any|lit' | 'number' | 'pattern' | 'lit' | 'num' | 'digits' | 'num|lit' | 'date_pattern';
 
-/** The functions a computed column offers (domain.ComputedFunctions). */
-export const COMPUTED_FUNCTIONS: Record<ComputedFn, { title: string; args: ArgSlot[]; min?: number; max?: number; out: string; help: string }> = {
-  upper: { title: 'Upper case', args: ['text'], out: 'text', help: 'The text in capitals.' },
-  lower: { title: 'Lower case', args: ['text'], out: 'text', help: 'The text in small letters.' },
-  trim: { title: 'Trim spaces', args: ['text'], out: 'text', help: 'Without spaces at either end.' },
-  length: { title: 'Length', args: ['text'], out: 'int', help: 'How many characters the text has.' },
-  concat: { title: 'Join', args: ['any|lit'], min: 2, max: 5, out: 'text', help: 'Columns and texts one after another; empty when a column is.' },
-  substr: { title: 'Part of text', args: ['text', 'number', 'number'], out: 'text', help: 'From a position (1 is the first character), so many characters.' },
-  date_format: { title: 'Date as text', args: ['time', 'pattern'], out: 'text', help: 'A timestamp or date written as a pattern, e.g. 2026-10.' },
-  to_text: { title: 'As text', args: ['any'], out: 'text', help: 'Any plain value as text.' },
-  to_integer: { title: 'As a whole number', args: ['text'], out: 'int', help: 'Text that holds a whole number; empty when it doesn’t.' },
+/** The picker's groups, in order. */
+export const COMPUTED_GROUPS = ['Text', 'Numbers', 'Dates', 'Conversions', 'Empty values'] as const;
+
+type ComputedSpec = { title: string; args: ArgSlot[]; min?: number; max?: number; out: string; help: string; group: (typeof COMPUTED_GROUPS)[number] };
+
+/** The functions a computed column offers (domain.ComputedFunctions; backend/testdata/computed_functions.json
+ *  keeps the two equal). `out` '' is the kind of the arguments. */
+export const COMPUTED_FUNCTIONS: Record<ComputedFn, ComputedSpec> = {
+  upper: { title: 'Upper case', args: ['text'], out: 'text', group: 'Text', help: 'The text in capitals.' },
+  lower: { title: 'Lower case', args: ['text'], out: 'text', group: 'Text', help: 'The text in small letters.' },
+  trim: { title: 'Trim spaces', args: ['text'], out: 'text', group: 'Text', help: 'Without spaces at either end.' },
+  length: { title: 'Length', args: ['text'], out: 'int', group: 'Text', help: 'How many characters the text has.' },
+  concat: { title: 'Join', args: ['any|lit'], min: 2, max: 5, out: 'text', group: 'Text', help: 'Columns and texts one after another; empty when a column is.' },
+  substr: { title: 'Part of text', args: ['text', 'number', 'number'], out: 'text', group: 'Text', help: 'From a position (1 is the first character), so many characters.' },
+  replace: { title: 'Replace text', args: ['text', 'lit', 'lit'], out: 'text', group: 'Text', help: 'Every occurrence of a text replaced by another.' },
+  left: { title: 'First characters', args: ['text', 'number'], out: 'text', group: 'Text', help: 'So many characters from the start.' },
+  right: { title: 'Last characters', args: ['text', 'number'], out: 'text', group: 'Text', help: 'So many characters from the end.' },
+  pad_left: { title: 'Pad on the left', args: ['text', 'number', 'lit'], out: 'text', group: 'Text', help: 'Filled on the left to a length (longer text is cut).' },
+  pad_right: { title: 'Pad on the right', args: ['text', 'number', 'lit'], out: 'text', group: 'Text', help: 'Filled on the right to a length (longer text is cut).' },
+  join_with: { title: 'Join with a separator', args: ['lit', 'any|lit'], min: 3, max: 6, out: 'text', group: 'Text', help: 'A separator, then columns and texts; empty ones are skipped.' },
+  abs: { title: 'Absolute value', args: ['num'], out: '', group: 'Numbers', help: 'The number without its sign.' },
+  ceil: { title: 'Round up', args: ['num'], out: '', group: 'Numbers', help: 'The smallest whole number not below it.' },
+  floor: { title: 'Round down', args: ['num'], out: '', group: 'Numbers', help: 'The largest whole number not above it.' },
+  round: { title: 'Round', args: ['num', 'digits'], out: '', group: 'Numbers', help: 'Rounded to so many decimal places.' },
+  add: { title: 'Add', args: ['num', 'num|lit'], out: 'float', group: 'Numbers', help: 'A number plus a column or a number (floating point).' },
+  subtract: { title: 'Subtract', args: ['num', 'num|lit'], out: 'float', group: 'Numbers', help: 'A number minus a column or a number (floating point).' },
+  multiply: { title: 'Multiply', args: ['num', 'num|lit'], out: 'float', group: 'Numbers', help: 'A number times a column or a number (floating point).' },
+  divide: { title: 'Divide', args: ['num', 'num|lit'], out: 'float', group: 'Numbers', help: 'A number divided by a column or a number; empty when dividing by zero.' },
+  date_format: { title: 'Date as text', args: ['time', 'pattern'], out: 'text', group: 'Dates', help: 'A timestamp or date written as a pattern, e.g. 2026-10.' },
+  year: { title: 'Year', args: ['time'], out: 'int', group: 'Dates', help: 'The year of a date or timestamp.' },
+  month: { title: 'Month', args: ['time'], out: 'int', group: 'Dates', help: 'The month, 1 to 12.' },
+  day: { title: 'Day of the month', args: ['time'], out: 'int', group: 'Dates', help: 'The day, 1 to 31.' },
+  hour: { title: 'Hour', args: ['time'], out: 'int', group: 'Dates', help: 'The hour, 0 to 23.' },
+  parse_date: { title: 'Date from text', args: ['text', 'date_pattern'], out: 'date', group: 'Dates', help: 'Text read as a date with a pattern; empty when it isn’t one.' },
+  days_between: { title: 'Days between', args: ['time', 'time'], out: 'int', group: 'Dates', help: 'Whole days from the first to the second.' },
+  to_text: { title: 'As text', args: ['any'], out: 'text', group: 'Conversions', help: 'Any plain value as text.' },
+  to_integer: { title: 'As a whole number', args: ['text'], out: 'int', group: 'Conversions', help: 'Text that holds a whole number; empty when it doesn’t.' },
+  to_decimal: { title: 'As a decimal number', args: ['any', 'digits'], out: 'decimal', group: 'Conversions', help: 'With so many decimal places; empty when it isn’t a number.' },
+  to_float: { title: 'As a floating-point number', args: ['any'], out: 'float', group: 'Conversions', help: 'Empty when it isn’t a number.' },
+  first_set: { title: 'First that isn’t empty', args: ['any'], min: 2, max: 5, out: '', group: 'Empty values', help: 'The first of the columns that has a value (all of one kind).' },
 };
 
 export const DATE_PATTERNS = ['yyyy', 'yyyy-MM', 'yyyy-MM-dd', 'yyyy-MM-dd HH', 'yyyy-MM-dd HH:mm:ss'];
+/** The patterns "Date from text" reads (domain.ParseDatePatterns). */
+export const PARSE_DATE_PATTERNS = ['yyyy-MM-dd', 'yyyyMMdd', 'dd/MM/yyyy', 'MM/dd/yyyy'];
+const DECIMAL_RE = /^-?(0|[1-9][0-9]{0,17})(\.[0-9]{1,9})?$/;
 
 /** The slot of argument i. */
 export function argSlot(fn: ComputedFn, i: number): ArgSlot {
@@ -598,7 +633,8 @@ export function argSlot(fn: ComputedFn, i: number): ArgSlot {
 /** Whether a column of kind (columnKind) fits a slot (domain.KindFits). */
 export function kindFits(slot: ArgSlot, kind: string): boolean {
   if (slot === 'text') return kind === 'text';
-  if (slot === 'time') return kind === 'timestamp' || kind === 'date';
+  if (slot === 'time') return kind === 'timestamp' || kind === 'date' || kind === 'timestamptz';
+  if (slot === 'num' || slot === 'num|lit') return kind === 'int' || kind === 'decimal' || kind === 'float';
   if (slot === 'any' || slot === 'any|lit') return !['binary', 'document', 'list', 'json', 'unknown'].includes(kind);
   return false;
 }
@@ -611,15 +647,21 @@ export function defaultArgs(fn: ComputedFn): ComputedArg[] {
     const slot = argSlot(fn, i);
     if (slot === 'number') return { number: 1 };
     if (slot === 'pattern') return { text: 'yyyy-MM-dd' };
+    if (slot === 'date_pattern') return { text: 'yyyy-MM-dd' };
+    if (slot === 'lit') return { text: '' };
+    if (slot === 'digits') return { integer: 2 };
     return { column: '' };
   });
 }
 
-/** The formula in words, e.g. Upper case(status). */
+/** The formula in words, e.g. Upper case(status); an expression as it is stored. */
 export function formulaText(t: TransformStep): string {
+  if (t.expression !== undefined) return t.expression || '…';
   const fn = t.function ? COMPUTED_FUNCTIONS[t.function] : undefined;
   if (!fn) return '…';
-  const args = (t.args ?? []).map((a) => (a.column !== undefined ? a.column || '…' : a.text !== undefined ? `"${a.text}"` : String(a.number ?? '…')));
+  const args = (t.args ?? []).map((a) =>
+    a.column !== undefined ? a.column || '…' : a.text !== undefined ? `"${a.text}"` : a.decimal !== undefined ? a.decimal : String(a.number ?? a.integer ?? '…'),
+  );
   return `${fn.title}(${args.join(', ')})`;
 }
 
@@ -628,15 +670,18 @@ export function computedError(t: TransformStep): string | null {
   if (!t.table) return 'Choose the table.';
   const e = nameError(t.name ?? '');
   if (e) return e;
+  if (t.expression !== undefined) return t.expression.trim() ? null : 'Write the expression, or switch back to a function.';
   const fn = t.function ? COMPUTED_FUNCTIONS[t.function] : undefined;
   if (!fn) return 'Choose a function.';
   const args = t.args ?? [];
   for (const [i, a] of args.entries()) {
     const slot = argSlot(t.function!, i);
     if (slot === 'number' && !(Number.isInteger(a.number) && a.number! >= 1 && a.number! <= 65535)) return 'Numbers are whole, from 1 to 65535.';
-    if ((slot === 'text' || slot === 'any' || slot === 'time') && !a.column) return 'Pick a column for every argument.';
-    if (slot === 'any|lit' && a.column === '') return 'Pick a column for every argument.';
-    if (a.text !== undefined && slot === 'any|lit') {
+    if (slot === 'digits' && !(Number.isInteger(a.integer) && a.integer! >= 0 && a.integer! <= 18)) return 'Decimal places are whole, from 0 to 18.';
+    if ((slot === 'text' || slot === 'any' || slot === 'time' || slot === 'num') && !a.column) return 'Pick a column for every argument.';
+    if ((slot === 'any|lit' || slot === 'num|lit') && a.column === '') return 'Pick a column for every argument.';
+    if (slot === 'num|lit' && a.decimal !== undefined && !DECIMAL_RE.test(a.decimal)) return 'Write the number in full, e.g. 2.5 or -10 (no leading zeros).';
+    if (a.text !== undefined && (slot === 'any|lit' || slot === 'lit')) {
       const te = textError(a.text);
       if (te) return te;
     }

@@ -1,0 +1,267 @@
+{
+  "date_patterns": [
+    "yyyy",
+    "yyyy-MM",
+    "yyyy-MM-dd",
+    "yyyy-MM-dd HH",
+    "yyyy-MM-dd HH:mm:ss"
+  ],
+  "functions": {
+    "abs": {
+      "args": [
+        "num"
+      ],
+      "out": "",
+      "group": "Numbers"
+    },
+    "add": {
+      "args": [
+        "num",
+        "num|lit"
+      ],
+      "out": "float",
+      "group": "Numbers"
+    },
+    "ceil": {
+      "args": [
+        "num"
+      ],
+      "out": "",
+      "group": "Numbers"
+    },
+    "concat": {
+      "args": [
+        "any|lit"
+      ],
+      "min": 2,
+      "max": 5,
+      "out": "text",
+      "group": "Text"
+    },
+    "date_format": {
+      "args": [
+        "time",
+        "pattern"
+      ],
+      "out": "text",
+      "group": "Dates"
+    },
+    "day": {
+      "args": [
+        "time"
+      ],
+      "out": "int",
+      "group": "Dates"
+    },
+    "days_between": {
+      "args": [
+        "time",
+        "time"
+      ],
+      "out": "int",
+      "group": "Dates"
+    },
+    "divide": {
+      "args": [
+        "num",
+        "num|lit"
+      ],
+      "out": "float",
+      "group": "Numbers"
+    },
+    "first_set": {
+      "args": [
+        "any"
+      ],
+      "min": 2,
+      "max": 5,
+      "out": "",
+      "group": "Empty values"
+    },
+    "floor": {
+      "args": [
+        "num"
+      ],
+      "out": "",
+      "group": "Numbers"
+    },
+    "hour": {
+      "args": [
+        "time"
+      ],
+      "out": "int",
+      "group": "Dates"
+    },
+    "join_with": {
+      "args": [
+        "lit",
+        "any|lit"
+      ],
+      "min": 3,
+      "max": 6,
+      "out": "text",
+      "group": "Text"
+    },
+    "left": {
+      "args": [
+        "text",
+        "number"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "length": {
+      "args": [
+        "text"
+      ],
+      "out": "int",
+      "group": "Text"
+    },
+    "lower": {
+      "args": [
+        "text"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "month": {
+      "args": [
+        "time"
+      ],
+      "out": "int",
+      "group": "Dates"
+    },
+    "multiply": {
+      "args": [
+        "num",
+        "num|lit"
+      ],
+      "out": "float",
+      "group": "Numbers"
+    },
+    "pad_left": {
+      "args": [
+        "text",
+        "number",
+        "lit"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "pad_right": {
+      "args": [
+        "text",
+        "number",
+        "lit"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "parse_date": {
+      "args": [
+        "text",
+        "date_pattern"
+      ],
+      "out": "date",
+      "group": "Dates"
+    },
+    "replace": {
+      "args": [
+        "text",
+        "lit",
+        "lit"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "right": {
+      "args": [
+        "text",
+        "number"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "round": {
+      "args": [
+        "num",
+        "digits"
+      ],
+      "out": "",
+      "group": "Numbers"
+    },
+    "substr": {
+      "args": [
+        "text",
+        "number",
+        "number"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "subtract": {
+      "args": [
+        "num",
+        "num|lit"
+      ],
+      "out": "float",
+      "group": "Numbers"
+    },
+    "to_decimal": {
+      "args": [
+        "any",
+        "digits"
+      ],
+      "out": "decimal",
+      "group": "Conversions"
+    },
+    "to_float": {
+      "args": [
+        "any"
+      ],
+      "out": "float",
+      "group": "Conversions"
+    },
+    "to_integer": {
+      "args": [
+        "text"
+      ],
+      "out": "int",
+      "group": "Conversions"
+    },
+    "to_text": {
+      "args": [
+        "any"
+      ],
+      "out": "text",
+      "group": "Conversions"
+    },
+    "trim": {
+      "args": [
+        "text"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "upper": {
+      "args": [
+        "text"
+      ],
+      "out": "text",
+      "group": "Text"
+    },
+    "year": {
+      "args": [
+        "time"
+      ],
+      "out": "int",
+      "group": "Dates"
+    }
+  },
+  "parse_date_patterns": [
+    "yyyy-MM-dd",
+    "yyyyMMdd",
+    "dd/MM/yyyy",
+    "MM/dd/yyyy"
+  ]
+}

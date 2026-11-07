@@ -88,6 +88,9 @@ func stepProps(c connectors.CompileContext, src connectors.Source, desc *connect
 				props[key+"add.fields"] = strings.Join(t.AddFields, ",")
 			}
 		case "filter":
+			if t.Expression != "" {
+				return nil, nil, nil, problem.New(422, "transform_unsupported", fmt.Sprintf("Step %d: a filter written as an expression runs only on Flink CDC; build it from rules.", i+1))
+			}
 			if t.Typed() {
 				if len(t.Rules) > 0 && !caps.RowFilters {
 					return nil, nil, nil, problem.New(422, "transform_unsupported",

@@ -134,7 +134,8 @@ export function writtenColumns(found: Discovered, spec: SpecParts, engine: Engin
   }
   for (const t of spec.transforms) {
     if (t.type === 'add_field' && t.name && (!t.tables || t.tables.includes(id))) out.set(t.name, 'text');
-    if (t.type === 'computed' && t.table === id && t.name && engine === 'flink-cdc' && t.function) out.set(t.name, COMPUTED_FUNCTIONS[t.function].out);
+    if (t.type === 'computed' && t.table === id && t.name && engine === 'flink-cdc' && (t.function || t.expression !== undefined))
+      out.set(t.name, t.expression !== undefined ? 'unknown' : COMPUTED_FUNCTIONS[t.function!].out || 'unknown');
     if (t.type === 'soft_delete') out.set(engine === 'flink-cdc' ? '__op' : '__deleted', 'text');
   }
   if (engine !== 'flink-cdc') {
@@ -171,6 +172,7 @@ export function automaticSummary(engine: EngineId, options: Record<string, unkno
 /** Why a column can't be picked for a field (null when it can): upserts delete by the key only
  *  within a partition (ADR 0005 R5). */
 export function columnRefusal(col: WrittenColumn, keys: string[]): string | null {
+  if (col.kind === 'unknown') return keys.length && !col.key ? 'Not part of the key: an update that changes it would leave the old row behind.' : 'Its kind is only known when the pipeline runs: it can’t be partitioned.';
   if (!col.kind) return 'Written as a list, a document or a structure: it can’t be partitioned.';
   if (keys.length && !col.key) return 'Not part of the key: an update that changes it would leave the old row behind.';
   return null;
