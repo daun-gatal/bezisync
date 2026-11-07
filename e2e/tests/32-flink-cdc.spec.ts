@@ -547,3 +547,106 @@ test('Flink CDC: an Oracle release its reader can\'t read is refused before depl
   expect(version?.message).toMatch(/Free|26ai/);
   await api.send('DELETE', url);
 });
+
+// ADR 0008: computed columns and filters run on the real Flink CDC engine as BeziSync renders
+// them: typed functions on NULLs (they used to stop the job), a number joined into text (CAST to
+// STRING didn't compile), equality with a number on a BIGINT (always false), a division by zero
+// (NULL), and an expression column typed in the wizard and an expression filter.
+test('Flink CDC: computed columns and filters, typed and as expressions, on NULLs and zeros', async ({ page }) => {
+  test.setTimeout(1_200_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('flinkx');
+  const table = `shop.fx_${tag.replace(/-/g, '_')}`;
+  await ownerSql(`CREATE TABLE ${table} (id bigint PRIMARY KEY, status text, total numeric(10,2), qty int, note text); ALTER TABLE ${table} REPLICA IDENTITY FULL;
+    INSERT INTO ${table} VALUES (1, 'paid', 150.00, 3, 'hello'), (2, NULL, NULL, NULL, NULL), (3, 'gone', 10, 1, 'x'), (4, 'skip', 5, 0, 'y'), (5, 'zero', 7.50, 0, 'z')`);
+  const { password, ...pg } = SOURCE_PG;
+  const { secret_access_key, ...iceberg } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  const computed = (id: string, name: string, fn: string, args: unknown[]) => ({ type: 'computed', id, table, name, function: fn, args });
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
+    spec: {
+      source: { tables: { include: [table] } }, sink: { naming: `fx_${tag.replace(/-/g, '_')}_{table}` }, snapshot: { mode: 'initial' },
+      transforms: [
+        { type: 'filter', id: 'kp01', rules: [{ field: 'id', op: 'ne', value: 3 }] },
+        computed('cc01', 'note_up', 'upper', [{ column: 'note' }]),
+        computed('cc02', 'label', 'concat', [{ column: 'status' }, { text: '-' }, { column: 'qty' }]),
+        computed('cc03', 'amount', 'multiply', [{ column: 'total' }, { column: 'qty' }]),
+        computed('cc04', 'per_unit', 'divide', [{ column: 'total' }, { column: 'qty' }]),
+      ],
+    },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+
+  // In the wizard (Expert mode): an expression column and an expression filter, checked as typed.
+  await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'expert' });
+  try {
+    await signIn(page);
+    await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+    await page.getByRole('button', { name: 'Add transform' }).click();
+    await page.getByRole('button', { name: /^Computed column/ }).click();
+    const cc = page.getByRole('region', { name: /Computed column/ }).last();
+    await choose(cc.getByLabel(/^Table:/), table);
+    await cc.getByLabel('New column').fill('size');
+    await cc.getByRole('radio', { name: 'An expression' }).click();
+    const box = cc.getByLabel('Expression', { exact: true });
+    await box.fill('case when total > 100 then \'big\' when total is null then \'none\' else \'small\' end || nope(1)');
+    await expect(cc.getByRole('alert').filter({ hasText: 'nope' })).toContainText("isn't a function");
+    await box.fill('case when total > 100 then \'big\' when total is null then \'none\' else \'small\' end');
+    await expect(cc.getByText('Saved as')).toContainText("CASE WHEN `total` > 100 THEN 'big' WHEN `total` IS NULL THEN 'none' ELSE 'small' END");
+    await box.blur();
+    await expect(box).toHaveValue("CASE WHEN `total` > 100 THEN 'big' WHEN `total` IS NULL THEN 'none' ELSE 'small' END");
+    await cc.getByRole('button', { name: 'Done' }).click();
+    await page.getByRole('button', { name: 'Add transform' }).click();
+    await page.getByRole('button', { name: /^Keep only some rows/ }).click();
+    const flt = page.getByRole('region', { name: /Keep only some rows/ }).last();
+    await flt.getByRole('radio', { name: 'An expression' }).click();
+    const cond = flt.getByLabel('Keep rows where', { exact: true });
+    await cond.fill('now() > ts');
+    await expect(flt.getByRole('alert')).toContainText(/no column ts|can't use NOW/);
+    await cond.fill("status is null or status <> 'skip'");
+    await expect(flt.getByText('Saved as')).toBeVisible();
+    await flt.getByRole('button', { name: 'Done' }).click();
+    await page.getByRole('button', { name: 'Continue to review →' }).click();
+    await expect(page).toHaveURL(/step=review/);
+  } finally {
+    await api.send('PATCH', '/api/v1/auth/me', { ui_mode: 'guided' });
+  }
+  type Saved = { spec: { transforms: Record<string, unknown>[] } };
+  const saved = await api.get<Saved>(url);
+  expect(saved.spec.transforms.find((t) => t.name === 'size')).toMatchObject({ expression: "CASE WHEN `total` > 100 THEN 'big' WHEN `total` IS NULL THEN 'none' ELSE 'small' END" });
+  expect(saved.spec.transforms.find((t) => t.type === 'filter' && t.expression)).toMatchObject({ expression: "`status` IS NULL OR `status` <> 'skip'" });
+  await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+
+  const pre = await api.send<{ sections: { report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
+  const expr = pre.sections.flatMap((s) => s.report.checks).filter((c) => c.code === 'transform_expression' || c.code === 'transform_computed_input');
+  expect(expr.filter((c) => c.status === 'fail'), JSON.stringify(expr)).toEqual([]);
+  await api.send('POST', `${url}/deploy`, {});
+  await waitFor('Flink CDC pipeline with expressions streaming', async () => {
+    const cur = await api.get<{ lifecycle: string; status: unknown }>(url);
+    if (cur.lifecycle === 'failed') throw new Error(JSON.stringify(cur.status));
+    return cur.lifecycle === 'streaming';
+  }, 900_000);
+  await ownerSql(`INSERT INTO ${table} VALUES (6, 'late', 200, 4, 'new')`);
+  const rows = new Map<number, Record<string, unknown>>();
+  await waitFor('the copied and streamed rows, computed, in Iceberg', async () => {
+    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
+    for (const r of e.records) rows.set(Number(r.value.id), r.value);
+    return rows.has(6);
+  }, 600_000);
+  // Row 3 is filtered by its BIGINT id, row 4 by the expression; NULLs stay NULL, a division by zero is NULL.
+  expect([...rows.keys()].sort()).toEqual([1, 2, 5, 6]);
+  expect(rows.get(1)).toMatchObject({ note_up: 'HELLO', label: 'paid-3', amount: 450, per_unit: 50, size: 'big' });
+  expect(rows.get(2)).toMatchObject({ note_up: null, label: null, amount: null, per_unit: null, size: 'none' });
+  expect(rows.get(5)).toMatchObject({ note_up: 'Z', label: 'zero-0', amount: 0, per_unit: null, size: 'small' });
+  expect(rows.get(6)).toMatchObject({ note_up: 'NEW', label: 'late-4', amount: 800, per_unit: 50, size: 'big' });
+
+  await api.send('DELETE', `${url}?drop_destinations=true`);
+  await waitFor('Flink CDC pipeline deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
+  await ownerSql(`DROP TABLE IF EXISTS ${table}`);
+});
