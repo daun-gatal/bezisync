@@ -66,6 +66,15 @@ func ValidateModel(configSchema, secretSchema schemas.Schema, config, secretValu
 	if !ok {
 		return nil, nil, validationProblem(fieldErrors(cv), "config")
 	}
+	// Settings never hold "${": Debezium Server and the Flink CDC helper would read it as a
+	// variable, which can name another secret (connectors.ConfigExpressions).
+	if locs := connectors.ConfigExpressions(cfg); len(locs) > 0 {
+		errs := make([]problemFieldError, len(locs))
+		for i, l := range locs {
+			errs[i] = problemFieldError{Loc: l, Message: "Value error, must not contain \"${\": it would be read as a variable", Type: "value_error"}
+		}
+		return nil, nil, validationProblem(errs, "config")
+	}
 	refs, err := RefsOf(secretValues)
 	if err != nil {
 		return nil, nil, err

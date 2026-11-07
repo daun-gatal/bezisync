@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -99,4 +101,49 @@ func scanStrings(rows *sql.Rows) ([]sql.NullString, error) {
 		ptrs[i] = &vals[i]
 	}
 	return vals, rows.Scan(ptrs...)
+}
+
+// ConfigExpressions are the places in a connection's settings (not its secrets) that hold "${":
+// Debezium Server expands ${…} in application.properties, and the Flink CDC helper fills ${BZ_…}
+// placeholders, so a setting like "${BZ_STATE_PASSWORD}" would copy another secret to wherever
+// the setting is sent. Settings never need it; it is refused when saved and when compiled.
+func ConfigExpressions(cfg map[string]any) [][]string {
+	var out [][]string
+	var walk func(loc []string, v any)
+	walk = func(loc []string, v any) {
+		switch x := v.(type) {
+		case string:
+			if strings.Contains(x, "${") {
+				out = append(out, slices.Clone(loc))
+			}
+		case map[string]any:
+			keys := make([]string, 0, len(x))
+			for k := range x {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			for _, k := range keys {
+				walk(append(loc, k), x[k])
+			}
+		case []any:
+			for i, item := range x {
+				walk(append(loc, strconv.Itoa(i)), item)
+			}
+		}
+	}
+	walk(nil, cfg)
+	return out
+}
+
+// RefuseConfigExpressions is ConfigExpressions as a 422 for the connection named.
+func RefuseConfigExpressions(name string, cfg map[string]any) error {
+	locs := ConfigExpressions(cfg)
+	if len(locs) == 0 {
+		return nil
+	}
+	errs := make([]map[string]any, len(locs))
+	for i, l := range locs {
+		errs[i] = map[string]any{"loc": append([]string{"config"}, l...), "message": "Settings can't contain \"${\": it would be read as a variable that can hold credentials."}
+	}
+	return problem.New(422, "connection_config", fmt.Sprintf("The connection %s has a setting containing \"${\", which BeziSync refuses: change it on the connection.", name)).WithErrors(errs)
 }
