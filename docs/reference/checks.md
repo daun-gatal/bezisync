@@ -1465,6 +1465,19 @@ Fix:
 ALTER TABLE … SET IDENTIFIER FIELDS <key columns> (Spark), or drop the table so the pipeline creates it.
 ```
 
+<a id="iceberg-flink-keyless-table"></a>
+### `iceberg_flink_keyless_table`
+
+**Table without a key**
+
+- Why: Flink CDC only. Flink CDC 3.7.0 appends to an existing Iceberg table that has no identifier fields, and writes every delete, and the old values of every update, into it as ordinary rows, so readers see deleted and replaced rows as live ones (fixed upstream in FLINK-41057, after 3.7.0). A table the pipeline creates gets the source's key, so only a table created beforehand without one is affected.
+
+Fix:
+
+```
+Drop them and let the pipeline create them with the table's key (Positions → Start over, dropping destinations), or write them with a Debezium pipeline, which appends every change correctly.
+```
+
 <a id="iceberg-key-columns"></a>
 ### `iceberg_key_columns`
 
