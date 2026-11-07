@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -106,5 +107,91 @@ func TestOraclePrepareFlinkLive(t *testing.T) {
 	plain.Config = map[string]any{"host": conn.Config["host"], "port": conn.Config["port"], "database": "XE", "user": "c##cdc_reader"}
 	if got, err := src.Prepare(ctx, plain, c); err != nil || len(got) != 0 {
 		t.Fatalf("non-CDB: %v %+v", err, got)
+	}
+}
+
+// E22: on Flink CDC the probe reports the archive's window and never claims a loss it can't see.
+func TestOracleProbeFlinkSummary(t *testing.T) {
+	week := int64(7 * 24 * 3600)
+	i := oraFlinkImpact(&week)
+	if i.Lost || i.Risk != nil || i.BehindSeconds != nil || *i.RetentionSeconds != week || !strings.Contains(i.Summary, "saved state") || !strings.Contains(i.Summary, "7 d") && !strings.Contains(i.Summary, "7 days") {
+		t.Fatalf("%+v", i)
+	}
+	if i := oraFlinkImpact(nil); !strings.Contains(i.Summary, "unknown") {
+		t.Fatalf("%+v", i)
+	}
+}
+
+// E12 (pure): ANALYZE needs the privilege or ownership; locked statistics and missing rights block
+// only a pipeline that copies; a deploy that copies warns of the statistics it replaces.
+func TestAnalyzeCheck(t *testing.T) {
+	cdb := oraConfig{Database: "ORCLCDB", PDB: "orclpdb1", User: "c##cdc"}
+	cases := []struct {
+		name    string
+		a       oraAnalyze
+		f       FlinkCheckFacts
+		status  string
+		block   bool
+		snippet string
+	}{
+		{"privileged, streaming", oraAnalyze{Privileged: true}, FlinkCheckFacts{Copies: true}, "pass", false, "may analyze"},
+		{"owner", oraAnalyze{OwnsAll: true}, FlinkCheckFacts{Copies: true}, "pass", false, "may analyze"},
+		{"copies now", oraAnalyze{Privileged: true}, FlinkCheckFacts{Copies: true, CopyNow: true}, "warn", false, "replaces its optimizer statistics"},
+		{"no right, copies", oraAnalyze{}, FlinkCheckFacts{Copies: true}, "fail", true, "ORA-01031"},
+		{"no right, from now", oraAnalyze{}, FlinkCheckFacts{}, "warn", false, "Start over"},
+		{"locked", oraAnalyze{Privileged: true, Locked: []string{"SHOP.ORDERS"}}, FlinkCheckFacts{Copies: true}, "fail", true, "ORA-38029"},
+		{"locked, from now", oraAnalyze{Privileged: true, Locked: []string{"SHOP.ORDERS"}}, FlinkCheckFacts{}, "warn", false, "ORA-38029"},
+	}
+	for _, c := range cases {
+		got := flinkAnalyzeCheck(cdb, c.a, c.f)
+		if got.Status != c.status || got.Blocking != c.block || !strings.Contains(got.Message, c.snippet) {
+			t.Errorf("%s: %s %v %q", c.name, got.Status, got.Blocking, got.Message)
+		}
+	}
+	// The least grant: inside the PDB, not CONTAINER=ALL.
+	got := flinkAnalyzeCheck(cdb, oraAnalyze{}, FlinkCheckFacts{Copies: true})
+	if !strings.Contains(got.Fix.Code, "ALTER SESSION SET CONTAINER = ORCLPDB1;") || strings.Contains(got.Fix.Code, "CONTAINER=ALL") ||
+		!strings.Contains(got.Fix.Code, `GRANT ANALYZE ANY TO "C##CDC";`) {
+		t.Fatal(got.Fix.Code)
+	}
+	if got := flinkAnalyzeCheck(oraConfig{Database: "ORCL", User: "cdc"}, oraAnalyze{}, FlinkCheckFacts{Copies: true}); strings.Contains(got.Fix.Code, "SESSION") {
+		t.Fatal(got.Fix.Code)
+	}
+	locked := flinkAnalyzeCheck(cdb, oraAnalyze{Privileged: true, Locked: []string{"SHOP.ORDERS"}}, FlinkCheckFacts{Copies: true})
+	if locked.Fix == nil || !strings.Contains(locked.Fix.Code, "DBMS_STATS.UNLOCK_TABLE_STATS('SHOP', 'ORDERS')") {
+		t.Fatal(locked.Fix)
+	}
+	// The version check reads the first banner line.
+	if v := flinkVersionCheck("Oracle AI Database 26ai Free Release 23.26.3.0.0 - Develop", false); v.Status != "fail" || !v.Blocking || !strings.Contains(v.Message, "26ai") {
+		t.Fatalf("%+v", v)
+	}
+	if v := flinkVersionCheck("Oracle Database 21c Express Edition Release 21.0.0.0.0 - Production\nVersion 21.3.0.0.0", true); v.Status != "pass" || strings.Contains(v.Message, "\n") {
+		t.Fatalf("%+v", v)
+	}
+}
+
+// E12–E14 live: the checks against the e2e-like XE (ANALYZE ANY granted; the flush table there or
+// creatable), and an unreachable database only warns.
+func TestOracleFlinkChecksLive(t *testing.T) {
+	conn := oracleFlinkConn(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	got := map[string]string{}
+	for _, c := range (&oracleSource{}).FlinkChecks(ctx, conn, FlinkCheckFacts{Tables: []string{"SHOP.ORDERS"}, Copies: true}) {
+		got[c.Code] = c.Status
+	}
+	if got["flink_oracle_version"] != "pass" || got["flink_oracle_analyze"] != "pass" || got["flink_oracle_flush_table"] != "pass" || got["flink_oracle_unknown"] != "" {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestOracleFlinkChecksUnreachable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conn := Resolved{Type: "oracle", Config: map[string]any{"host": "127.0.0.1", "port": 1, "database": "XE", "pdb": "XEPDB1", "user": "c##cdc"},
+		Secrets: map[string]any{"password": "pw"}}
+	out := (&oracleSource{}).FlinkChecks(ctx, conn, FlinkCheckFacts{Copies: true})
+	if len(out) != 1 || out[0].Code != "flink_oracle_unknown" || out[0].Status != "warn" || out[0].Blocking {
+		t.Fatalf("%+v", out)
 	}
 }

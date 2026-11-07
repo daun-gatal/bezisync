@@ -1007,6 +1007,9 @@ func (s *oracleSource) Probe(ctx context.Context, conn Resolved, c CompileContex
 		}
 	}
 	fix := "Keep archived logs longer (RMAN deletion policy, recovery area size; on RDS 'archivelog retention hours')."
+	if scn == nil && c.Engine == "flink-cdc" {
+		return oraFlinkImpact(kept), nil
+	}
 	if scn == nil {
 		return TimeWindowImpact(nil, kept, "the archive", fix), nil
 	}
@@ -1036,4 +1039,16 @@ func (s *oracleSource) Probe(ctx context.Context, conn Resolved, c CompileContex
 		impact.RiskFix = "Reset the pipeline's position and copy the tables again. " + fix
 	}
 	return impact, nil
+}
+
+// oraFlinkImpact: a Flink CDC pipeline's SCN is inside its encrypted saved state, so how much redo
+// it still needs isn't measured; only the archive's window is (ADR 0006).
+func oraFlinkImpact(kept *int64) *SourceImpact {
+	impact := &SourceImpact{RetentionSeconds: kept}
+	window := "how long the archive keeps changes is unknown"
+	if kept != nil {
+		window = "the archive keeps changes for " + HumanSeconds(*kept)
+	}
+	impact.Summary = "Flink CDC keeps its position in its saved state, so how much redo it still needs isn't measured; " + window + "."
+	return impact
 }

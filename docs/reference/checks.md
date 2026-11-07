@@ -2481,6 +2481,70 @@ Fix:
   verbs: [get, list, create, update, patch, delete]
 ```
 
+<a id="flink-oracle-analyze"></a>
+### `flink_oracle_analyze`
+
+**Table statistics**
+
+- Why: Flink CDC's Oracle reader runs ANALYZE TABLE … COMPUTE STATISTICS on each table before it splits the first copy into chunks. That needs ANALYZE ANY (or owning the tables) and unlocked statistics, and it reads each table in full and replaces its optimizer statistics, which can change query plans. A pipeline that reads from now only warns; a deploy that copies warns of the effect.
+
+Fix:
+
+```
+Grant ANALYZE ANY to the connector user inside the PDB (the check shows the statement).
+```
+
+Fix:
+
+```
+Unlock the tables' statistics with DBMS_STATS.UNLOCK_TABLE_STATS.
+```
+
+<a id="flink-oracle-flush-table"></a>
+### `flink_oracle_flush_table`
+
+**LogMiner flush table**
+
+- Why: On a multitenant database Flink CDC's Oracle reader (Debezium 1.9) records its position in the connector user's LOG_MINING_FLUSH table in the CDB root. BeziSync creates it at deploy when the user may create tables there; otherwise every flush fails with ORA-00942. The table is shared with every pipeline mining as that user.
+
+Fix:
+
+```
+In the CDB root, create the table with one row (the check shows the statements), or give the user CREATE TABLE and quota there.
+```
+
+<a id="flink-oracle-unknown"></a>
+### `flink_oracle_unknown`
+
+**Oracle for Flink CDC**
+
+- Why: BeziSync could not read what Flink CDC's Oracle reader needs from the database (its version, ANALYZE rights, the flush table). The source's own checks say whether the database can be reached.
+
+Fix:
+
+```
+Fix what the source checks report, then run the checks again.
+```
+
+<a id="flink-oracle-version"></a>
+### `flink_oracle_version`
+
+**Oracle version**
+
+- Why: Flink CDC 3.7 reads Oracle with Debezium 1.9, which knows Enterprise, Standard and Express Edition up to 23ai, not Oracle Database Free or Oracle AI Database 26ai: their pipelines fail at start. It also reads V$VERSION, which needs SELECT_CATALOG_ROLE. A forced deploy can't skip this check.
+
+Fix:
+
+```
+Run this pipeline on Debezium, which reads this release (Iceberg and the event destinations), or read from an Enterprise, Standard or Express Edition database up to 23ai.
+```
+
+Fix:
+
+```
+Grant SELECT_CATALOG_ROLE to the connector user.
+```
+
 <a id="flink-primary-key"></a>
 ### `flink_primary_key`
 
@@ -2540,6 +2604,19 @@ Fix:
 
 ```
 Create this pipeline again: a new pipeline gets other server ids.
+```
+
+<a id="flink-tables-added"></a>
+### `flink_tables_added`
+
+**Added tables**
+
+- Why: Flink CDC's Oracle reader never copies a table added to a pipeline that restores a saved position: only rows written afterwards arrive. With nothing left to restore (after Start over) the pipeline starts as Start over chose. BeziSync also refuses to restore a position saved before the tables were added.
+
+Fix:
+
+```
+Pause the pipeline and use Positions → Start over (it copies every table again), then deploy. Or capture the new tables in a second pipeline.
 ```
 
 <a id="flink-tables-unknown"></a>

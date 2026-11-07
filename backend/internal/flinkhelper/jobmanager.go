@@ -143,6 +143,17 @@ var fatal = []struct {
 		"PostgreSQL sends updates and deletes without the old row: set REPLICA IDENTITY FULL on the captured tables (preflight shows the statement), then Start over."},
 	{regexp.MustCompile(`TransformException|No match found for function signature`), "transform_failed",
 		"A transform can't run on Flink CDC. Change it in the Transform step, then deploy again."},
+	// Flink CDC's Oracle reader (ADR 0006).
+	{regexp.MustCompile(`Failed to resolve Oracle database version`), "oracle_version",
+		"Flink CDC's Oracle reader can't read this database's version (Oracle Database Free and 26ai aren't supported). Run this pipeline on Debezium."},
+	{regexp.MustCompile(`Oracle failed to re-construct redo SQL`), "oracle_schema_change",
+		"A column of a captured Oracle table was renamed or dropped, and Flink CDC's Oracle reader can't read the changes made before it. Pause the pipeline and use Positions → Start over."},
+	{regexp.MustCompile(`(?s)Fail to analyze table.*ORA-01031|ORA-01031.*Fail to analyze table`), "oracle_analyze",
+		"The Oracle user may not analyze the captured tables, which Flink CDC's first copy does. Grant ANALYZE ANY (preflight shows the statement), then restart."},
+	{regexp.MustCompile(`Failed to flush Oracle LogWriter`), "oracle_flush_table",
+		"The Oracle user's LOG_MINING_FLUSH table is missing from the CDB root. Deploy again (BeziSync creates it) or create it (preflight shows the statement)."},
+	{regexp.MustCompile(`Cannot find any table by the option 'tables'`), "tables_missing",
+		"None of the pipeline's tables can be found in the source. Check that they exist and the user can read them, then deploy again."},
 }
 
 // The start-up race of Flink CDC's schema registry: a job that hits it before its first

@@ -1220,6 +1220,12 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	if srcErr != nil {
 		return nil, srcErr
 	}
+	if drop := connectors.FlinkDebeziumOnlyChecks(sourceConn.Type); len(drop) > 0 && EngineOf(p) == engine.FlinkCDC {
+		kept := slices.DeleteFunc(slices.Clone(srcReport.Checks), func(c checks.Check) bool { return slices.Contains(drop, c.Code) })
+		if len(kept) != len(srcReport.Checks) {
+			srcReport = checks.Summarize(kept, started)
+		}
+	}
 	if sinkErr != nil {
 		return nil, sinkErr
 	}
@@ -1369,6 +1375,11 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		if c != nil {
 			configChecks = append(configChecks, *c)
 		}
+		if c, err = flinkTablesAddedCheck(ctx, q, p, spec, sourceConn.Type); err != nil {
+			return nil, err
+		} else if c != nil {
+			configChecks = append(configChecks, *c)
+		}
 	}
 	discover := &discoverOnce{src: source, typ: sourceConn.Type}
 	var recommended []Recommendation
@@ -1404,12 +1415,23 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		cctx := connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec}
 		configChecks = append(configChecks, sinkChecks(ctx, sink, sinkDesc, cctx, compiled.Destinations, discover, flink)...)
 	}
-	sections = append(sections, PreflightSection{Key: "config", Title: "Configuration", Report: checks.Summarize(configChecks, started)})
+	var engineChecks []checks.Check
 	if flink {
-		engineChecks, err := FlinkChecks(ctx, q, p, spec, rt, sourceConn, discover, srcReport)
-		if err != nil {
+		if engineChecks, err = FlinkChecks(ctx, q, p, spec, rt, sourceConn, discover, srcReport); err != nil {
 			return nil, err
 		}
+		// A check whose failure the job can't survive goes where a forced deploy can't skip it.
+		for i := 0; i < len(engineChecks); {
+			if slices.Contains(flinkConfigChecks, engineChecks[i].Code) {
+				configChecks = append(configChecks, engineChecks[i])
+				engineChecks = slices.Delete(engineChecks, i, i+1)
+				continue
+			}
+			i++
+		}
+	}
+	sections = append(sections, PreflightSection{Key: "config", Title: "Configuration", Report: checks.Summarize(configChecks, started)})
+	if flink {
 		sections = append(sections, PreflightSection{Key: "engine", Title: "Flink CDC", Report: checks.Summarize(engineChecks, started)})
 	}
 	policy, err := PolicyChecks(ctx, q, p, spec)
@@ -1576,7 +1598,18 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 		return nil, nil, err
 	}
 	// Tables added to a running pipeline are copied while it streams, where the source can. Only
-	// Debezium needs a snapshot signal for that; Flink CDC copies added tables itself (AddTables).
+	// Debezium needs a snapshot signal for that; Flink CDC copies added tables itself where its
+	// reader can (AddTables). Where it can't (Oracle), preflight let this deploy through only with
+	// nothing left to restore; the positions saved before it must never be restored (ADR 0006).
+	if previous != nil && *previous != v.ID && len(report.Change.TablesAdded) > 0 {
+		src, err := GetConnection(ctx, q, p.SourceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := recordTablesFloor(ctx, q, p, src.Type, report.Change.TablesAdded); err != nil {
+			return nil, nil, err
+		}
+	}
 	if previous != nil && *previous != v.ID && len(report.Change.TablesAdded) > 0 && capture.Incremental &&
 		engine.CapsFor(EngineOf(p), "").RecopyTable {
 		tables := make([]any, len(report.Change.TablesAdded))
@@ -1890,3 +1923,6 @@ func writePins(ctx context.Context, q db.Querier, p *models.Pipeline, v *models.
 	_, err = q.Exec(ctx, `UPDATE pipeline_versions SET spec = $1, spec_hash = $2 WHERE id = $3`, v.Spec, v.SpecHash, v.ID)
 	return err
 }
+
+// flinkConfigChecks are Flink CDC checks a forced deploy can't skip: the job could only fail.
+var flinkConfigChecks = []string{"flink_oracle_version"}
