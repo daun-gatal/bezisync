@@ -293,10 +293,34 @@ through the same catalogs.
   always appended (a preflight warning says which).
 - **Commits** at least every minute by default (5 or 15 minutes for fewer, larger files; "as soon as
   possible" commits every batch). Health counts that interval as expected delay, not lag.
-- **Partitioning**: upserted tables are bucketed by their first key column (`bucket(id, 16)`; 4 or 64
-  buckets in the Destination step), change logs by the day of the change (`day(__source_ts_ms)`).
-  The wizard records each table's key column in `sink.options.partitions` (set it there through
-  YAML or the API); existing tables keep their partitioning. Expert mode can turn it off.
+- **Partitioning** (both engines): **Partition by**
+  in the Destination step gives a table up to four fields: a column and each value, the year,
+  month, day or hour of a date or timestamp (one per column), buckets of a hash (`bucket[N]`, N
+  from 1 to 1024) or the leading part (`truncate[N]`, N up to 1,000,000). The columns offered are
+  the ones the table writes (after renames, added and computed columns) and the transforms the
+  ones Iceberg allows for the type the engine writes: no buckets of a true/false or
+  floating-point value, no truncation of a date. It is applied when the table is created; a table
+  that already exists keeps its partitioning, so preflight blocks asking it for other partitioning
+  (`iceberg_partition_existing`: keep its own, or Start over, dropping destinations).
+  - **Upserted tables are partitioned only by key columns** (`iceberg_partition_key`). Rows are
+    upserted by writing deletes on the key, and Iceberg applies a delete only to rows in its own
+    partition: partitioned by a column outside the key (an `updated_at` day, a `status`), an update
+    that changes it leaves the old row behind. The editor shows such columns disabled. For
+    time-like layout on an upserted table, partition by the leading part of an increasing key
+    (`truncate[100000](id)`). Change logs (*every change appended*) take any column, including
+    Debezium's *time of the change* (`__source_ts_ms`). A table that already exists is checked
+    against its own identifier fields: one partitioned off them may already hold duplicate rows
+    (`SELECT <key>, count(*) … GROUP BY <key> HAVING count(*) > 1`), and the fix is Start over.
+  - **On Debezium** a table Partition by doesn't list keeps the automatic partitioning: upserted
+    tables bucketed by their first key column (`bucket(id, 16)`; 4 or 64 buckets in the Destination
+    step), change logs by the day of the change. The wizard records each table's key column in
+    `sink.options.partitions` (set it there through YAML or the API); Expert mode can turn the
+    automatic partitioning off (Partition by still applies). Tables routed to one
+    destination share its partitioning: a listed table's fields (tables that list fields must list
+    the same), else the automatic one when they agree, else none. A field the table doesn't have stops the pipeline when
+    the table is created, so preflight checks every field. MongoDB collections can't be listed.
+  - **Key columns on Debezium** stay under their own names: a key column renamed or left out drops
+    out of the table's identity (`iceberg_key_columns`).
 - **Event shape**: Iceberg needs the row after change with `__op` and `__source_ts_ms`; BeziSync adds
   that step (or completes yours) and sends timestamps as ISO-8601 text (Kafka Connect types for SQL
   Server). Outbox steps and tombstone deletes are not available.
@@ -310,13 +334,9 @@ through the same catalogs.
 - **On Flink CDC** (chosen in the wizard when a Flink CDC image is registered; Debezium stays the
   default): the same connections and tables, written by Flink CDC's Iceberg sink. Rows are upserted
   by key (deleted rows are removed, or kept and marked `__op = '-D'`; *every change appended* is
-  Debezium only) and new columns are added. Tables are unpartitioned unless **Partition by** (the
-  Destination step) gives a table up to four fields: a column and each value, the year, month, day
-  or hour of a date or timestamp, buckets of a hash (`bucket[N]`, N from 1 to 1024) or the leading
-  part (`truncate[N]`), compiled into Flink CDC's `partition.key`. Flink CDC applies it when it
-  creates a table; an existing table keeps its partitioning, so preflight blocks a deploy that asks
-  an existing table for other partitioning (drop it with Start over, or keep its own), and blocks
-  a partition column the rows don't carry or a transform the column's type can't take.
+  Debezium only) and new columns are added. Tables are unpartitioned unless **Partition by** (see
+  *Partitioning*) lists them, compiled into Flink CDC's `partition.key`; there is no automatic
+  partitioning and no time of the change (`__source_ts_ms`).
   The namespace must be one level of letters, digits and underscores, and a Glue catalog signs in
   with the runtime's AWS role (no access keys). Catalog and storage credentials travel to the
   cluster as catalog properties, filled in by BeziSync's helper inside the pipeline's containers.
