@@ -65,6 +65,8 @@ export const EVENTHUBS = {
 export const PULSAR = { service_url: `pulsar://pulsar.${DATA}:6650`, admin_url: `http://pulsar.${DATA}:8080`, tenant: 'public', namespace: 'default' };
 /** Oracle Free (15-source-oracle.yaml): LogMiner common user on the CDB, tables in the PDB. */
 export const ORACLE = { host: `source-oracle.${DATA}`, port: 1521, database: 'FREE', pdb: 'FREEPDB1', user: 'c##cdc_reader', password: 'cdc-reader-pw' };
+/** Oracle XE 21c (15-source-oracle-xe.yaml), for Flink CDC's Oracle reader (it can't read Oracle Free). */
+export const ORACLE_XE = { host: `source-oracle-xe.${DATA}`, port: 1521, database: 'XE', pdb: 'XEPDB1', user: 'c##cdc_reader', password: 'cdc-reader-pw' };
 /** CockroachDB single node, insecure (16-source-cockroachdb.yaml). */
 export const COCKROACHDB = { host: `source-cockroachdb.${DATA}`, port: 26257, database: 'shop', user: 'cdc_reader', ssl_mode: 'disable' };
 export const COCKROACHDB_FROM_RUNNER = { host: 'bezisync-e2e-k3s', port: 32657, database: 'shop', user: 'e2e_writer' };

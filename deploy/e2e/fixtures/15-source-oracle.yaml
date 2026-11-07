@@ -1,4 +1,4 @@
-# Oracle Free 23ai (multitenant: CDB FREE, PDB FREEPDB1) in ARCHIVELOG mode with supplemental
+# Oracle Database Free (the pinned build reports "Oracle AI Database 26ai", 23.26; multitenant: CDB FREE, PDB FREEPDB1) in ARCHIVELOG mode with supplemental
 # logging, a LogMiner common user and a sample table. In-cluster: source-oracle.bezisync-e2e-data:1521.
 # Specs write rows with `kubectl exec deploy/source-oracle -- sqlplus` (no Oracle client in the runner).
 apiVersion: v1
