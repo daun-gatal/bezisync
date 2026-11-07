@@ -644,9 +644,14 @@ func (s *icebergSink) CheckPipeline(ctx context.Context, conn Resolved, c Compil
 	var out []checks.Check
 	upsert := Str(facts.Options, "write_mode") != "append"
 	if upsert && conn.Provider == "rustfs" {
+		// Flink CDC can only upsert into Iceberg (ADR 0007 P4): the change log isn't its fix.
+		fix := "Choose \"Every change appended\" in the Destination step."
+		if facts.FlinkCDC {
+			fix = "Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Tables for this pipeline, or run it on Debezium with \"Every change appended\"."
+		}
 		out = append(out, checks.Check{Code: "iceberg_rustfs_upsert", Title: "Rows", Status: checks.Fail, Category: checks.CatDestination, Blocking: true,
 			Message: "RustFS S3 Tables (preview) refuses the first upsert commit of a new table (a row-level commit needs an earlier snapshot).",
-			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Choose \"Every change appended\" in the Destination step."}})
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: fix}})
 	}
 	keys, _ := facts.Options["partitions"].(map[string]any)
 	// On Flink CDC a table without a key fails preflight (flink_primary_key), and tables are not

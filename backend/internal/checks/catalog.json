@@ -2586,7 +2586,8 @@
   {
    "code": "iceberg_rustfs_upsert",
    "fixes": [
-    "Choose \"Every change appended\" in the Destination step."
+    "Choose \"Every change appended\" in the Destination step.",
+    "Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Tables for this pipeline, or run it on Debezium with \"Every change appended\"."
    ],
    "section": "Apache Iceberg",
    "titles": [

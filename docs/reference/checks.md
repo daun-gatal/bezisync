@@ -1593,6 +1593,12 @@ Fix:
 Choose "Every change appended" in the Destination step.
 ```
 
+Fix:
+
+```
+Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Tables for this pipeline, or run it on Debezium with "Every change appended".
+```
+
 <a id="iceberg-write"></a>
 ### `iceberg_write`
 
