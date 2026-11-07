@@ -1,7 +1,9 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { Api, choose, defaultProject, signIn, unique } from './helpers';
 import { EVENTHUBS, HTTP_ECHO, HTTP_ECHO_FROM_RUNNER, ICEBERG_REST, KINESIS, MOTO, MOTO_FROM_RUNNER, NATS, PUBSUB, PUBSUB_FROM_RUNNER, PULSAR, REDIS, RUSTFS_TABLES, SOURCE_PG, TARGET_MYSQL, TARGET_PG } from './fixtures';
 import { sql, waitFor } from './data';
+import { layoutProblems } from './layout';
 import { walkWizard } from './walk';
 
 test.describe.configure({ mode: 'serial' });
@@ -174,6 +176,18 @@ test('Postgres → Apache Iceberg on Debezium: Partition by from the wizard, app
   await page.getByRole('listbox').getByRole('option', { name: 'id', exact: true }).click();
   await choose(part.getByLabel('shop.orders field 1 transform'), 'Buckets of a hash');
   await part.getByLabel('shop.orders field 1 buckets').fill('8');
+  // The editor at phone, tablet and desktop widths, light and dark: no overflow, accessible.
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    for (const width of [390, 768, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await layoutProblems(page), `${scheme} ${width}px`).toEqual([]);
+      await page.locator('[aria-label="Partition by"]').screenshot({ path: test.info().outputPath(`partition-by-${scheme}-${width}.png`) });
+    }
+    const axe = await new AxeBuilder({ page }).include('[aria-label="Partition by"]').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+    expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id), scheme).toEqual([]);
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
   await page.getByRole('button', { name: 'Continue to transform →' }).click();
   await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
   expect((await api.get<Saved>(url)).spec.sink.options.partition_by).toEqual({ 'shop.orders': [{ n: 8, column: 'id', transform: 'bucket' }] });
