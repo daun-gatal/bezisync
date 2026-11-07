@@ -254,7 +254,7 @@ describe('computed', () => {
     expect(kindFits('text', 'text')).toBe(true);
     expect(kindFits('text', 'int')).toBe(false);
     expect(kindFits('time', 'timestamp')).toBe(true);
-    expect(kindFits('time', 'timestamptz')).toBe(false);
+    expect(kindFits('time', 'timestamptz')).toBe(true); // ADR 0008: verified on Flink CDC 3.7.0
     expect(kindFits('any', 'json')).toBe(false);
     expect(kindFits('any|lit', 'decimal')).toBe(true);
   });

@@ -118,15 +118,22 @@ export interface TransformStep {
   table?: string;
   function?: ComputedFn;
   args?: ComputedArg[];
+  /** Flink CDC only (ADR 0008): a computed column or a filter written as an expression; stored as
+   *  BeziSync's canonical text. */
+  expression?: string;
 }
 
-export type ComputedFn = 'upper' | 'lower' | 'trim' | 'length' | 'concat' | 'substr' | 'date_format' | 'to_text' | 'to_integer';
+export type ComputedFn =
+  | 'upper' | 'lower' | 'trim' | 'length' | 'concat' | 'substr' | 'date_format' | 'to_text' | 'to_integer'
+  | 'replace' | 'left' | 'right' | 'pad_left' | 'pad_right' | 'join_with' | 'first_set'
+  | 'abs' | 'ceil' | 'floor' | 'round' | 'add' | 'subtract' | 'multiply' | 'divide'
+  | 'year' | 'month' | 'day' | 'hour' | 'parse_date' | 'days_between' | 'to_decimal' | 'to_float';
 /** One argument: a column, a text or a number (exactly one). */
-export interface ComputedArg { column?: string; text?: string; number?: number }
+export interface ComputedArg { column?: string; text?: string; number?: number; integer?: number; decimal?: string }
 
 /** Stage of a step: 0 keep events, 1 event shape, 2 field changes, -1 order as written. */
 export function stageOf(t: TransformStep): number {
-  if (t.type === 'filter' && ((t.operations?.length ?? 0) > 0 || (t.rules?.length ?? 0) > 0)) return 0;
+  if (t.type === 'filter' && ((t.operations?.length ?? 0) > 0 || (t.rules?.length ?? 0) > 0 || Boolean(t.expression))) return 0;
   if (t.type === 'unwrap' || t.type === 'soft_delete') return 1;
   if (t.type === 'rename' || t.type === 'add_field' || t.type === 'flatten' || t.type === 'custom') return 2;
   return -1;

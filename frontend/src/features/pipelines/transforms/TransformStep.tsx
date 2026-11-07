@@ -139,7 +139,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   const shapeCtx: ShapeCtx = { flink, unwrap: sinkCaps.unwrap ?? null, optionDefaults: sinkSchema ? defaultsOf(sinkSchema) : {} };
   const order = drawOrder(steps, flink);
   const keyOf = (t: Step, i: number) => t.id ?? `step-${i}`;
-  const ctxFor = (index: number): EditorContext => ({ sourceType, sink: sinkCaps, tables, caps, spec: draft, steps, index, expert, flink, shape: shapeCtx });
+  const ctxFor = (index: number): EditorContext => ({ sourceType, sink: sinkCaps, tables, caps, spec: draft, steps, index, expert, flink, shape: shapeCtx, projectId: project.id, pipelineId: pipeline.id });
   const update = (i: number, next: Step) => setSteps(steps.map((t, j) => (j === i ? next : t)));
   const remove = (i: number) => {
     setSteps(steps.filter((_, j) => j !== i));
