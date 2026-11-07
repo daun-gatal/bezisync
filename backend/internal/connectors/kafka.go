@@ -275,8 +275,10 @@ func KafkaClientProps(conn Resolved, prefix, envKey string) (map[string]string, 
 		}
 		props[prefix+".sasl.mechanism"] = mech
 		props[prefix+".sasl.jaas.config"] = "${" + envKey + "_JAAS}"
-		user := strings.ReplaceAll(orEmpty(cfg.Username), `"`, `\"`)
-		password := strings.ReplaceAll(orEmpty(cfg.Password), `"`, `\"`)
+		// JAAS reads \ and " as escapes inside a quoted value: both are escaped.
+		jaas := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+		user := jaas.Replace(orEmpty(cfg.Username))
+		password := jaas.Replace(orEmpty(cfg.Password))
 		env[envKey+"_JAAS"] = fmt.Sprintf(`%s required username="%s" password="%s";`, module, user, password)
 	}
 	if ca := orEmpty(cfg.CAPEM); ca != "" && strings.HasSuffix(cfg.Protocol, "SSL") {

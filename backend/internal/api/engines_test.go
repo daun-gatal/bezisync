@@ -29,7 +29,7 @@ func TestFlinkCDCOffUntilAnImageIsRegistered(t *testing.T) {
 	}
 	// What each engine runs, and Flink CDC's settings and sizes, for the wizard.
 	if at(t, l[0], "sources") != nil || at(t, l[0], "except_sinks").([]any)[0] != "starrocks" || len(at(t, l[1], "sources").([]any)) != 4 ||
-		len(at(t, l[1], "sinks").([]any)) != 4 || len(at(t, l[1], "settings").([]any)) == 0 || at(t, l[1], "sizes", "medium", "parallelism") != float64(4) ||
+		len(at(t, l[1], "sinks").([]any)) != 8 || len(at(t, l[1], "settings").([]any)) == 0 || at(t, l[1], "sizes", "medium", "parallelism") != float64(4) ||
 		len(at(t, l[0], "settings").([]any)) == 0 || at(t, l[0], "settings").([]any)[0].(map[string]any)["engine"] != "debezium" {
 		t.Fatal(string(engines.Raw))
 	}
@@ -84,10 +84,12 @@ func TestPipelineEngineChoice(t *testing.T) {
 		t.Fatal(string(flink.Raw))
 	}
 
-	// Flink CDC can't write Kafka; asking for it is refused with the pair named.
-	bad := map[string]any{"name": "bad", "source_id": e.ids.Source, "sink_id": e.ids.Sink, "engine": "flink-cdc"}
+	// Flink CDC can't write an HTTP endpoint; asking for it is refused with the pair named.
+	hook := e.admin.post("/api/v1/projects/"+e.pid+"/connections", map[string]any{"kind": "sink", "type": "http", "name": "hook",
+		"config": map[string]any{"url": "http://127.0.0.1:9/hook"}}).expect(201).Str("id")
+	bad := map[string]any{"name": "bad", "source_id": e.ids.Source, "sink_id": hook, "engine": "flink-cdc"}
 	r := e.admin.post(base, bad).expect(422)
-	if r.Code() != "engine_unsupported" || !strings.Contains(r.Str("detail"), "PostgreSQL") || !strings.Contains(r.Str("detail"), "Kafka") {
+	if r.Code() != "engine_unsupported" || !strings.Contains(r.Str("detail"), "PostgreSQL") || !strings.Contains(r.Str("detail"), "HTTP") {
 		t.Fatal(string(r.Raw))
 	}
 	if r := e.admin.post(base, map[string]any{"name": "bad2", "source_id": e.ids.Source, "engine": "spark"}).expect(422); !strings.Contains(string(r.Raw), "engine") {
@@ -112,10 +114,10 @@ func TestPipelineEngineChoice(t *testing.T) {
 	// Moving a Flink CDC draft to a destination Flink CDC can't write moves it to Debezium,
 	// unless its spec holds Flink CDC settings.
 	url := base + "/" + flink.Str("id")
-	if r := e.admin.patch(url, map[string]any{"sink_id": e.ids.Sink}, ifMatch(flink.At("version"))...).expect(422); r.Code() != "engine_settings" {
+	if r := e.admin.patch(url, map[string]any{"sink_id": hook}, ifMatch(flink.At("version"))...).expect(422); r.Code() != "engine_settings" {
 		t.Fatal(string(r.Raw))
 	}
-	cleared := e.admin.patch(url, map[string]any{"sink_id": e.ids.Sink, "spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}}},
+	cleared := e.admin.patch(url, map[string]any{"sink_id": hook, "spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}}},
 		ifMatch(flink.At("version"))...).expect(200)
 	if cleared.Str("engine") != "debezium" {
 		t.Fatal(string(cleared.Raw))

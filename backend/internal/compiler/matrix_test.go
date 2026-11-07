@@ -102,8 +102,11 @@ func matrixConn(t *testing.T, d *connectors.Descriptor) connectors.Resolved {
 
 // matrixTypeValues are per-connector values the generic ones above don't satisfy.
 var matrixTypeValues = map[string]map[string]any{
-	"nats":    {"url": "nats://nats:4222"},
-	"iceberg": {"uri": "https://catalog.example.com/api/catalog"},
+	"nats":          {"url": "nats://nats:4222"},
+	"iceberg":       {"uri": "https://catalog.example.com/api/catalog"},
+	"elasticsearch": {"hosts": "http://es-a:9200,http://es-b:9200", "username": "cdc"},
+	"paimon":        {"warehouse": "s3://lake/paimon", "s3_endpoint": "http://s3.internal:9000", "path_style": true, "access_key_id": "AKIA"},
+	"oceanbase":     {"host": "ob.internal", "user": "cdc@test"},
 }
 
 func schemaProps(m *om.Map) *om.Map {
@@ -252,7 +255,7 @@ var oracleFlinkInput = func() compiler.FlinkInput {
 }()
 
 // flinkOnly are destinations only Flink CDC writes to.
-var flinkOnly = map[string]bool{"starrocks": true, "doris": true, "fluss": true}
+var flinkOnly = map[string]bool{"starrocks": true, "doris": true, "fluss": true, "elasticsearch": true, "paimon": true, "oceanbase": true}
 
 func withNaming(raw map[string]any, naming string) map[string]any {
 	out := map[string]any{}
@@ -350,7 +353,7 @@ func TestCompileMatrixUnchanged(t *testing.T) {
 					got[key] = outcome(compiler.Compile(ctx(spec), matrixConn(t, src), matrixConn(t, snk), ""))
 				}
 			}
-			if !slices.Contains([]string{"mysql", "postgresql", "sqlserver", "oracle"}, src.Type) || !slices.Contains([]string{"iceberg", "starrocks", "doris", "fluss"}, snk.Type) {
+			if !slices.Contains([]string{"mysql", "postgresql", "sqlserver", "oracle"}, src.Type) || !slices.Contains([]string{"iceberg", "starrocks", "doris", "fluss", "kafka", "elasticsearch", "paimon", "oceanbase"}, snk.Type) {
 				continue
 			}
 			flinkSpecs := flinkMatrixSpecs
