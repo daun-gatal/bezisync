@@ -178,7 +178,19 @@ export function columnRefusal(col: WrittenColumn, keys: string[]): string | null
 
 /** Why partitioning can't be saved as it is (IcebergPartitionBy's rules, and with the tables'
  *  written columns the preflight rules); null when it can. */
-export function partitionError(by: PartitionBy, written?: Record<string, { columns: WrittenColumn[]; keys: string[] }>): string | null {
+export function partitionError(by: PartitionBy, written?: Record<string, { columns: WrittenColumn[]; keys: string[] }>, routed?: Map<string, string>): string | null {
+  // Tables a route sends to one destination must list the same fields (icebergPartitionKey).
+  if (routed) {
+    const seen = new Map<string, [string, string]>();
+    for (const [table, fields] of Object.entries(by)) {
+      const dest = routed.get(table);
+      if (!dest || !fields.length) continue;
+      const key = fields.map((f) => `${f.transform}${f.n}${f.column}`).join(',');
+      const prev = seen.get(dest);
+      if (prev && prev[1] !== key) return `${prev[0]} and ${table} are routed to ${dest} with different partitioning: give them the same.`;
+      if (!prev) seen.set(dest, [table, key]);
+    }
+  }
   for (const [table, fields] of Object.entries(by)) {
     for (const f of fields) {
       if (!f.column) return `${table}: pick a column for every field.`;
@@ -259,6 +271,7 @@ export function PartitionByEditor({ value, onChange, tables, discovered, spec, e
           How Iceberg splits each table’s files. Applied when the table is created; a table that already exists keeps its partitioning. Rows upserted by key can be
           partitioned only by key columns.
         </Meta>
+        {engine !== 'flink-cdc' ? <Meta>The automatic bucket count, and turning automatic partitioning off, are Destination settings.</Meta> : null}
       </div>
       {tables.map((table) => {
         const fields = value[table] ?? [];
@@ -324,17 +337,20 @@ export function fieldText(f: PartitionField): string {
 
 /** Partition by in one line for the Transform step's row (ADR 0007 P1): up to two listed tables
  *  by name, then counts; a Debezium table not listed gets the automatic default unless it's off. */
-export function partitionSummary(by: PartitionBy, tables: string[], engine: EngineId, options: Record<string, unknown>): string {
+export function partitionSummary(by: PartitionBy, tables: string[], engine: EngineId, options: Record<string, unknown>, routed: Map<string, string> = new Map()): string {
   const listed = tables.filter((t) => by[t]?.length);
-  const rest = tables.length - listed.length;
-  const automatic = engine !== 'flink-cdc' && options.partitioning !== 'none';
-  if (!listed.length) return automatic ? 'Automatic' : 'Not partitioned';
-  const head =
-    listed.length <= 2
-      ? listed.map((t) => `${t}: ${by[t]!.map(fieldText).join(', ')}`).join(' · ')
-      : `${listed.length} tables partitioned`;
-  if (!rest) return head;
-  return automatic ? `${head} · Automatic for the rest` : listed.length <= 2 ? head : `${head} · ${rest} not`;
+  // What each table Partition by doesn't list gets: on Debezium the automatic default, worded as
+  // the editor words it (automaticSummary); on Flink CDC nothing.
+  const others = tables.filter((t) => !by[t]?.length).map((t) => automaticSummary(engine, options, t, tables, routed, by) ?? 'Not partitioned');
+  const automatic = others.filter((s) => !s.startsWith('Not partitioned')).length;
+  const none = others.length - automatic;
+  const parts: string[] = [];
+  if (listed.length && listed.length <= 2) parts.push(...listed.map((t) => `${t}: ${by[t]!.map(fieldText).join(', ')}`));
+  else if (listed.length) parts.push(`${listed.length} tables partitioned`);
+  if (!listed.length && others.length === 1) return others[0]!;
+  if (automatic) parts.push(listed.length || none ? `${automatic} automatic` : 'Automatic');
+  if (none) parts.push(listed.length || automatic ? `${none} not partitioned` : 'Not partitioned');
+  return parts.join(' · ');
 }
 
 /** The destination options with Partition by as the Transform step saves it (ADR 0007 P2):

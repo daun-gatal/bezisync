@@ -87,7 +87,8 @@ export function SinkStep({
   // A write-mode or engine change here can make saved fields invalid: said here, fixed in Transform.
   const partitionProblem = partitioned ? partitionError(partitionByFor(partitions, engine), written) : null;
   const savedOptions = (() => {
-    if (!optionsSchema) return spec.sink.options;
+    // A destination without options keeps none of another destination's (Partition by included).
+    if (!optionsSchema) return current?.type === pipeline.sink?.type ? spec.sink.options : {};
     return keepPartitionBy(deriveSinkOptions(cleanValues(optionsSchema, options), optionsSchema, tables, spec.keys ?? {}, discovery.data?.tables), storedPartitionBy, partitioned);
   })();
 
@@ -111,6 +112,8 @@ export function SinkStep({
         ? (choices.find((e) => !e.available)?.reason ?? 'Its engine isn’t available.')
       : nameError
       ? 'Fix the destination naming.'
+      : flink && optionsSchema?.properties?.write_mode?.ui?.unavailable?.[String(options.write_mode)]
+        ? 'Choose how rows are written: Flink CDC can’t append every change.'
       : registry && !format.registry_url
         ? 'Enter the schema registry URL.'
         : null;

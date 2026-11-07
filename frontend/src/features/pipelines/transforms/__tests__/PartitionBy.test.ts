@@ -141,16 +141,25 @@ describe('Partition by saved from the Transform step (ADR 0007)', () => {
     expect(JSON.stringify(out)).toBe(JSON.stringify({ write_mode: 'upsert', partition_by: { 'shop.orders': [{ n: 0, column: 'id', transform: 'identity' }] }, format_version: '2' }));
     expect(withPartitionBy({ write_mode: 'upsert', partition_by: { 'shop.orders': [bucket] } }, {}, 'debezium')).toEqual({ write_mode: 'upsert' });
   });
-  it('P-14: summarises in Guided words, counts past two tables', () => {
+  it('P-14: summarises in the editor’s words, by name up to two tables, then counts', () => {
     const tables = Array.from({ length: 30 }, (_, i) => `shop.t${i}`);
+    const recorded = { partitions: Object.fromEntries(tables.map((t) => [t, 'id'])) };
     expect(partitionSummary({}, tables, 'flink-cdc', {})).toBe('Not partitioned');
-    expect(partitionSummary({}, tables, 'debezium', {})).toBe('Automatic');
-    expect(partitionSummary({}, tables, 'debezium', { partitioning: 'none' })).toBe('Not partitioned');
+    expect(partitionSummary({}, tables, 'debezium', recorded)).toBe('Automatic');
+    expect(partitionSummary({}, ['shop.t0'], 'debezium', recorded)).toBe('Automatic: 16 buckets of id');
+    expect(partitionSummary({}, ['shop.t0'], 'debezium', { ...recorded, write_mode: 'append' })).toBe('Automatic: by the day of the change');
+    expect(partitionSummary({}, tables, 'debezium', { ...recorded, partitioning: 'none' })).toBe('Not partitioned');
     expect(partitionSummary({ 'shop.t0': [bucket], 'shop.t1': [{ n: 0, column: 'region', transform: 'identity' }] }, ['shop.t0', 'shop.t1'], 'flink-cdc', {}))
       .toBe('shop.t0: Buckets of id (16) · shop.t1: Each value of region');
-    expect(partitionSummary({ 'shop.t0': [bucket] }, tables, 'debezium', {})).toBe('shop.t0: Buckets of id (16) · Automatic for the rest');
+    expect(partitionSummary({ 'shop.t0': [bucket] }, tables, 'debezium', recorded)).toBe('shop.t0: Buckets of id (16) · 29 automatic');
     const three = { 'shop.t0': [bucket], 'shop.t1': [bucket], 'shop.t2': [bucket] };
-    expect(partitionSummary(three, tables, 'flink-cdc', {})).toBe('3 tables partitioned · 27 not');
-    expect(partitionSummary(three, tables, 'debezium', {})).toBe('3 tables partitioned · Automatic for the rest');
+    expect(partitionSummary(three, tables, 'flink-cdc', {})).toBe('3 tables partitioned · 27 not partitioned');
+    expect(partitionSummary(three, tables, 'debezium', { partitions: { 'shop.t3': 'id' } })).toBe('3 tables partitioned · 1 automatic · 26 not partitioned');
+  });
+  it('refuses tables routed together with different fields (icebergPartitionKey)', () => {
+    const routed = new Map([['shop.a', 'all'], ['shop.b', 'all']]);
+    expect(partitionError({ 'shop.a': [bucket], 'shop.b': [{ ...bucket, n: 8 }] }, undefined, routed)).toBe('shop.a and shop.b are routed to all with different partitioning: give them the same.');
+    expect(partitionError({ 'shop.a': [bucket], 'shop.b': [bucket] }, undefined, routed)).toBeNull();
+    expect(partitionError({ 'shop.a': [bucket] }, undefined, routed)).toBeNull();
   });
 });

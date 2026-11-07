@@ -134,7 +134,7 @@ export function stageOf(t: TransformStep): number {
 
 /** Keeps only references to captured tables: scoped steps lose removed tables (a step left
  *  with none is dropped), and key columns of removed tables go. */
-export function pruneToTables(spec: FullSpec, include: string[]): Pick<FullSpec, 'transforms' | 'keys'> {
+export function pruneToTables(spec: FullSpec, include: string[]): Pick<FullSpec, 'transforms' | 'keys' | 'sink'> {
   const keep = new Set(include);
   const transforms = spec.transforms.flatMap((t) => {
     if (!t.tables) return [t];
@@ -142,7 +142,33 @@ export function pruneToTables(spec: FullSpec, include: string[]): Pick<FullSpec,
     return tables.length ? [{ ...t, tables }] : [];
   });
   const keys = spec.keys ? Object.fromEntries(Object.entries(spec.keys).filter(([t]) => keep.has(t))) : undefined;
-  return { transforms, ...(keys && Object.keys(keys).length ? { keys } : { keys: undefined }) };
+  // Iceberg's per-table options (Partition by, the recorded keys) only for captured tables: the
+  // server refuses a table it doesn't capture. The same object when nothing changes.
+  let options = spec.sink.options;
+  for (const name of ['partition_by', 'partitions']) {
+    const map = options[name];
+    if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
+    const kept = Object.fromEntries(Object.entries(map as Record<string, unknown>).filter(([t]) => keep.has(t)));
+    if (Object.keys(kept).length === Object.keys(map).length) continue;
+    const { [name]: _drop, ...rest } = options;
+    void _drop;
+    options = name === 'partition_by' && !Object.keys(kept).length ? rest : { ...rest, [name]: kept };
+    options = jsonbSorted(options);
+  }
+  const sink = options === spec.sink.options ? spec.sink : { ...spec.sink, options };
+  return { transforms, sink, ...(keys && Object.keys(keys).length ? { keys } : { keys: undefined }) };
+}
+
+/** The spec's top-level keys in the order the server dumps them (domain.PipelineSpec.Dump):
+ *  values, keys, flink_cdc, flink_cdc_image, tuning, placement come last, in that order, so a
+ *  step that rebuilds the spec compares equal with the server's copy when nothing changed. */
+export function inServerOrder(spec: FullSpec): FullSpec {
+  const tail = ['values', 'keys', 'flink_cdc', 'flink_cdc_image', 'tuning', 'placement'];
+  const rec = spec as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(rec)) if (!tail.includes(k)) out[k] = rec[k];
+  for (const k of tail) if (k in rec && rec[k] !== undefined) out[k] = rec[k];
+  return out as unknown as FullSpec;
 }
 
 /** Puts (or removes, with null) the event-shape step without breaking the stage order: an
@@ -296,37 +322,8 @@ export function deriveSinkOptions(
       if (!found && !keys[t]) continue;
       map[t] = keys[t]?.[0] ?? found?.primary_key?.[0] ?? '';
     }
-    out = { ...out, [name]: map };
-  }
-  return out;
-}
-
-/** The recorded table keys (`ui.from: table_keys`, Debezium Iceberg's automatic partitioning) again
- *  for the tables whose chosen key changed from `before` to `after`, by deriveSinkOptions' rule
- *  (ADR 0007 P3). Other tables keep what was recorded, so saving without a key change saves the
- *  same options (the same object). */
-export function rederiveTableKeys(
-  options: Record<string, unknown>,
-  schema: JsonSchema | null | undefined,
-  include: string[],
-  before: Record<string, string[]>,
-  after: Record<string, string[]>,
-  discovered: DiscoveredKey[] | undefined,
-): Record<string, unknown> {
-  const changed = include.filter((t) => JSON.stringify(before[t] ?? []) !== JSON.stringify(after[t] ?? []));
-  if (!schema?.properties || !discovered || !changed.length) return options;
-  let out = options;
-  for (const [name, prop] of Object.entries(schema.properties)) {
-    if (prop.ui?.from !== 'table_keys') continue;
-    const recorded = options[name];
-    if (!recorded || typeof recorded !== 'object') continue;
-    const map = { ...(recorded as Record<string, string>) };
-    for (const t of changed) {
-      const found = discovered.find((d) => `${d.schema}.${d.name}` === t);
-      if (!found && !after[t]) continue;
-      map[t] = after[t]?.[0] ?? found?.primary_key?.[0] ?? '';
-    }
-    if (JSON.stringify(map) !== JSON.stringify(recorded)) out = jsonbSorted({ ...out, [name]: jsonbSorted(map) });
+    // In the JSONB order the server returns it, so an unchanged step compares equal.
+    out = { ...out, [name]: jsonbSorted(map) };
   }
   return out;
 }

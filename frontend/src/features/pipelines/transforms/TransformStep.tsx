@@ -9,7 +9,7 @@ import { sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/c
 import { usePolicies } from '@/lib/policies';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { fullSpec, optionsSchemaFor, rederiveTableKeys, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
+import { deriveSinkOptions, fullSpec, inServerOrder, optionsSchemaFor, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
 import { defaultsOf, type JsonSchema } from '@/components/SchemaForm';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, SoftDeleteEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor, ComputedEditor } from './editors';
@@ -26,6 +26,7 @@ import {
   defaultStep,
   FLINK_TITLE,
   moveStep,
+  routeTargets,
   NO_CAPS,
   stepCaps,
   stepErrors,
@@ -113,17 +114,19 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
     const { values: _v, keys: _k, ...rest } = spec;
     // On Flink CDC never saved (saving the step also clears formats left from before).
     const v = flink ? undefined : cleanValues(values, caps);
-    // Partition by, and the automatic key recorded for a table whose key changed here (ADR 0007 P2, P3).
-    const options = iceberg
-      ? withPartitionBy(rederiveTableKeys(spec.sink.options, sinkSchema, captured, spec.keys ?? {}, keys, discovery.data?.tables), partitionBy, pipeline.engine)
-      : spec.sink.options;
+    // Partition by is saved from here (ADR 0007 P2); the same options object when it is unchanged.
+    const options = iceberg ? withPartitionBy(spec.sink.options, partitionBy, pipeline.engine) : spec.sink.options;
     const sink = options === spec.sink.options ? spec.sink : { ...spec.sink, options };
-    return { ...rest, sink, transforms: steps, ...(v ? { values: v } : {}), ...(Object.keys(keys).length ? { keys } : {}) };
-  }, [spec, steps, values, keys, caps, flink, iceberg, sinkSchema, captured, discovery.data?.tables, partitionBy, pipeline.engine]);
-  // The columns each table writes as this screen stands, for Partition by.
+    // In the server's key order, so an unchanged step compares equal and saves nothing.
+    return inServerOrder({ ...rest, sink, transforms: steps, ...(v ? { values: v } : {}), ...(Object.keys(keys).length ? { keys } : {}) });
+  }, [spec, steps, values, keys, caps, flink, iceberg, partitionBy, pipeline.engine]);
+  // The columns each table writes as this screen stands, for Partition by; the automatic key it
+  // shows follows the key chosen here (the Review step records it, as it always has: ADR 0007 P3).
   const parts = { source: spec.source, transforms: steps, keys, values: draft.values };
   const written = iceberg ? writtenByTable(captured, discovery.data?.tables, parts, pipeline.engine, sourceType, spec.sink.options.write_mode) : {};
-  const partitionErr = iceberg ? partitionError(partitionByFor(partitionBy, pipeline.engine), written) : null;
+  const routed = routeTargets(steps, captured);
+  const partitionErr = iceberg ? partitionError(partitionByFor(partitionBy, pipeline.engine), written, routed) : null;
+  const shownOptions = iceberg ? deriveSinkOptions(draft.sink.options, sinkSchema, captured, keys, discovery.data?.tables) : draft.sink.options;
   const errors = stepErrors(steps, captured);
   const dirty = JSON.stringify(draft) !== JSON.stringify(spec);
   useImperativeHandle(handle, () => ({
@@ -403,7 +406,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               <StepRow
                 n={null}
                 title="Partition by"
-                summary={partitionSummary(partitionByFor(partitionBy, pipeline.engine), captured, pipeline.engine, draft.sink.options)}
+                summary={partitionSummary(partitionByFor(partitionBy, pipeline.engine), captured, pipeline.engine, shownOptions, routed)}
                 technical={expert ? (flink ? 'partition.key' : 'debezium.sink.iceberg.partition-by.<table>') : undefined}
                 error={partitionErr ?? undefined}
                 open={open === 'partition'}
@@ -417,7 +420,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
                   sourceType={sourceType}
                   spec={parts}
                   engine={pipeline.engine}
-                  options={draft.sink.options}
+                  options={shownOptions}
                 />
               </StepRow>
             </>

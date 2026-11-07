@@ -1508,7 +1508,7 @@ Choose key columns for them in the Transform step (Message key).
 Fix:
 
 ```
-Change Partition by in the Destination step.
+Change Partition by in the Transform step.
 ```
 
 Fix:
@@ -1546,7 +1546,7 @@ Check the catalog connection's access to the namespace, then run preflight again
 Fix:
 
 ```
-In the Destination step, partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned.
+In the Transform step (Partition by), partition these tables by their key columns (buckets or the leading part of the key), or leave them unpartitioned.
 ```
 
 Fix:

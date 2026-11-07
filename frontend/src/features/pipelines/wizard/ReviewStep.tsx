@@ -26,6 +26,8 @@ import { clusterFromPreset, manualError, manualErrors, streamingError, streaming
 import { useProject } from '@/lib/session';
 import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary, useShapeCtx } from '../transforms/Impact';
+import { routeTargets } from '../transforms/model';
+import { partitionByFor, partitionError, writtenByTable, type PartitionBy } from '../transforms/PartitionBy';
 import { CUSTOM_CPUS, CUSTOM_MEMORIES, deriveSinkOptions, fullSpec, heapMiB, memoryMiB, optionsSchemaFor, PRESET_AMOUNTS, RESOURCES, SNAPSHOT_MODES, type FullSpec, flinkSinkOptions } from '../spec';
 import { useSaveSpec, type SaveBody, type StepHandle } from '../useSaveSpec';
 import { FlinkClusterEditor } from './FlinkClusterEditor';
@@ -124,6 +126,16 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const nameErr = deployed ? null : !name.trim() ? 'Give the pipeline a name.' : slugError(name, others);
 
   const discovery = useDiscovery(project.id, pipeline.source.id);
+  // Partition by is edited in Transform (ADR 0007), which the step list can skip: said here too.
+  // Preflight blocks the same cases on deploy, so this doesn't block saving.
+  const partitionProblem =
+    pipeline.sink?.type === 'iceberg'
+      ? partitionError(
+          partitionByFor((spec.sink.options.partition_by as PartitionBy | undefined) ?? {}, pipeline.engine),
+          writtenByTable(spec.source.tables.include, discovery.data?.tables, spec, pipeline.engine, pipeline.source.type, spec.sink.options.write_mode),
+          routeTargets(spec.transforms, spec.source.tables.include),
+        )
+      : null;
   // A running Flink CDC pipeline keeps its readers while it has a saved position to restore
   // (flink_readers_changed); after Start over they can change.
   const positions = useSavedPositions(project.id, pipeline.id, flink && deployed);
@@ -314,6 +326,14 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
         title={deployed ? 'Review and deploy the change' : 'Review and deploy'}
         description="Settings save as you change them. The final checks run against exactly this configuration."
       />
+      {partitionProblem ? (
+        <Notice tone="warn" title="Partition by needs a change">
+          <span className="block">{partitionProblem}</span>
+          <Button size="sm" className="mt-2" onClick={onBack}>
+            Fix it in Transform
+          </Button>
+        </Notice>
+      ) : null}
       <Card
         title="Settings"
         actions={
