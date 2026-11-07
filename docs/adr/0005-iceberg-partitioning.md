@@ -267,15 +267,19 @@ One PR, one logical commit per step, each passing `make verify-quick` on its pac
 4. **Partition by on Debezium (R1–R3, R8).** Compile listed tables, route-aware, with conflict
    refusal and the precedence rules (the MongoDB block and `iceberg_key_columns` land with step 3). Update the descriptor help. Add matrix rows
    for the new shapes; no existing row changes.
+4b. **Routed automatic defaults (R2, Routes).** Key every Debezium destination after routes
+   (`debeziumDestinationFields`), shared by the compile, the key rule and the editor's summary;
+   accept the two `ice-route` matrix rows on purpose.
 5. **The editor on both engines.** Written columns, kinds, the key rule's disabled reasons, the
-   automatic summary, the Review re-check, the engine-switch strip, the truncate cap. Vitest.
+   automatic summary, stale fields named, the engine-switch strip, the truncate cap. Vitest.
 6. **e2e.** In `08-sinks`, add a Debezium journey: Partition by through the wizard, deploy, the
-   table created with that spec (asserted by a re-check through `iceberg_partition_existing`), and
-   the key rule blocking a non-key field. In `32-flink-cdc`, the wizard journey partitions by key
+   table created with that spec (asserted by a re-check through `iceberg_partition_existing`), the
+   non-key columns offered disabled, and a later `day(created_at)` blocked against the existing
+   table. In `32-flink-cdc`, the wizard journey partitions by key
    columns and asserts the key rule on `day(created_at)`; `walkWizard` runs on both engines.
-7. **Docs and contracts.** The guide, the connectors and wizard contracts, `ARCHITECTURE.md` (Known
-   issue: routed automatic defaults), `.rules/backend.md` and the changelog fragment (with the
-   behaviour change, the duplicate-finding query and the rollback note).
+7. **Docs and contracts.** The guide, the connectors and wizard contracts, `.rules/backend.md` and
+   the changelog fragment (with the behaviour change, the duplicate-finding query, the routed
+   restart and the rollback note).
 
 ### Verification plan
 
