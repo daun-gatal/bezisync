@@ -6,7 +6,7 @@ import { Meta } from '@/components/ui/text';
 import { jsonbSorted } from '@/lib/settings';
 import type { EngineId } from '@/lib/engines';
 import type { FullSpec, ValueFormats } from '../spec';
-import { COMPUTED_FUNCTIONS, columnKind, routeTargets } from '../transforms/model';
+import { COMPUTED_FUNCTIONS, columnKind, routeTargets } from './model';
 
 /** One partition field, in the order the server's JSONB keeps its keys. */
 export interface PartitionField {
@@ -255,7 +255,6 @@ export function PartitionByEditor({ value, onChange, tables, discovered, spec, e
   return (
     <section aria-label="Partition by" className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-col gap-0.5">
-        <strong className="text-sm font-semibold">Partition by</strong>
         <Meta>
           How Iceberg splits each table’s files. Applied when the table is created; a table that already exists keeps its partitioning. Rows upserted by key can be
           partitioned only by key columns.
@@ -314,4 +313,39 @@ export function PartitionByEditor({ value, onChange, tables, discovered, spec, e
       })}
     </section>
   );
+}
+
+/** One field in Guided words, e.g. "Buckets of id (16)". */
+export function fieldText(f: PartitionField): string {
+  const n = f.transform === 'bucket' || f.transform === 'truncate' ? ` (${f.n})` : '';
+  const words = f.transform === 'bucket' ? 'Buckets' : LABELS[f.transform];
+  return `${words} of ${f.column || '…'}${n}`;
+}
+
+/** Partition by in one line for the Transform step's row (ADR 0007 P1): up to two listed tables
+ *  by name, then counts; a Debezium table not listed gets the automatic default unless it's off. */
+export function partitionSummary(by: PartitionBy, tables: string[], engine: EngineId, options: Record<string, unknown>): string {
+  const listed = tables.filter((t) => by[t]?.length);
+  const rest = tables.length - listed.length;
+  const automatic = engine !== 'flink-cdc' && options.partitioning !== 'none';
+  if (!listed.length) return automatic ? 'Automatic' : 'Not partitioned';
+  const head =
+    listed.length <= 2
+      ? listed.map((t) => `${t}: ${by[t]!.map(fieldText).join(', ')}`).join(' · ')
+      : `${listed.length} tables partitioned`;
+  if (!rest) return head;
+  return automatic ? `${head} · Automatic for the rest` : listed.length <= 2 ? head : `${head} · ${rest} not`;
+}
+
+/** The destination options with Partition by as the Transform step saves it (ADR 0007 P2):
+ *  tables without fields left out, the engine's fields only, JSONB key order. The options object
+ *  is returned unchanged when Partition by is what it already holds, so an unchanged step saves
+ *  nothing. */
+export function withPartitionBy(options: Record<string, unknown>, by: PartitionBy, engine: EngineId): Record<string, unknown> {
+  const next = cleanPartitionBy(partitionByFor(by, engine));
+  const stored = (options.partition_by as PartitionBy | undefined) ?? {};
+  if (JSON.stringify(next) === JSON.stringify(cleanPartitionBy(stored))) return options;
+  const { partition_by: _pb, ...rest } = options;
+  void _pb;
+  return jsonbSorted(Object.keys(next).length ? { ...rest, partition_by: next } : rest);
 }

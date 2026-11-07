@@ -301,6 +301,36 @@ export function deriveSinkOptions(
   return out;
 }
 
+/** The recorded table keys (`ui.from: table_keys`, Debezium Iceberg's automatic partitioning) again
+ *  for the tables whose chosen key changed from `before` to `after`, by deriveSinkOptions' rule
+ *  (ADR 0007 P3). Other tables keep what was recorded, so saving without a key change saves the
+ *  same options (the same object). */
+export function rederiveTableKeys(
+  options: Record<string, unknown>,
+  schema: JsonSchema | null | undefined,
+  include: string[],
+  before: Record<string, string[]>,
+  after: Record<string, string[]>,
+  discovered: DiscoveredKey[] | undefined,
+): Record<string, unknown> {
+  const changed = include.filter((t) => JSON.stringify(before[t] ?? []) !== JSON.stringify(after[t] ?? []));
+  if (!schema?.properties || !discovered || !changed.length) return options;
+  let out = options;
+  for (const [name, prop] of Object.entries(schema.properties)) {
+    if (prop.ui?.from !== 'table_keys') continue;
+    const recorded = options[name];
+    if (!recorded || typeof recorded !== 'object') continue;
+    const map = { ...(recorded as Record<string, string>) };
+    for (const t of changed) {
+      const found = discovered.find((d) => `${d.schema}.${d.name}` === t);
+      if (!found && !after[t]) continue;
+      map[t] = after[t]?.[0] ?? found?.primary_key?.[0] ?? '';
+    }
+    if (JSON.stringify(map) !== JSON.stringify(recorded)) out = jsonbSorted({ ...out, [name]: jsonbSorted(map) });
+  }
+  return out;
+}
+
 /** Destination options a Flink CDC pipeline has: Iceberg keeps how rows are written (upserts by
  *  key: no append) and the table format; commit timing and bucket partitioning are Debezium's. */
 const FLINK_OPTIONS = ['write_mode', 'format_version'];
@@ -330,4 +360,12 @@ export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: 
         : prop;
   }
   return Object.keys(properties).length ? { ...schema, properties } : null;
+}
+
+/** The Destination step's options with the stored Partition by carried over unchanged (ADR 0007
+ *  P2: the Transform step writes it), or without it once the destination isn't Iceberg. */
+export function keepPartitionBy(options: Record<string, unknown>, stored: unknown, iceberg: boolean): Record<string, unknown> {
+  const { partition_by: _pb, ...rest } = options;
+  void _pb;
+  return iceberg && stored && typeof stored === 'object' && Object.keys(stored).length ? jsonbSorted({ ...rest, partition_by: stored }) : rest;
 }

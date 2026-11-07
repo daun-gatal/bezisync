@@ -9,11 +9,12 @@ import { sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/c
 import { usePolicies } from '@/lib/policies';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { fullSpec, optionsSchemaFor, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
+import { fullSpec, optionsSchemaFor, rederiveTableKeys, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
 import { defaultsOf, type JsonSchema } from '@/components/SchemaForm';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, SoftDeleteEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor, ComputedEditor } from './editors';
 import { FlinkPreviewPanel } from './FlinkPreviewPanel';
+import { PartitionByEditor, partitionByFor, partitionError, partitionSummary, withPartitionBy, writtenByTable, type PartitionBy } from './PartitionBy';
 import { PreviewPanel } from './PreviewPanel';
 import {
   addStep,
@@ -73,6 +74,8 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   const [steps, setSteps] = useState<Step[]>(spec.transforms);
   const [values, setValues] = useState<ValueFormats>(spec.values ?? {});
   const [keys, setKeys] = useState<Record<string, string[]>>(spec.keys ?? {});
+  // Partition by (Iceberg, both engines) is chosen here, after the key and renames (ADR 0007).
+  const [partitionBy, setPartitionBy] = useState<PartitionBy>((spec.sink.options.partition_by as PartitionBy | undefined) ?? {});
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const discovery = useDiscovery(project.id, pipeline.source.id);
@@ -103,23 +106,33 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
         })),
     [discovery.data, captured],
   );
+  const iceberg = pipeline.sink?.type === 'iceberg';
+  // What the compiler reads for deletes: the destination's unwrap rule and its options with defaults.
+  const sinkSchema = optionsSchemaFor(sinkCaps.options_schema as JsonSchema | null, pipeline.engine);
   const draft: FullSpec = useMemo(() => {
     const { values: _v, keys: _k, ...rest } = spec;
     // On Flink CDC never saved (saving the step also clears formats left from before).
     const v = flink ? undefined : cleanValues(values, caps);
-    return { ...rest, transforms: steps, ...(v ? { values: v } : {}), ...(Object.keys(keys).length ? { keys } : {}) };
-  }, [spec, steps, values, keys, caps, flink]);
+    // Partition by, and the automatic key recorded for a table whose key changed here (ADR 0007 P2, P3).
+    const options = iceberg
+      ? withPartitionBy(rederiveTableKeys(spec.sink.options, sinkSchema, captured, spec.keys ?? {}, keys, discovery.data?.tables), partitionBy, pipeline.engine)
+      : spec.sink.options;
+    const sink = options === spec.sink.options ? spec.sink : { ...spec.sink, options };
+    return { ...rest, sink, transforms: steps, ...(v ? { values: v } : {}), ...(Object.keys(keys).length ? { keys } : {}) };
+  }, [spec, steps, values, keys, caps, flink, iceberg, sinkSchema, captured, discovery.data?.tables, partitionBy, pipeline.engine]);
+  // The columns each table writes as this screen stands, for Partition by.
+  const parts = { source: spec.source, transforms: steps, keys, values: draft.values };
+  const written = iceberg ? writtenByTable(captured, discovery.data?.tables, parts, pipeline.engine, sourceType, spec.sink.options.write_mode) : {};
+  const partitionErr = iceberg ? partitionError(partitionByFor(partitionBy, pipeline.engine), written) : null;
   const errors = stepErrors(steps, captured);
   const dirty = JSON.stringify(draft) !== JSON.stringify(spec);
   useImperativeHandle(handle, () => ({
     dirty: () => dirty,
-    commit: async () => (errors.size ? false : dirty ? save({ spec: draft }) : true),
+    commit: async () => (errors.size || partitionErr ? false : dirty ? save({ spec: draft }) : true),
   }));
   // The unwrap row (drawn and edited); ordering uses shapeIndex, the server's boundary.
   const shapeAt = steps.findIndex((t) => t.type === 'unwrap');
   const softAt = steps.findIndex((t) => t.type === 'soft_delete');
-  // What the compiler reads for deletes: the destination's unwrap rule and its options with defaults.
-  const sinkSchema = optionsSchemaFor(sinkCaps.options_schema as JsonSchema | null, pipeline.engine);
   const shapeCtx: ShapeCtx = { flink, unwrap: sinkCaps.unwrap ?? null, optionDefaults: sinkSchema ? defaultsOf(sinkSchema) : {} };
   const order = drawOrder(steps, flink);
   const keyOf = (t: Step, i: number) => t.id ?? `step-${i}`;
@@ -384,6 +397,31 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               </StepRow>
             </>
           ) : null}
+          {iceberg ? (
+            <>
+              <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">Partition by</div>
+              <StepRow
+                n={null}
+                title="Partition by"
+                summary={partitionSummary(partitionByFor(partitionBy, pipeline.engine), captured, pipeline.engine, draft.sink.options)}
+                technical={expert ? (flink ? 'partition.key' : 'debezium.sink.iceberg.partition-by.<table>') : undefined}
+                error={partitionErr ?? undefined}
+                open={open === 'partition'}
+                onToggle={() => setOpen(open === 'partition' ? null : 'partition')}
+              >
+                <PartitionByEditor
+                  value={partitionByFor(partitionBy, pipeline.engine)}
+                  onChange={setPartitionBy}
+                  tables={captured}
+                  discovered={discovery.data?.tables}
+                  sourceType={sourceType}
+                  spec={parts}
+                  engine={pipeline.engine}
+                  options={draft.sink.options}
+                />
+              </StepRow>
+            </>
+          ) : null}
           <SystemLine>BeziSync names each destination ({spec.sink.naming})</SystemLine>
         </Card>
         {flink ? (
@@ -400,8 +438,16 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
             <span className="text-sm text-bad">
               {errors.size} step{errors.size === 1 ? ' needs' : 's need'} attention.
             </span>
+          ) : partitionErr ? (
+            <span className="text-sm text-bad">Partition by needs attention.</span>
           ) : null}
-          <Button variant="primary" disabled={errors.size > 0} why="Fix the highlighted steps first." loading={pending} onClick={onNext}>
+          <Button
+            variant="primary"
+            disabled={errors.size > 0 || Boolean(partitionErr)}
+            why={errors.size ? 'Fix the highlighted steps first.' : 'Fix Partition by first.'}
+            loading={pending}
+            onClick={onNext}
+          >
             Continue to review →
           </Button>
         </div>

@@ -1,5 +1,5 @@
 import { DEFAULT_SINK_CAPS, type SinkCaps } from '@/lib/connections';
-import { deriveSinkOptions, destinationFor, flinkSinkOptions, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
+import { deriveSinkOptions, destinationFor, keepPartitionBy, rederiveTableKeys, flinkSinkOptions, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
 
 describe('pipeline spec helpers', () => {
   it('fills defaults that mirror the backend', () => {
@@ -175,5 +175,43 @@ describe('flinkSinkOptions', () => {
     const out = flinkSinkOptions(schema, { write_mode: 'upsert', format_version: '2', partitions: { 'shop.orders': 'id' }, partition_by: by });
     expect(JSON.stringify(out)).toBe(JSON.stringify({ write_mode: 'upsert', partition_by: by, format_version: '2' }));
     expect(flinkSinkOptions(schema, { write_mode: 'upsert', partition_by: {} })).toEqual({ write_mode: 'upsert' });
+  });
+});
+
+describe('the recorded automatic key follows a key chosen in Transform (ADR 0007 P3)', () => {
+  const schema = { type: 'object', properties: { partitions: { type: 'object', ui: { from: 'table_keys' } } } } as never;
+  const discovered = [
+    { schema: 'shop', name: 'orders', primary_key: ['id'] },
+    { schema: 'shop', name: 'items', primary_key: ['item_id'] },
+  ];
+  const include = ['shop.orders', 'shop.items'];
+  it('P-8: re-records only the table whose key changed', () => {
+    const options = { write_mode: 'upsert', partitions: { 'shop.items': 'stale', 'shop.orders': 'id' } };
+    const out = rederiveTableKeys(options, schema, include, {}, { 'shop.orders': ['tenant_id', 'id'] }, discovered);
+    expect(out.partitions).toEqual({ 'shop.items': 'stale', 'shop.orders': 'tenant_id' });
+    const back = rederiveTableKeys(out, schema, include, { 'shop.orders': ['tenant_id', 'id'] }, {}, discovered);
+    expect(back.partitions).toEqual({ 'shop.items': 'stale', 'shop.orders': 'id' });
+  });
+  it('P-9: keys unchanged keep the options object, stale or not', () => {
+    const options = { partitions: { 'shop.orders': 'stale' } };
+    expect(rederiveTableKeys(options, schema, include, { 'shop.orders': ['a'] }, { 'shop.orders': ['a'] }, discovered)).toBe(options);
+  });
+  it('leaves options without recorded keys (Flink CDC, other destinations) alone', () => {
+    const options = { write_mode: 'upsert' };
+    expect(rederiveTableKeys(options, schema, include, {}, { 'shop.orders': ['x'] }, discovered)).toBe(options);
+    expect(rederiveTableKeys(options, null, include, {}, { 'shop.orders': ['x'] }, discovered)).toBe(options);
+  });
+});
+
+describe('the Destination step carries Partition by through (ADR 0007 P2)', () => {
+  const stored = { 'shop.orders': [{ n: 8, column: 'id', transform: 'bucket' }] };
+  it('P-4: keeps the stored value byte for byte, whatever the form sends', () => {
+    const out = keepPartitionBy({ write_mode: 'upsert', partition_by: { 'shop.orders': [] }, format_version: '2' }, stored, true);
+    expect(JSON.stringify(out)).toBe(JSON.stringify({ write_mode: 'upsert', partition_by: stored, format_version: '2' }));
+    expect(keepPartitionBy({ write_mode: 'upsert' }, undefined, true)).toEqual({ write_mode: 'upsert' });
+    expect(keepPartitionBy({ write_mode: 'upsert' }, {}, true)).toEqual({ write_mode: 'upsert' });
+  });
+  it('P-5: drops it once the destination is not Iceberg', () => {
+    expect(keepPartitionBy({ write_mode: 'upsert', partition_by: stored }, stored, false)).toEqual({ write_mode: 'upsert' });
   });
 });

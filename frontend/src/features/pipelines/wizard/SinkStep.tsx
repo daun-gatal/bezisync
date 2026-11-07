@@ -14,11 +14,10 @@ import { SchemaForm, cleanValues, defaultsOf, type FormValues, type JsonSchema }
 import { DEFAULT_SINK_CAPS, sinkCapsOf, TYPE_LABEL, useCheckConnection, useConnections, useConnectorTypes, useDiscovery } from '@/lib/connections';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { deriveSinkOptions, fullSpec, optionsSchemaFor, sinkDestinationFor, sinkNamingError, specForEngine, type FullSpec } from '../spec';
+import { deriveSinkOptions, fullSpec, keepPartitionBy, optionsSchemaFor, sinkDestinationFor, sinkNamingError, specForEngine, type FullSpec } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { ConnectionCards, StepHeader } from './shared';
-import { cleanPartitionBy, partitionByFor, partitionError, PartitionByEditor, writtenByTable, type PartitionBy } from './PartitionBy';
-import { jsonbSorted } from '@/lib/settings';
+import { partitionByFor, partitionError, writtenByTable, type PartitionBy } from '../transforms/PartitionBy';
 
 type Format = FullSpec['sink']['format'];
 
@@ -77,16 +76,17 @@ export function SinkStep({
   const showFormat = !forcedFormat && !flink && caps.formats.length > 0;
   const registry = showFormat && (format.type === 'avro' || format.type === 'protobuf');
   const discovery = useDiscovery(project.id, pipeline.source.id);
-  // Partition by (Iceberg, both engines) is edited by its own card and kept out of the form.
-  const [partitionBy, setPartitionBy] = useState<PartitionBy>((spec.sink.options.partition_by as PartitionBy | undefined) ?? {});
+  // Partition by (Iceberg, both engines) is chosen in Transform (ADR 0007): this step keeps the
+  // stored value as it is, and drops it only for a destination that isn't Iceberg.
+  const storedPartitionBy = spec.sink.options.partition_by as PartitionBy | undefined;
   const partitioned = current?.type === 'iceberg';
-  const partitions = cleanPartitionBy(partitionByFor(partitionBy, engine));
+  const partitions = storedPartitionBy ?? {};
   const written = writtenByTable(tables, discovery.data?.tables, spec, engine, pipeline.source.type, options.write_mode ?? spec.sink.options.write_mode);
+  // A write-mode or engine change here can make saved fields invalid: said here, fixed in Transform.
+  const partitionProblem = partitioned ? partitionError(partitionByFor(partitions, engine), written) : null;
   const savedOptions = (() => {
     if (!optionsSchema) return spec.sink.options;
-    const { partition_by: _pb, ...rest } = deriveSinkOptions(cleanValues(optionsSchema, options), optionsSchema, tables, spec.keys ?? {}, discovery.data?.tables);
-    void _pb;
-    return partitioned && Object.keys(partitions).length ? jsonbSorted({ ...rest, partition_by: partitions }) : rest;
+    return keepPartitionBy(deriveSinkOptions(cleanValues(optionsSchema, options), optionsSchema, tables, spec.keys ?? {}, discovery.data?.tables), storedPartitionBy, partitioned);
   })();
 
   // Choosing another destination: start from its naming default (unless the user wrote their
@@ -109,8 +109,6 @@ export function SinkStep({
         ? (choices.find((e) => !e.available)?.reason ?? 'Its engine isn’t available.')
       : nameError
       ? 'Fix the destination naming.'
-      : partitioned && partitionError(partitions, written)
-        ? partitionError(partitions, written)
       : registry && !format.registry_url
         ? 'Enter the schema registry URL.'
         : null;
@@ -270,10 +268,13 @@ export function SinkStep({
         </Card>
       ) : null}
       {partitioned ? (
-        <Card>
-          <PartitionByEditor value={partitionByFor(partitionBy, engine)} onChange={setPartitionBy} tables={tables} discovered={discovery.data?.tables} sourceType={pipeline.source.type}
-            spec={spec} engine={engine} options={savedOptions} />
-        </Card>
+        partitionProblem ? (
+          <Notice tone="warn" title="Partition by needs a change">
+            {partitionProblem} Fix it in the Transform step, next.
+          </Notice>
+        ) : (
+          <Meta className="block">Partition by is chosen in Transform, after the key and renames.</Meta>
+        )
       ) : null}
       <InlineError error={error} doing="Couldn’t save the destination" />
       <div className="flex flex-wrap justify-between gap-3">
