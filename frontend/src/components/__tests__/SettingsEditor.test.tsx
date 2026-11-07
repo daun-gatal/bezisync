@@ -79,3 +79,21 @@ describe('RawProperties', () => {
     expect(screen.getByLabelText('Property 5 name')).toHaveValue('');
   });
 });
+
+describe('SettingsEditor pins', () => {
+  it('draws a boolean setting a project policy pins as disabled (Known issue 13)', async () => {
+    const flag = {
+      engine: 'debezium', scope: 'source', stage: 'streaming', impact: 'restart', key: 'debezium.source.provide.transaction.metadata',
+      title: 'Transaction metadata', type: 'bool', default: 'false', why: 'Adds transaction boundaries.',
+    } as Setting;
+    const onChange = vi.fn();
+    render(<SettingsEditor idBase="p" value={{}} settings={[flag]} pinned={{ [flag.key]: 'true' }} onChange={onChange} />);
+    const on = screen.getByRole('button', { name: 'On' });
+    const off = screen.getByRole('button', { name: 'Off' });
+    expect(on).toHaveAttribute('aria-pressed', 'true');
+    expect(off).toBeDisabled();
+    await userEvent.click(off);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText(/Set by project policy\./)).toBeInTheDocument();
+  });
+});

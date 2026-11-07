@@ -150,6 +150,7 @@ function SettingRow({
               label={s.title}
               value={value === 'true' ? 'true' : 'false'}
               onChange={onChange}
+              disabled={disabled}
               options={[
                 { value: 'false', label: 'Off' },
                 { value: 'true', label: 'On' },
