@@ -3435,6 +3435,384 @@
   },
   {
    "descriptor": {
+    "supports_masking": false,
+    "kind": "sink",
+    "type": "elasticsearch",
+    "title": "Elasticsearch",
+    "description": "Search indexes: one index per source table, one document per row (its id the primary key; a delete removes it), written by Flink CDC. Runs on Flink CDC.",
+    "engines": [
+     "flink-cdc"
+    ],
+    "presets": [],
+    "config_schema": {
+     "properties": {
+      "hosts": {
+       "maxLength": 1000,
+       "minLength": 1,
+       "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(,https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?)*$",
+       "title": "Hosts",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "http://elasticsearch:9200",
+        "help": "http(s)://host:port, comma-separated. https needs a certificate from a public CA: Flink CDC's Elasticsearch sink can't be given another CA."
+       }
+      },
+      "version": {
+       "default": "8",
+       "enum": [
+        "6",
+        "7",
+        "8"
+       ],
+       "title": "Version",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "labels": {
+         "6": "Elasticsearch 6",
+         "7": "Elasticsearch 7",
+         "8": "Elasticsearch 8"
+        }
+       }
+      },
+      "username": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "User",
+       "ui": {
+        "group": "Sign in",
+        "help": "Leave empty for a cluster without security."
+       }
+      }
+     },
+     "required": [
+      "hosts"
+     ],
+     "title": "ElasticsearchConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Sign in"
+       }
+      }
+     },
+     "title": "ElasticsearchSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "{schema}_{table}",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+      "max_length": 200,
+      "message": "Start with a letter or digit; then letters, digits, '_' and '-' (dots become '_'; index names are lower-cased).",
+      "flatten_dots": true,
+      "single": false
+     },
+     "formats": [],
+     "unwrap": {
+      "required": false,
+      "add_fields": [],
+      "delete_handling": []
+     },
+     "outbox": false,
+     "options_schema": {
+      "properties": {},
+      "title": "ElasticsearchOptions",
+      "type": "object"
+     }
+    }
+   },
+   "debezium_name": "",
+   "readable": true
+  },
+  {
+   "descriptor": {
+    "supports_masking": false,
+    "kind": "sink",
+    "type": "paimon",
+    "title": "Apache Paimon",
+    "description": "Lakehouse tables: one primary-key Paimon table per source table in a filesystem catalog on S3 or an S3-compatible store, created and written by Flink CDC. Runs on Flink CDC.",
+    "engines": [
+     "flink-cdc"
+    ],
+    "presets": [],
+    "config_schema": {
+     "properties": {
+      "warehouse": {
+       "maxLength": 500,
+       "minLength": 6,
+       "pattern": "^s3://[a-z0-9.-]{3,63}(/[A-Za-z0-9._/-]*)?$",
+       "title": "Warehouse",
+       "type": "string",
+       "ui": {
+        "group": "Storage",
+        "placeholder": "s3://lake/paimon",
+        "help": "Where the catalog keeps its tables: s3://bucket/path."
+       }
+      },
+      "database": {
+       "default": "cdc",
+       "maxLength": 64,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Storage",
+        "help": "Tables are created here."
+       }
+      },
+      "s3_endpoint": {
+       "anyOf": [
+        {
+         "maxLength": 300,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "S3 endpoint",
+       "ui": {
+        "group": "Storage",
+        "help": "For S3-compatible stores (MinIO, RustFS, Ceph); empty for AWS S3.",
+        "placeholder": "https://s3.example.com"
+       }
+      },
+      "region": {
+       "anyOf": [
+        {
+         "maxLength": 50,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Region",
+       "ui": {
+        "group": "Storage"
+       }
+      },
+      "path_style": {
+       "default": false,
+       "title": "Path-style access",
+       "type": "boolean",
+       "ui": {
+        "group": "Storage",
+        "help": "Most S3-compatible stores need it."
+       }
+      },
+      "access_key_id": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Access key ID",
+       "ui": {
+        "group": "Sign in",
+        "help": "Empty: the runtime's own credentials (an IAM role)."
+       }
+      }
+     },
+     "required": [
+      "warehouse"
+     ],
+     "title": "PaimonConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "secret_access_key": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Secret access key",
+       "ui": {
+        "group": "Sign in"
+       }
+      }
+     },
+     "title": "PaimonSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "{schema}_{table}",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "max_length": 64,
+      "message": "Use letters, digits and '_' (dots become '_'; names are lower-cased).",
+      "flatten_dots": true,
+      "single": false
+     },
+     "formats": [],
+     "unwrap": {
+      "required": false,
+      "add_fields": [],
+      "delete_handling": []
+     },
+     "outbox": false,
+     "options_schema": {
+      "properties": {},
+      "title": "PaimonOptions",
+      "type": "object"
+     }
+    }
+   },
+   "debezium_name": "",
+   "readable": false
+  },
+  {
+   "descriptor": {
+    "supports_masking": false,
+    "kind": "sink",
+    "type": "oceanbase",
+    "title": "OceanBase",
+    "description": "Distributed relational tables (MySQL tenants): one table per source table, created and written by Flink CDC over JDBC with OceanBase Connector/J. Runs on Flink CDC.",
+    "engines": [
+     "flink-cdc"
+    ],
+    "presets": [],
+    "config_schema": {
+     "properties": {
+      "host": {
+       "maxLength": 255,
+       "minLength": 1,
+       "title": "Host",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "placeholder": "oceanbase.internal"
+       }
+      },
+      "query_port": {
+       "default": 2881,
+       "maximum": 65535,
+       "minimum": 1,
+       "title": "Port",
+       "type": "integer",
+       "ui": {
+        "group": "Connection",
+        "help": "The SQL port of an OBServer or OBProxy (2881, or 2883 through OBProxy)."
+       }
+      },
+      "database": {
+       "default": "cdc",
+       "maxLength": 64,
+       "minLength": 1,
+       "title": "Database",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "help": "Tables are created here; BeziSync creates the database if it is missing."
+       }
+      },
+      "user": {
+       "maxLength": 128,
+       "minLength": 1,
+       "title": "User",
+       "type": "string",
+       "ui": {
+        "group": "Connection",
+        "help": "With the tenant: user@tenant (and #cluster through OBProxy). MySQL tenants only.",
+        "placeholder": "cdc@test"
+       }
+      }
+     },
+     "required": [
+      "host",
+      "user"
+     ],
+     "title": "OceanBaseConfig",
+     "type": "object"
+    },
+    "secret_schema": {
+     "properties": {
+      "password": {
+       "anyOf": [
+        {
+         "maxLength": 500,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Password",
+       "ui": {
+        "group": "Connection"
+       }
+      }
+     },
+     "title": "OceanBaseSecrets",
+     "type": "object"
+    },
+    "sink": {
+     "naming": {
+      "default": "{schema}_{table}",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "max_length": 64,
+      "message": "Use letters, digits and '_' (dots become '_'; names are lower-cased).",
+      "flatten_dots": true,
+      "single": false
+     },
+     "formats": [],
+     "unwrap": {
+      "required": false,
+      "add_fields": [],
+      "delete_handling": []
+     },
+     "outbox": false,
+     "options_schema": {
+      "properties": {},
+      "title": "OceanBaseOptions",
+      "type": "object"
+     }
+    }
+   },
+   "debezium_name": "",
+   "readable": true
+  },
+  {
+   "descriptor": {
     "supports_masking": true,
     "kind": "sink",
     "type": "jdbc",

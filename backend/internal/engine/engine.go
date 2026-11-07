@@ -1,7 +1,8 @@
 // Package engine names the change-data-capture engines BeziSync runs and what each one can do.
 //
 // Debezium Server streams change events to every destination BeziSync supports. Flink CDC keeps
-// tables in sync in analytics and lakehouse stores (Iceberg, StarRocks, Doris, Fluss), reading
+// tables in sync in analytics, lakehouse and search stores (Iceberg, StarRocks, Doris, Fluss,
+// Paimon, OceanBase, Elasticsearch) and writes Kafka too, reading
 // MySQL/MariaDB, PostgreSQL, SQL Server and Oracle. A pipeline's engine is chosen when its
 // destination is chosen and fixed once it is deployed.
 //
@@ -44,10 +45,10 @@ func (id ID) Title() string {
 var flinkSources = []string{"mysql", "postgresql", "sqlserver", "oracle"}
 
 // flinkSinks are the destination types Flink CDC writes in BeziSync.
-var flinkSinks = []string{"iceberg", "starrocks", "doris", "fluss"}
+var flinkSinks = []string{"iceberg", "starrocks", "doris", "fluss", "kafka", "elasticsearch", "paimon", "oceanbase"}
 
 // flinkOnlySinks have no Debezium Server sink.
-var flinkOnlySinks = []string{"starrocks", "doris", "fluss"}
+var flinkOnlySinks = []string{"starrocks", "doris", "fluss", "elasticsearch", "paimon", "oceanbase"}
 
 // Runs lists what an engine reads and writes: nil means every source (or destination) except
 // those in exceptSinks.

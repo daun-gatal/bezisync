@@ -179,9 +179,9 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
 ## Pipelines, compiler, runtimes, controller
 - Engines (`internal/engine`): a pipeline runs on Debezium Server or Flink CDC. `engine.Supports`
   and `engine.Choices` say which engines can run a source/destination pair (Flink CDC: MySQL/MariaDB,
-  PostgreSQL, SQL Server and Oracle into Iceberg, StarRocks, Doris and Fluss — only sources with a
-  Flink CDC *pipeline* source; MongoDB, Vitess and TiDB have none, ADR 0006; StarRocks, Doris and Fluss are
-  Flink CDC only); `engine.Default` is Debezium wherever it can run. `engine.CapsFor` is what an
+  PostgreSQL, SQL Server and Oracle into Iceberg, Kafka, StarRocks, Doris, Fluss, Elasticsearch, Paimon
+  and OceanBase — only sources with a Flink CDC *pipeline* source; MongoDB, Vitess and TiDB have none,
+  ADR 0006; all but Iceberg and Kafka are Flink CDC only, ADR 0009); `engine.Default` is Debezium wherever it can run. `engine.CapsFor` is what an
   engine can do (edit offsets, copy a table again, saved positions, event formats…), with `Why` for
   every unavailable action. Capabilities come from the engine and, on Flink CDC, the source type
   (Oracle: no start from a time, no adding tables without Start over), never from the destination
@@ -295,7 +295,8 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   driver reports (`quota`, `quota_cpu_free`, `quota_memory_free`; the Role reads ResourceQuotas) and
   compares what a redeploy adds (`runningNeed`). The helper's `config_error` phase (an image without a connector or driver)
   is reported with the helper's own fix.
-- Flink-only destinations (`engine.FlinkOnlySink`: StarRocks, Doris, Fluss) carry `engines:
+- Flink-only destinations (`engine.FlinkOnlySink`: StarRocks, Doris, Fluss, Elasticsearch, Paimon,
+  OceanBase) carry `engines:
   ["flink-cdc"]` in their descriptor; `connector-types` adds `available`/`unavailable_reason` and
   creating such a connection is refused (`engine_unavailable`) until Flink CDC is available. Their
   `CompileSink` refuses Debezium. StarRocks and Doris (`connectors/olap.go` shares the check,
@@ -304,7 +305,12 @@ testdata/contract/    # contract corpus recorded from the Python implementation 
   can load straight into listed BE nodes (`be_nodes`) when the FE's redirects are unreachable. Fluss
   (`connectors/fluss.go`): BeziSync has no Fluss client, so its check is reachability, it is not
   readable, and delete reports its tables as `retained` with the statement to drop them; SASL/PLAIN
-  sign-in only (no TLS documented upstream). A Flink CDC
+  sign-in only (no TLS documented upstream). Elasticsearch (`elasticsearch.go`): checked, read and
+  dropped over its HTTP API through the SSRF client (`esCall`); index = routed name lower-cased.
+  Paimon (`paimon.go`): filesystem catalog on S3, checked with a test object (aws-sdk-go-v2 over the
+  SSRF client), not readable, tables `retained`. OceanBase (`oceanbase.go`) reuses `olapSink`
+  (`noHTTP`, `mysqlDrop`) with OceanBase Connector/J. Kafka on Flink CDC (`kafka_flink.go`) is JSON
+  only, keyed by the primary key (`hash-by-key`). A sink's extra JARs go in `FlinkBlock.Extra`. A Flink CDC
   pipeline resolves its image with `ResolvePipelineImage` (deploy) and is left out of the Debezium
   versions usage and upgrades; the sink spec's event format is checked for Debezium only.
 - Iceberg on Flink CDC (`connectors/iceberg_flink.go`): the same REST/Glue connections; Iceberg 1.10

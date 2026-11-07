@@ -127,9 +127,20 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   `kube-system` loads it at every boot and it runs the host's `apparmor_parser` through a mount of
   the host's root, so treat its manifest and image like node configuration.
 - **Unencrypted Flink CDC destinations.** StarRocks and Doris load over HTTP Stream Load and are
-  checked over the MySQL protocol without TLS, and Fluss documents no TLS for Flink CDC: rows and
+  checked over the MySQL protocol without TLS, OceanBase is written over JDBC and checked over the
+  MySQL protocol without TLS, and Fluss documents no TLS for Flink CDC: rows and
   credentials cross the network in plain text. Keep them and the runtime on a private network.
-  Their connection checks create and drop a test table (StarRocks, Doris).
+  Their connection checks create and drop a test table (StarRocks, Doris, OceanBase).
+- **More Flink CDC destinations (ADR 0009).** Flink CDC's Elasticsearch sink takes no CA: `https`
+  works only with a publicly trusted certificate, so a private cluster is written over plain HTTP
+  (keep it on a private network). Paimon's S3 keys travel as catalog properties of the job, filled
+  in by the helper from placeholders like Iceberg's on Flink CDC, so anyone who can read the Flink
+  web UI or job graph of that pipeline can read them: keep the UI unexposed. OceanBase's JDBC URL (and StarRocks's and Doris's
+  URLs) are built from a host that must be a host name or IP address, a port, a checked database
+  name and BeziSync's own parameters, so no `/`, `?` or `&` can add driver options. Elasticsearch
+  and Paimon checks create and delete a test index or object, through the SSRF guard (Paimon without
+  a key signs with the control plane's own AWS credentials, as Iceberg's checks do); OceanBase's create and drop a test table. Hudi isn't offered: its S3 keys would sit in table
+  metadata or every TaskManager's environment.
 - **Oracle on Flink CDC writes in the CDB root and refreshes statistics.** On a multitenant
   database BeziSync creates `LOG_MINING_FLUSH` in the connector user's schema of the CDB root (the
   table Debezium Server's Oracle connector creates there too), and Flink CDC's first copy runs

@@ -19,6 +19,9 @@
   "StarRocks",
   "Apache Doris",
   "Apache Fluss",
+  "Elasticsearch",
+  "Apache Paimon",
+  "OceanBase",
   "Database (JDBC)",
   "Amazon SQS",
   "Amazon SNS",
@@ -3453,6 +3456,191 @@
     "Connection checks may not contact loopback, link-local or cloud metadata addresses."
    ],
    "fixes": []
+  },
+  {
+   "code": "elasticsearch_config",
+   "section": "Elasticsearch",
+   "titles": [
+    "Settings"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "elasticsearch_network_reachable",
+   "section": "Elasticsearch",
+   "titles": [
+    "Reach Elasticsearch"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "elasticsearch_network_unreachable",
+   "section": "Elasticsearch",
+   "titles": [
+    "Reach Elasticsearch"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "elasticsearch_network_blocked",
+   "section": "Elasticsearch",
+   "titles": [
+    "Reach Elasticsearch"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "elasticsearch_login",
+   "section": "Elasticsearch",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [
+    "Flink CDC's Elasticsearch sink signs in with a user and password, or none; it has no CA option, so https works only with a certificate from a public CA."
+   ],
+   "fixes": [
+    "Check the host's scheme (http or https). https needs a certificate from a public CA: Flink CDC's Elasticsearch sink can't be given another CA.",
+    "Check the user and password on the connection."
+   ]
+  },
+  {
+   "code": "elasticsearch_version",
+   "section": "Elasticsearch",
+   "titles": [
+    "Version"
+   ],
+   "whys": [
+    "The sink writes with the client of the version set on the connection (6, 7 or 8); a different server major version refuses its requests."
+   ],
+   "fixes": [
+    "Set the connection's version to {major}.",
+    "Point the connection at an Elasticsearch 6, 7 or 8 cluster."
+   ]
+  },
+  {
+   "code": "elasticsearch_create_index",
+   "section": "Elasticsearch",
+   "titles": [
+    "Create indexes"
+   ],
+   "whys": [
+    "Flink CDC's sink writes into indexes created by their first document (it creates no mappings), and drops none: BeziSync writes and deletes a test index."
+   ],
+   "fixes": [
+    "Give the user the create_index, index and delete_index privileges on the indexes it writes and on bezisync_check_* (the check's test index), and allow automatic index creation (action.auto_create_index).",
+    "Delete the index {probe}, and give the user the delete_index privilege on the indexes it writes."
+   ]
+  },
+  {
+   "code": "paimon_config",
+   "section": "Apache Paimon",
+   "titles": [
+    "Settings"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "paimon_storage",
+   "section": "Apache Paimon",
+   "titles": [
+    "Storage"
+   ],
+   "whys": [
+    "Paimon keeps data, manifests and snapshots under the warehouse: BeziSync writes and deletes a test object there."
+   ],
+   "fixes": [
+    "Check the bucket, the endpoint (and path-style access for S3-compatible stores) and that the key, or the runtime's role when no key is set, may put, get, list and delete objects under the warehouse (the check tries put and delete).",
+    "Allow the address in BEZISYNC_SSRF_ALLOW_CIDRS, or use another endpoint."
+   ]
+  },
+  {
+   "code": "paimon_keyless_table",
+   "section": "Apache Paimon",
+   "titles": [
+    "Table without a key"
+   ],
+   "whys": [
+    "A Paimon table without a primary key is an append table: it can't take the updates and deletes Flink CDC writes. Tables the pipeline creates get the source table's key."
+   ],
+   "fixes": [
+    "Drop them (with Flink SQL or Spark on the same catalog) and let the pipeline create them with the table's key, or name other destinations in the Destination step.",
+    "Check that the connection may list and read objects under the warehouse, then run preflight again."
+   ]
+  },
+  {
+   "code": "oceanbase_config",
+   "section": "OceanBase",
+   "titles": [
+    "Settings"
+   ],
+   "whys": [],
+   "fixes": []
+  },
+  {
+   "code": "oceanbase_network_reachable",
+   "section": "OceanBase",
+   "titles": [
+    "Reach the OceanBase server (MySQL protocol)"
+   ],
+   "whys": [
+    "The host answered on the port."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "oceanbase_network_unreachable",
+   "section": "OceanBase",
+   "titles": [
+    "Reach the OceanBase server (MySQL protocol)"
+   ],
+   "whys": [
+    "No TCP connection: allow the port from where connectors run (firewall, security group, peering)."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "oceanbase_network_blocked",
+   "section": "OceanBase",
+   "titles": [
+    "Reach the OceanBase server (MySQL protocol)"
+   ],
+   "whys": [
+    "Connection checks may not contact loopback, link-local or cloud metadata addresses."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "oceanbase_login",
+   "section": "OceanBase",
+   "titles": [
+    "Sign in"
+   ],
+   "whys": [
+    "The user includes its tenant (user@tenant, and #cluster through OBProxy); only MySQL tenants are written."
+   ],
+   "fixes": []
+  },
+  {
+   "code": "oceanbase_create_table",
+   "section": "OceanBase",
+   "titles": [
+    "Create tables"
+   ],
+   "whys": [],
+   "fixes": [
+    "GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}';\nGRANT CREATE ON *.* TO '{user}';"
+   ]
   }
  ]
 }

@@ -1779,6 +1779,183 @@ GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{da
 
 - Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
 
+## Elasticsearch
+
+<a id="elasticsearch-config"></a>
+### `elasticsearch_config`
+
+**Settings**
+
+<a id="elasticsearch-create-index"></a>
+### `elasticsearch_create_index`
+
+**Create indexes**
+
+- Why: Flink CDC's sink writes into indexes created by their first document (it creates no mappings), and drops none: BeziSync writes and deletes a test index.
+
+Fix:
+
+```
+Give the user the create_index, index and delete_index privileges on the indexes it writes and on bezisync_check_* (the check's test index), and allow automatic index creation (action.auto_create_index).
+```
+
+Fix:
+
+```
+Delete the index {probe}, and give the user the delete_index privilege on the indexes it writes.
+```
+
+<a id="elasticsearch-login"></a>
+### `elasticsearch_login`
+
+**Sign in**
+
+- Why: Flink CDC's Elasticsearch sink signs in with a user and password, or none; it has no CA option, so https works only with a certificate from a public CA.
+
+Fix:
+
+```
+Check the host's scheme (http or https). https needs a certificate from a public CA: Flink CDC's Elasticsearch sink can't be given another CA.
+```
+
+Fix:
+
+```
+Check the user and password on the connection.
+```
+
+<a id="elasticsearch-network-blocked"></a>
+### `elasticsearch_network_blocked`
+
+**Reach Elasticsearch**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="elasticsearch-network-reachable"></a>
+### `elasticsearch_network_reachable`
+
+**Reach Elasticsearch**
+
+- Why: The host answered on the port.
+
+<a id="elasticsearch-network-unreachable"></a>
+### `elasticsearch_network_unreachable`
+
+**Reach Elasticsearch**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
+<a id="elasticsearch-version"></a>
+### `elasticsearch_version`
+
+**Version**
+
+- Why: The sink writes with the client of the version set on the connection (6, 7 or 8); a different server major version refuses its requests.
+
+Fix:
+
+```
+Set the connection's version to {major}.
+```
+
+Fix:
+
+```
+Point the connection at an Elasticsearch 6, 7 or 8 cluster.
+```
+
+## Apache Paimon
+
+<a id="paimon-config"></a>
+### `paimon_config`
+
+**Settings**
+
+<a id="paimon-keyless-table"></a>
+### `paimon_keyless_table`
+
+**Table without a key**
+
+- Why: A Paimon table without a primary key is an append table: it can't take the updates and deletes Flink CDC writes. Tables the pipeline creates get the source table's key.
+
+Fix:
+
+```
+Drop them (with Flink SQL or Spark on the same catalog) and let the pipeline create them with the table's key, or name other destinations in the Destination step.
+```
+
+Fix:
+
+```
+Check that the connection may list and read objects under the warehouse, then run preflight again.
+```
+
+<a id="paimon-storage"></a>
+### `paimon_storage`
+
+**Storage**
+
+- Why: Paimon keeps data, manifests and snapshots under the warehouse: BeziSync writes and deletes a test object there.
+
+Fix:
+
+```
+Check the bucket, the endpoint (and path-style access for S3-compatible stores) and that the key, or the runtime's role when no key is set, may put, get, list and delete objects under the warehouse (the check tries put and delete).
+```
+
+Fix:
+
+```
+Allow the address in BEZISYNC_SSRF_ALLOW_CIDRS, or use another endpoint.
+```
+
+## OceanBase
+
+<a id="oceanbase-config"></a>
+### `oceanbase_config`
+
+**Settings**
+
+<a id="oceanbase-create-table"></a>
+### `oceanbase_create_table`
+
+**Create tables**
+
+Fix:
+
+```
+GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}';
+GRANT CREATE ON *.* TO '{user}';
+```
+
+<a id="oceanbase-login"></a>
+### `oceanbase_login`
+
+**Sign in**
+
+- Why: The user includes its tenant (user@tenant, and #cluster through OBProxy); only MySQL tenants are written.
+
+<a id="oceanbase-network-blocked"></a>
+### `oceanbase_network_blocked`
+
+**Reach the OceanBase server (MySQL protocol)**
+
+- Why: Connection checks may not contact loopback, link-local or cloud metadata addresses.
+
+<a id="oceanbase-network-reachable"></a>
+### `oceanbase_network_reachable`
+
+**Reach the OceanBase server (MySQL protocol)**
+
+- Why: The host answered on the port.
+
+<a id="oceanbase-network-unreachable"></a>
+### `oceanbase_network_unreachable`
+
+**Reach the OceanBase server (MySQL protocol)**
+
+- Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
+
 ## Database (JDBC)
 
 <a id="jdbc-config"></a>

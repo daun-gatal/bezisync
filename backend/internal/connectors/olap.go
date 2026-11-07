@@ -36,6 +36,10 @@ type olapSink struct {
 	probe func(table string, replicas int) string
 	// grant is the SQL that gives a user what pipelines need.
 	grant func(c olapConfig) string
+	// noHTTP: the database loads over its SQL port only (OceanBase): no HTTP port to check.
+	noHTTP bool
+	// mysqlDrop: DROP TABLE without StarRocks's and Doris's FORCE (MySQL syntax).
+	mysqlDrop bool
 }
 
 func (o olapSink) cfg(conn Resolved) (olapConfig, error) {
@@ -50,11 +54,21 @@ func (o olapSink) cfg(conn Resolved) (olapConfig, error) {
 	}
 	c := olapConfig{Host: Str(cfg, "host"), QueryPort: Int(cfg, "query_port"), HTTP: Int(cfg, "http_port"), Database: Str(cfg, "database"),
 		User: Str(cfg, "user"), Replicas: Int(cfg, "replicas"), Password: Str(sec, "password"), BENodes: Str(cfg, "be_nodes")}
+	if !olapHost(c.Host) {
+		// The host goes into JDBC and load URLs: a '/', '?' or '&' would add driver options.
+		return c, problem.New(422, o.typ+"_config", "The host is a host name or an IP address.").
+			WithErrors([]map[string]any{{"loc": []string{"config", "host"}, "message": "Use a host name or an IP address, without a scheme, port or path."}})
+	}
 	if !flinkName.MatchString(c.Database) {
 		return c, problem.New(422, o.typ+"_config", "The database name may only use letters, digits and underscores.").
 			WithErrors([]map[string]any{{"loc": []string{"config", "database"}, "message": "Use letters, digits and '_'."}})
 	}
 	return c, nil
+}
+
+// olapHost: a host name, an IPv4 address, or an IPv6 address (bracketed by net.JoinHostPort).
+func olapHost(h string) bool {
+	return oraHost.MatchString(h) || (net.ParseIP(h) != nil && strings.Contains(h, ":"))
 }
 
 func (c olapConfig) open(ctx context.Context, timeout time.Duration) (*sql.Conn, func(), error) {
@@ -105,10 +119,10 @@ func (o olapSink) check(ctx context.Context, conn Resolved) (checks.Report, erro
 		}
 		return checks.Report{}, err
 	}
-	if !NetworkCheck(ctx, run, cfg.Host, cfg.QueryPort, o.typ+"_network", "the "+o.title+" FE (MySQL protocol)", 0) {
+	if !NetworkCheck(ctx, run, cfg.Host, cfg.QueryPort, o.typ+"_network", "the "+o.title+" "+o.sqlEndpoint(), 0) {
 		return checks.Summarize(run.Checks, started), nil
 	}
-	if !NetworkCheck(ctx, run, cfg.Host, cfg.HTTP, o.typ+"_http", "the "+o.title+" FE (HTTP, Stream Load)", 0) {
+	if !o.noHTTP && !NetworkCheck(ctx, run, cfg.Host, cfg.HTTP, o.typ+"_http", "the "+o.title+" FE (HTTP, Stream Load)", 0) {
 		return checks.Summarize(run.Checks, started), nil
 	}
 	c, done, err := cfg.open(ctx, 10*time.Second)
@@ -136,7 +150,7 @@ func (o olapSink) check(ctx context.Context, conn Resolved) (checks.Report, erro
 	if _, err := c.ExecContext(ctx, o.probe(olapTable(probe), cfg.Replicas)); err != nil {
 		return fail("BeziSync could not create a table in "+cfg.Database+": the pipeline creates its tables.", err), nil
 	}
-	_, _ = c.ExecContext(context.WithoutCancel(ctx), "DROP TABLE "+olapTable(probe)+" FORCE")
+	_, _ = c.ExecContext(context.WithoutCancel(ctx), o.drop(olapTable(probe)))
 	run.Passed(o.typ+"_create_table", "Create tables", checks.CatPermissions, "Created and dropped a test table in "+cfg.Database+".", "")
 	return checks.Summarize(run.Checks, started), nil
 }
@@ -209,7 +223,7 @@ func (o olapSink) cleanup(ctx context.Context, conn Resolved, destinations map[s
 	defer done()
 	var results []ArtifactResult
 	for _, dest := range sortedUnique(destinations) {
-		if _, err := c.ExecContext(ctx, "DROP TABLE "+olapTable(dest)+" FORCE"); err != nil {
+		if _, err := c.ExecContext(ctx, o.drop(olapTable(dest))); err != nil {
 			outcome := "failed"
 			if olapMissing(err) {
 				outcome = "not_found"
@@ -220,4 +234,20 @@ func (o olapSink) cleanup(ctx context.Context, conn Resolved, destinations map[s
 		results = append(results, ArtifactResult{Kind: "table", Name: dest, Outcome: "removed"})
 	}
 	return results, nil
+}
+
+// drop is the statement that drops a table.
+func (o olapSink) drop(table string) string {
+	if o.mysqlDrop {
+		return "DROP TABLE " + table
+	}
+	return "DROP TABLE " + table + " FORCE"
+}
+
+// sqlEndpoint names what the SQL port is, for checks.
+func (o olapSink) sqlEndpoint() string {
+	if o.noHTTP {
+		return "server (MySQL protocol)"
+	}
+	return "FE (MySQL protocol)"
 }
