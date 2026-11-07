@@ -80,10 +80,66 @@ func TestIcebergPartitionBy(t *testing.T) {
 	if b, err := compile(same); err != nil || b.Options.Get("partition.key") != "lake.orders:bucket[8](id)" {
 		t.Fatal(err, b)
 	}
-	// Debezium's build partitions by its own option.
-	if _, _, err := (&icebergSink{}).CompileSink(Resolved{Type: "iceberg", Config: rest, Secrets: map[string]any{"token": "x"}}, CompileContext{ShortID: "0123456789ab", Spec: spec}); err == nil ||
-		!strings.Contains(err.Error(), "Partition by is a Flink CDC option") {
+}
+
+// ADR 0005 R1, R2: Partition by on Debezium, as the build's per-table partition-by keyed by the
+// event's destination; precedence over the automatic default; routes.
+func TestIcebergPartitionByDebezium(t *testing.T) {
+	rest := map[string]any{"catalog_type": "rest", "uri": "https://cat.example/api", "warehouse": "s3://lake/", "namespace": "lake", "auth": "token", "storage": "vended"}
+	compile := func(spec domain.PipelineSpec, opts map[string]any) (map[string]string, error) {
+		for k, v := range opts {
+			spec.Sink.Options[k] = v
+		}
+		spec.Sink.Naming = "{schema}_{table}"
+		props, _, err := (&icebergSink{}).CompileSink(Resolved{Type: "iceberg", Config: rest, Secrets: map[string]any{"token": "x"}}, CompileContext{ShortID: "0123456789ab", Spec: spec})
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]string{}
+		for k, v := range props {
+			if after, ok := strings.CutPrefix(k, "debezium.sink.iceberg.partition-by."); ok {
+				out[after] = v
+			}
+		}
+		return out, nil
+	}
+	long := strings.Repeat("c", 63)
+	spec := partitionSpec([]string{"shop.orders", "shop.items", "shop.events"}, map[string]any{
+		"shop.orders": []any{field("created_at", "day", 0), field("id", "bucket", 16)},
+		"shop.items":  []any{field("SKU", "truncate", 4), field("region", "identity", 0), field(long, "year", 0), field("at", "hour", 0)},
+	})
+	got, err := compile(spec, map[string]any{"partitioning": "auto", "partitions": map[string]any{"shop.orders": "id", "shop.events": "id"}})
+	if err != nil {
 		t.Fatal(err)
+	}
+	want := map[string]string{
+		"shop_orders": `day(created_at),bucket(id\,16)`,
+		"shop_items":  `truncate(SKU\,4),region,year(` + long + `),hour(at)`, // X3: names verbatim, case kept
+		"shop_events": `bucket(id\,16)`,                                      // unlisted: the automatic default
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("partition-by: %v, want %v", got, want)
+	}
+	// E8: partitioning none turns the default off, not Partition by.
+	got, _ = compile(spec, map[string]any{"partitions": map[string]any{"shop.events": "id"}})
+	if _, ok := got["shop_events"]; !ok {
+		t.Fatal("auto by default")
+	}
+	got, _ = compile(spec, map[string]any{"partitioning": "none", "partitions": map[string]any{"shop.events": "id"}})
+	if _, ok := got["shop_events"]; ok || got["shop_orders"] == "" {
+		t.Fatalf("none: %v", got)
+	}
+	// E16: tables routed together list the same fields, keyed by the route's destination.
+	route := domain.Transform{Type: "route", Routes: []domain.Route{{Match: "shop.orders_*", To: "orders"}}}
+	merged := partitionSpec([]string{"shop.orders_eu", "shop.orders_us"}, map[string]any{
+		"shop.orders_eu": []any{field("id", "bucket", 8)}, "shop.orders_us": []any{field("id", "bucket", 16)}}, route)
+	if _, err := compile(merged, nil); err == nil || !strings.Contains(err.Error(), "different partitioning") {
+		t.Fatal(err)
+	}
+	same := partitionSpec([]string{"shop.orders_eu", "shop.orders_us"}, map[string]any{
+		"shop.orders_eu": []any{field("id", "bucket", 8)}, "shop.orders_us": []any{field("id", "bucket", 8)}}, route)
+	if got, err := compile(same, nil); err != nil || fmt.Sprint(got) != fmt.Sprint(map[string]string{"orders": `bucket(id\,8)`}) {
+		t.Fatal(err, got)
 	}
 }
 

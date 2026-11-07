@@ -2995,7 +2995,7 @@
         "type": "object",
         "ui": {
          "hidden": true,
-         "help": "Flink CDC only: table (schema.table) → its partition fields, applied when Flink CDC creates the table."
+         "help": "Table (schema.table) → its partition fields, applied when the engine creates the table. On Debezium a table not listed keeps the automatic partitioning (Partitioning)."
         }
        }
       },

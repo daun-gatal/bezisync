@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
+	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
 	"github.com/daun-gatal/bezisync/backend/internal/ssrf"
@@ -130,8 +131,9 @@ func (s *icebergSink) CompileSink(conn Resolved, c CompileContext) (map[string]s
 	if err != nil {
 		return nil, nil, err
 	}
-	if by, _ := opts["partition_by"].(map[string]any); len(by) > 0 {
-		return nil, nil, problem.New(422, "engine_settings", "Partition by is a Flink CDC option: on Debezium, choose Partitioning (by key bucket, or the day of the change) in the Destination step.")
+	partitions, err := icebergPartitions(c, opts)
+	if err != nil {
+		return nil, nil, err
 	}
 	const p = "debezium.sink.iceberg."
 	props := map[string]string{
@@ -192,8 +194,8 @@ func (s *icebergSink) CompileSink(conn Resolved, c CompileContext) (map[string]s
 		props["debezium.sink.batch.batch-size-wait.max-wait-ms"] = fmt.Sprint(wait.Milliseconds())
 		props["debezium.sink.batch.batch-size-wait.wait-interval-ms"] = fmt.Sprint(min(wait/6, 10*time.Second).Milliseconds())
 	}
-	for routed, expr := range icebergPartitions(c, opts) {
-		props[p+"partition-by."+routed] = expr
+	for topic, expr := range partitions {
+		props[p+"partition-by."+topic] = expr
 	}
 	return props, env, nil
 }
@@ -217,35 +219,59 @@ func (s *icebergSink) DeliveryDelay(options map[string]any) time.Duration {
 
 var icebergColumnRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
-// icebergPartitions maps each captured table's routed destination to its partition expression.
-// Upserted tables are bucketed by their key column (from options.partitions, which the wizard
-// keeps from discovery; a table it does not list stays unpartitioned and preflight says so); a
-// change log is partitioned by the day of the change. The build applies it when it creates
-// the table.
-func icebergPartitions(c CompileContext, opts map[string]any) map[string]string {
-	out := map[string]string{}
-	if Str(opts, "partitioning") == "none" {
-		return out
+// icebergPartitions is the build's per-table partition-by (ADR 0005 R1, R2), keyed by the event's
+// destination: a table Partition by lists gets its fields, keyed after routes (tables routed
+// together must list the same); any other table the automatic default (debeziumAutomatic), keyed
+// by its naming-template topic exactly as it always compiled — for a routed table that key never
+// matches, so it stays unpartitioned (Known issues). The build reads the value as a list: the
+// comma inside bucket(…) and truncate(…) is escaped.
+func icebergPartitions(c CompileContext, opts map[string]any) (map[string]string, error) {
+	listed, err := IcebergPartitionBy(c.Spec, opts)
+	if err != nil {
+		return nil, err
 	}
-	keys, _ := opts["partitions"].(map[string]any)
+	routed := domain.RouteTargets(c.Spec)
+	out := map[string]string{}
+	topics := map[string]string{}
 	for _, t := range c.Spec.Source.Tables.Include {
 		schema, name, _ := strings.Cut(t, ".")
-		routed := c.Destination(schema, name)
-		if Str(opts, "write_mode") == "append" {
-			out[routed] = "day(__source_ts_ms)"
+		if fields, ok := listed[t]; ok {
+			topic := c.Destination(schema, name)
+			if to, isRouted := routed[t]; isRouted {
+				topic = to
+			}
+			expr := debeziumPartitionBy(fields)
+			if prev, seen := topics[topic]; seen && out[topic] != expr {
+				return nil, problem.New(422, "engine_settings", fmt.Sprintf("%s and %s are routed to %s with different partitioning: give them the same.", prev, t, topic))
+			}
+			out[topic], topics[topic] = expr, t
 			continue
 		}
-		col, listed := keys[t].(string)
-		switch {
-		case !listed:
-		case col == "":
-			out[routed] = "day(__source_ts_ms)"
-		case icebergColumnRe.MatchString(col):
-			// The build reads partition-by as a list: the comma inside bucket(…) is escaped.
-			out[routed] = fmt.Sprintf(`bucket(%s\,%s)`, col, Str(opts, "buckets"))
+		if fields := debeziumAutomatic(opts, t); len(fields) > 0 {
+			topic := c.Destination(schema, name)
+			if _, taken := topics[topic]; !taken {
+				out[topic] = debeziumPartitionBy(fields)
+			}
 		}
 	}
-	return out
+	return out, nil
+}
+
+// debeziumPartitionBy writes fields as the build's partition-by list: a column, year(c), month(c),
+// day(c), hour(c), bucket(c\,N), truncate(c\,N) (column first: IcebergUtil.transformArgPair).
+func debeziumPartitionBy(fields []PartitionField) string {
+	parts := make([]string, len(fields))
+	for i, f := range fields {
+		switch f.Transform {
+		case "identity":
+			parts[i] = f.Column
+		case "bucket", "truncate":
+			parts[i] = fmt.Sprintf(`%s(%s\,%d)`, f.Transform, f.Column, f.N)
+		default:
+			parts[i] = f.Transform + "(" + f.Column + ")"
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 // Destination is the table the build writes: the namespace, then the routed name lower-cased

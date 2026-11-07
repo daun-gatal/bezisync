@@ -154,6 +154,18 @@ var icebergMatrixSpecs = map[string]map[string]any{
 	"ice-route": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders", "public.orders_archive"}}},
 		"sink":       map[string]any{"options": map[string]any{"partitions": map[string]any{"public.orders": "id", "public.orders_archive": "id"}}},
 		"transforms": []any{map[string]any{"type": "route", "id": "rt01", "routes": []any{map[string]any{"match": "public.orders*", "to": "all_orders"}}}}},
+	// Partition by on Debezium (ADR 0005): listed tables get their fields, the others the default.
+	"ice-partition-by": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders", "public.customers"}}},
+		"sink": map[string]any{"options": map[string]any{"partitions": map[string]any{"public.orders": "id", "public.customers": "id"}, "partition_by": map[string]any{
+			"public.orders": []any{map[string]any{"column": "id", "transform": "bucket", "n": 8}, map[string]any{"column": "region", "transform": "identity"}}}}}},
+	"ice-partition-by-append": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders"}}},
+		"sink": map[string]any{"options": map[string]any{"write_mode": "append", "partitioning": "none", "partition_by": map[string]any{
+			"public.orders": []any{map[string]any{"column": "__source_ts_ms", "transform": "hour"}, map[string]any{"column": "name", "transform": "truncate", "n": 4}}}}}},
+	"ice-partition-by-route": {"source": map[string]any{"tables": map[string]any{"include": []any{"public.orders", "public.orders_archive"}}},
+		"sink": map[string]any{"options": map[string]any{"partition_by": map[string]any{
+			"public.orders":         []any{map[string]any{"column": "id", "transform": "bucket", "n": 4}},
+			"public.orders_archive": []any{map[string]any{"column": "id", "transform": "bucket", "n": 4}}}}},
+		"transforms": []any{map[string]any{"type": "route", "id": "rt01", "routes": []any{map[string]any{"match": "public.orders*", "to": "all_orders"}}}}},
 }
 
 // Iceberg-only shapes on Flink CDC: Partition by, with a route.
