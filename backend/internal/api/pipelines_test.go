@@ -317,6 +317,23 @@ func TestPipelinePermissionsAndValidation(t *testing.T) {
 	labels := e.ids.body()
 	labels["name"], labels["labels"] = "y", map[string]any{"Bad Key": "v"}
 	e.admin.post(base, labels).expect(422)
+	// Editing follows the same rule when the labels change (Known issue 8)...
+	u := base + "/" + pipe.Str("id")
+	cur := e.admin.get(u).expect(200)
+	if c := e.admin.patch(u, map[string]any{"labels": map[string]any{"Bad Key": "v"}}, ifMatch(cur.At("version"))...).expect(422); !strings.Contains(string(c.Raw), "up to 20 labels") {
+		t.Fatal(string(c.Raw))
+	}
+	many := map[string]any{}
+	for i := range 21 {
+		many[fmt.Sprintf("k%d", i)] = "v"
+	}
+	e.admin.patch(u, map[string]any{"labels": many}, ifMatch(cur.At("version"))...).expect(422)
+	e.admin.patch(u, map[string]any{"labels": map[string]any{"team": strings.Repeat("x", 64)}}, ifMatch(cur.At("version"))...).expect(422)
+	e.admin.patch(u, map[string]any{"labels": map[string]any{"team": strings.Repeat("x", 63)}}, ifMatch(cur.At("version"))...).expect(200)
+	// ...but labels an older pipeline already holds still save unchanged.
+	exec(t, `UPDATE pipelines SET labels = '{"Old Key": "v"}' WHERE id = '`+pipe.Str("id")+`'`)
+	cur = e.admin.get(u).expect(200)
+	e.admin.patch(u, map[string]any{"owner": "ops", "labels": map[string]any{"Old Key": "v"}}, ifMatch(cur.At("version"))...).expect(200)
 }
 
 func TestRuntimeAPI(t *testing.T) {

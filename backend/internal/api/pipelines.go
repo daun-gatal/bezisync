@@ -180,14 +180,8 @@ func labelsOf(v *val.V, o *val.Object, key string, validate bool) (map[string]st
 		return nil, false
 	}
 	if validate {
-		bad := len(m) > 20
-		for k, value := range m {
-			if !SlugRe.MatchString(k) || len([]rune(value)) > 63 {
-				bad = true
-			}
-		}
-		if bad {
-			v.Fail(f.Loc, "value_error", "Value error, up to 20 labels; keys are slugs, values at most 63 characters")
+		if !domain.LabelsValid(m) {
+			v.Fail(f.Loc, "value_error", domain.LabelsMessage)
 			return nil, false
 		}
 	}

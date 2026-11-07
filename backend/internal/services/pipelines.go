@@ -597,8 +597,17 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 	}
 	if e.LabelsSet {
 		labels := db.Map{}
+		same := len(e.Labels) == len(p.Labels)
 		for k, v := range e.Labels {
 			labels[k] = v
+			same = same && p.Labels[k] == v
+		}
+		// Changed labels follow the create-time rule; unchanged ones (even an older pipeline's
+		// that break it) save as they are.
+		if !same && !domain.LabelsValid(e.Labels) {
+			v := &val.V{}
+			v.Fail(val.Loc{"body", "labels"}, "value_error", domain.LabelsMessage)
+			return nil, v.Problem()
 		}
 		p.Labels = labels
 	}
