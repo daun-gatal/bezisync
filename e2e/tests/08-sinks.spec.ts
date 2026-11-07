@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { Api, defaultProject, unique } from './helpers';
+import { Api, choose, defaultProject, signIn, unique } from './helpers';
 import { EVENTHUBS, HTTP_ECHO, HTTP_ECHO_FROM_RUNNER, ICEBERG_REST, KINESIS, MOTO, MOTO_FROM_RUNNER, NATS, PUBSUB, PUBSUB_FROM_RUNNER, PULSAR, REDIS, RUSTFS_TABLES, SOURCE_PG, TARGET_MYSQL, TARGET_PG } from './fixtures';
 import { sql, waitFor } from './data';
+import { walkWizard } from './walk';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -134,6 +135,82 @@ test('Postgres → Apache Iceberg (REST catalog): upserts, updates and deletes',
     undefined,
     { naming: icebergNaming, options: { write_mode: 'upsert_keep_deletes', commit_interval: 'now', partitions: { 'shop.orders': 'id' } } },
   );
+});
+
+// ADR 0005: Partition by on Debezium, picked in the wizard. Rows are upserted by key, so only the
+// key partitions them; the build creates the table with that spec, and preflight blocks
+// partitioning by a column outside the key.
+test('Postgres → Apache Iceberg on Debezium: Partition by from the wizard, applied when the table is created', async ({ page }) => {
+  test.setTimeout(900_000);
+  const api = await Api.signIn();
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('icepart');
+  const { password, ...pg } = SOURCE_PG;
+  const { secret_access_key, ...config } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `d-${tag}`, config, secrets: { secret_access_key } }, 201);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id,
+    spec: { source: { tables: { include: ['shop.orders'] } }, sink: { naming: icebergNaming(tag), options: { write_mode: 'upsert', commit_interval: 'now' } }, snapshot: { mode: 'no_data' } },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  type Saved = { version: number; spec: { sink: { options: Record<string, unknown> } } & Record<string, unknown> };
+  type Pre = { sections: { report: { checks: { code: string; status: string; message: string }[] } }[] };
+  const check = (pre: Pre, code: string) => pre.sections.flatMap((s) => s.report.checks).find((c) => c.code === code);
+
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=sink`);
+  const part = page.getByRole('group', { name: 'Partition shop.orders' });
+  // Without fields the table gets the automatic default.
+  await expect(part.getByText('Automatic: 16 buckets of id')).toBeVisible();
+  await part.getByRole('button', { name: 'Add a partition field' }).click();
+  await part.getByLabel('shop.orders field 1 column').click();
+  // The time of the change is a Debezium column, but it changes with every update: not a key.
+  const changed = page.getByRole('listbox').getByRole('option', { name: '__source_ts_ms (time of the change)' });
+  await expect(changed).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByRole('listbox').getByRole('option', { name: 'created_at', exact: true })).toHaveAttribute('title', /Not part of the key/);
+  await page.getByRole('listbox').getByRole('option', { name: 'id', exact: true }).click();
+  await choose(part.getByLabel('shop.orders field 1 transform'), 'Buckets of a hash');
+  await part.getByLabel('shop.orders field 1 buckets').fill('8');
+  await page.getByRole('button', { name: 'Continue to transform →' }).click();
+  await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
+  expect((await api.get<Saved>(url)).spec.sink.options.partition_by).toEqual({ 'shop.orders': [{ n: 8, column: 'id', transform: 'bucket' }] });
+  await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+
+  const pre = await api.send<Pre>('POST', `${url}/preflight`, {});
+  for (const code of ['iceberg_partition_column', 'iceberg_partition_key']) expect(check(pre, code)?.status, check(pre, code)?.message).toBe('pass');
+  await api.send('POST', `${url}/deploy`, {});
+  await waitFor('Debezium Iceberg with Partition by streaming', async () => {
+    const cur = await api.get<{ lifecycle: string; status: unknown }>(url);
+    if (cur.lifecycle === 'failed') throw new Error(JSON.stringify(cur.status));
+    return cur.lifecycle === 'streaming';
+  }, 420_000);
+  const marker = `PART-${tag}`;
+  await sql('INSERT INTO shop.orders (customer_id, status, total) VALUES (1, $1, 1)', [marker]);
+  await viaEventsApi({ api, url, marker });
+  const [row] = await sql<{ id: number }>('SELECT id FROM shop.orders WHERE status = $1', [marker]);
+  await sql('UPDATE shop.orders SET status = $1 WHERE id = $2', [`${marker}-paid`, row!.id]);
+  await waitFor('update upserted into its bucket', async () => {
+    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=shop.orders&limit=100`);
+    const mine = e.records.filter((r) => Number(r.value.id) === row!.id);
+    return mine.length === 1 && mine[0]!.value.status === `${marker}-paid`;
+  }, 240_000);
+
+  // The build created the table with that spec: the existing-table check now compares it.
+  const again = await api.send<Pre>('POST', `${url}/preflight`, {});
+  const existing = check(again, 'iceberg_partition_existing');
+  expect(existing?.status, existing?.message).toBe('pass');
+  expect(check(again, 'iceberg_partition_key')?.status).toBe('pass');
+  // E5/E9: the day the order was made is outside the key (blocked), and the table keeps bucket[8](id).
+  const cur = await api.get<Saved>(url);
+  await api.patch(url, { spec: { ...cur.spec, sink: { ...cur.spec.sink, options: { ...cur.spec.sink.options, partition_by: { 'shop.orders': [{ n: 0, column: 'created_at', transform: 'day' }] } } } } }, cur.version);
+  const unsafe = await api.send<Pre>('POST', `${url}/preflight`, {});
+  expect(check(unsafe, 'iceberg_partition_existing')?.message).toContain('bucket[8](id)');
+  expect(check(unsafe, 'iceberg_partition_existing')?.status).toBe('fail');
+  await api.send('DELETE', `${url}?drop_destinations=true`);
+  await waitFor('Debezium Iceberg with Partition by deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 240_000);
 });
 
 test('Postgres → Apache Iceberg (RustFS S3 Tables, preview): a change log', async () => {

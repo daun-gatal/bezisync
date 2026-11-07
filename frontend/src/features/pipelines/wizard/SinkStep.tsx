@@ -272,7 +272,7 @@ export function SinkStep({
       {partitioned ? (
         <Card>
           <PartitionByEditor value={partitionByFor(partitionBy, engine)} onChange={setPartitionBy} tables={tables} discovered={discovery.data?.tables} sourceType={pipeline.source.type}
-            spec={spec} engine={engine} options={{ ...spec.sink.options, ...options }} />
+            spec={spec} engine={engine} options={savedOptions} />
         </Card>
       ) : null}
       <InlineError error={error} doing="Couldn’t save the destination" />
