@@ -163,9 +163,11 @@ func Evaluate(kind string, p *models.Pipeline, params map[string]any, now time.T
 	case "delivery_unverified":
 		canary := mapOf(status["canary"])
 		if running && canary["ok"] == false {
-			pending := mapOf(canary["pending"])
+			// The lost canary's time (a newer one may already be pending).
 			sent := "unknown time"
-			if v, ok := pending["sent_at"]; ok {
+			if v, ok := canary["lost_sent_at"]; ok && v != nil {
+				sent = strOf(v)
+			} else if v, ok := mapOf(canary["pending"])["sent_at"]; ok {
 				sent = strOf(v)
 			}
 			return Condition{true, p.Name + ": delivery not verified",

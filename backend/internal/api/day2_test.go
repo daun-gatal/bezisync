@@ -119,3 +119,40 @@ func TestVersionDiff(t *testing.T) {
 	e.admin.get(u + "/diff?from=1&to=9").expect(404)
 	e.admin.get(u + "/diff?from=1").expect(422)
 }
+
+// The stored position is remembered across ticks, so a position that moves back without a reset
+// raises position_regressed and keeps it until the next probe (Known issue 4).
+func TestPositionRegressedSurvivesTicks(t *testing.T) {
+	e := newPipelineEnv(t)
+	pipe := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
+	u := "/api/v1/projects/" + e.pid + "/pipelines/" + pipe.Str("id")
+	e.admin.post(u+"/deploy", map[string]any{}).expect(200)
+	short := strings.ReplaceAll(pipe.Str("id"), "-", "")[:12]
+	seedOffsets(t, short)
+	e.tick()
+	if lsn := e.admin.get(u).At("status", "last_lsn"); lsn != float64(100) {
+		t.Fatal("first probe did not record the position:", lsn)
+	}
+	e.tick() // no probe due: the position must be carried, not dropped
+	if lsn := e.admin.get(u).At("status", "last_lsn"); lsn != float64(100) {
+		t.Fatal("a tick without a probe dropped the position:", lsn)
+	}
+	ctx := context.Background()
+	c, err := pgx.Connect(ctx, db.NormalizeURL(config.Get().EffectiveStateDatabaseURL()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close(ctx) }()
+	if _, err := c.Exec(ctx, fmt.Sprintf(`UPDATE %s."offsets_%s" SET offset_val = '{"lsn": 50, "ts_usec": 1793003413680478}'`, compiler.StateSchema, short)); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, `UPDATE pipelines SET status = jsonb_set(status, '{source_impact,at}', '"2000-01-01T00:00:00+00:00"') WHERE id = '`+pipe.Str("id")+`'`)
+	e.tick()
+	if !conditionActive(t, pipe.Str("id"), "position_regressed") {
+		t.Fatal("position_regressed not raised:", string(e.admin.get(u).Raw))
+	}
+	e.tick() // and it stays raised until the next probe instead of flapping
+	if !conditionActive(t, pipe.Str("id"), "position_regressed") {
+		t.Fatal("position_regressed dropped by the next tick")
+	}
+}

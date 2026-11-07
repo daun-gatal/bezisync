@@ -41,7 +41,7 @@ const LeaderLock = 0x62657A01
 
 // CarriedStatus are status keys written outside the observe loop that a tick keeps.
 var CarriedStatus = []string{"counters", "source_impact", "events_per_second", "forced", "scheduled_snapshot", "schema_pending_breaking", "canary",
-	"transform_drift"}
+	"transform_drift", "last_lsn", "position_regressed"}
 
 const (
 	probeEvery  = 30 * time.Second
@@ -717,15 +717,18 @@ func (c *Controller) canary(ctx context.Context, tx pgx.Tx, p *models.Pipeline, 
 				state["ok"], state["verified_at"] = true, pytime.ISOFormat(now)
 				state["latency_ms"] = int64(now.Sub(sent).Seconds() * 1000)
 				delete(state, "pending")
+				delete(state, "lost_sent_at")
 			case now.Sub(sent) > time.Duration(s.CanaryTimeoutSeconds)*time.Second:
-				state["ok"] = false
+				// Lost: say so until a later canary arrives, and send the next one (a pending
+				// canary blocks new ones). The alert names when the lost one was written.
+				state["ok"], state["lost_sent_at"] = false, pending["sent_at"]
+				delete(state, "pending")
 			}
 		}
 	}
 	last, ok := parseISO(state["sent_at"])
 	due := !ok || now.Sub(last) >= time.Duration(s.CanaryIntervalSeconds)*time.Second
-	if _, hasPending := state["pending"]; !truthy(state["pending"]) && due {
-		_ = hasPending
+	if !truthy(state["pending"]) && due {
 		token := strings.ReplaceAll(uuid.NewString(), "-", "")
 		resolved, err := services.Resolve(ctx, tx, sourceConn)
 		if err == nil {
