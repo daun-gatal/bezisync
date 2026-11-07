@@ -50,13 +50,32 @@ export function specForEngine(spec: FullSpec, engine: EngineId): FullSpec {
     const { values: _values, tuning: _t, ...rest } = spec;
     void _values;
     void _t;
-    return { ...rest, debezium_image: null, advanced: {}, snapshot: { ...spec.snapshot, delay_seconds: 0, window: null }, ...(tuning ? { tuning } : {}) };
+    return {
+      ...rest,
+      sink: { ...spec.sink, options: withoutSourceTimestamp(spec.sink.options) },
+      debezium_image: null,
+      advanced: {},
+      snapshot: { ...spec.snapshot, delay_seconds: 0, window: null },
+      ...(tuning ? { tuning } : {}),
+    };
   }
   const { flink_cdc: _fc, flink_cdc_image: _img, tuning: _t, ...rest } = spec;
   void _fc;
   void _img;
   void _t;
   return { ...rest, ...(tuning ? { tuning } : {}) };
+}
+
+/** Iceberg Partition by without Debezium's time of the change (__source_ts_ms), which Flink CDC
+ *  doesn't write; a table left without fields is dropped, and so is an empty Partition by. */
+function withoutSourceTimestamp(options: Record<string, unknown>): Record<string, unknown> {
+  const by = options.partition_by as Record<string, { column: string }[]> | undefined;
+  if (!by) return options;
+  if (!Object.values(by).some((fields) => fields.some((f) => f.column === '__source_ts_ms'))) return options;
+  const kept = Object.fromEntries(Object.entries(by).map(([t, f]) => [t, f.filter((x) => x.column !== '__source_ts_ms')] as const).filter(([, f]) => f.length));
+  const { partition_by: _pb, ...rest } = options;
+  void _pb;
+  return Object.keys(kept).length ? { ...rest, partition_by: kept } : rest;
 }
 
 /** The settings of one engine: Debezium keys start with "debezium.", Flink CDC keys with the YAML

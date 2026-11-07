@@ -309,13 +309,19 @@ test('Flink CDC: an editor adds a computed column and partitions the Iceberg tab
   type Saved = { spec: { transforms: Record<string, unknown>[]; sink: { options: { partition_by?: unknown } } } };
   await signIn(page);
 
-  // Destination: partition orders by the day they were made, then buckets of the key.
+  // Destination: rows are upserted by key, so only the key partitions them (ADR 0005): a column
+  // outside it is offered disabled, with the reason. The leading part of an increasing key gives
+  // insert-ordered ranges; then buckets of it.
   await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=sink`);
   const part = page.getByRole('group', { name: 'Partition shop.orders' });
   await part.getByRole('button', { name: 'Add a partition field' }).click();
-  await choose(part.getByLabel('shop.orders field 1 column'), 'created_at');
-  // A timestamp offers the time transforms; text would not.
-  await choose(part.getByLabel('shop.orders field 1 transform'), 'Day');
+  await part.getByLabel('shop.orders field 1 column').click();
+  const createdAt = page.getByRole('listbox').getByRole('option', { name: 'created_at', exact: true });
+  await expect(createdAt).toHaveAttribute('aria-disabled', 'true');
+  await expect(createdAt).toHaveAttribute('title', /Not part of the key/);
+  await page.getByRole('listbox').getByRole('option', { name: 'id', exact: true }).click();
+  await choose(part.getByLabel('shop.orders field 1 transform'), 'Leading part');
+  await part.getByLabel('shop.orders field 1 width').fill('100000');
   await part.getByRole('button', { name: 'Add a partition field' }).click();
   await choose(part.getByLabel('shop.orders field 2 column'), 'id');
   await choose(part.getByLabel('shop.orders field 2 transform'), 'Buckets of a hash');
@@ -324,7 +330,7 @@ test('Flink CDC: an editor adds a computed column and partitions the Iceberg tab
   await part.getByLabel('shop.orders field 2 buckets').fill('8');
   await page.getByRole('button', { name: 'Continue to transform →' }).click();
   await expect(page.getByRole('heading', { name: 'Which rows and columns reach each table?' })).toBeVisible();
-  expect((await api.get<Saved>(url)).spec.sink.options.partition_by).toEqual({ 'shop.orders': [{ n: 0, column: 'created_at', transform: 'day' }, { n: 8, column: 'id', transform: 'bucket' }] });
+  expect((await api.get<Saved>(url)).spec.sink.options.partition_by).toEqual({ 'shop.orders': [{ n: 100000, column: 'id', transform: 'truncate' }, { n: 8, column: 'id', transform: 'bucket' }] });
 
   // Transform: a computed column joining the status and the customer, picked, never typed as SQL.
   await page.getByRole('button', { name: 'Add transform' }).click();
@@ -352,8 +358,17 @@ test('Flink CDC: an editor adds a computed column and partitions the Iceberg tab
   const pre = await api.send<{ sections: { report: { checks: { code: string; status: string }[] } }[] }>('POST', `${url}/preflight`, {});
   const all = pre.sections.flatMap((s) => s.report.checks);
   expect(all.find((c) => c.code === 'iceberg_partition_column')?.status).toBe('pass');
+  expect(all.find((c) => c.code === 'iceberg_partition_key')?.status).toBe('pass');
   expect(all.find((c) => c.code === 'transform_computed_input')).toBeUndefined();
   await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+  // E13: the day the order was made is outside the key: an update that changes it would leave the
+  // old row behind, so preflight blocks it (sent through the API, past the editor).
+  const cur = await api.get<{ version: number; spec: { sink: { options: Record<string, unknown> } } & Record<string, unknown> }>(url);
+  await api.patch(url, { spec: { ...cur.spec, sink: { ...cur.spec.sink, options: { ...cur.spec.sink.options, partition_by: { 'shop.orders': [{ n: 0, column: 'created_at', transform: 'day' }] } } } } }, cur.version);
+  const unsafe = await api.send<{ sections: { report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
+  const key = unsafe.sections.flatMap((s) => s.report.checks).find((c) => c.code === 'iceberg_partition_key');
+  expect(key?.status, key?.message).toBe('fail');
+  expect(key?.message).toContain('day(created_at) (its key: id)');
   await api.send('DELETE', url);
 });
 
