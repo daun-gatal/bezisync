@@ -67,7 +67,9 @@ export function SinkStep({
   const [picked, setPicked] = useState<EngineId | null>(null);
   const engine: EngineId = deployed ? pipeline.engine : (picked ?? pickEngine(choices, pipeline.engine));
   const flink = engine === 'flink-cdc';
-  const optionsSchema = optionsSchemaFor(caps.options_schema as JsonSchema | null, engine);
+  // Debezium is a real choice for a change log only before the first deploy, where it runs this pair.
+  const debeziumOffered = !deployed && choices.some((e) => e.id === 'debezium' && e.available);
+  const optionsSchema = optionsSchemaFor(caps.options_schema as JsonSchema | null, engine, { debeziumOffered });
   const masked = Object.values(spec.source.columns).reduce((n, r) => n + (r.mask?.length ?? 0), 0);
   const formats = FORMATS.filter((f) => caps.formats.includes(f.value));
   // A sink with one format (Iceberg reads Kafka Connect structs) uses it whatever the spec says.

@@ -21,6 +21,8 @@ export interface JsonSchemaProp {
     /** Display names (and one-line help) of enum values. */
     labels?: Record<string, string>;
     descriptions?: Record<string, string>;
+    /** Enum values shown but not choosable, with the reason (set by the wizard, never by descriptors). */
+    unavailable?: Record<string, string>;
     /** Shown only while each named field has one of the listed values. */
     when?: Record<string, unknown[]>;
     /** Kept in the values but never rendered (the wizard fills it). */
@@ -221,7 +223,13 @@ export function SchemaForm({
                       placeholder="Not set"
                       options={[
                         ...(f.nullable ? [{ value: '', label: 'Not set' }] : []),
-                        ...f.options.map((o) => ({ value: o, label: f.prop.ui?.labels?.[o] ?? o, description: f.prop.ui?.descriptions?.[o] })),
+                        ...f.options.map((o) => ({
+                          value: o,
+                          label: f.prop.ui?.labels?.[o] ?? o,
+                          description: f.prop.ui?.descriptions?.[o],
+                          disabled: Boolean(f.prop.ui?.unavailable?.[o]),
+                          why: f.prop.ui?.unavailable?.[o],
+                        })),
                       ]}
                     />
                   ) : f.kind === 'list' ? (

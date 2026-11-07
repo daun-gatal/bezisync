@@ -1,5 +1,5 @@
 import { DEFAULT_SINK_CAPS, type SinkCaps } from '@/lib/connections';
-import { deriveSinkOptions, destinationFor, keepPartitionBy, rederiveTableKeys, flinkSinkOptions, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
+import { deriveSinkOptions, destinationFor, FLINK_NO_APPEND, keepPartitionBy, rederiveTableKeys, flinkSinkOptions, fullSpec, namingError, optionsSchemaFor, parseAdvanced, pruneToTables, sinkDestinationFor, sinkNamingError, specForEngine, stageOf, withShape } from '../spec';
 
 describe('pipeline spec helpers', () => {
   it('fills defaults that mirror the backend', () => {
@@ -20,7 +20,11 @@ describe('pipeline spec helpers', () => {
     expect(optionsSchemaFor(schema, 'debezium')).toBe(schema);
     const flink = optionsSchemaFor(schema, 'flink-cdc');
     expect(Object.keys(flink?.properties ?? {})).toEqual(['write_mode']);
-    expect(flink?.properties?.write_mode?.enum).toEqual(['upsert_keep_deletes', 'upsert']);
+    // P-11: the change log stays in the list, unavailable with the reason; Debezium only when offered.
+    expect(flink?.properties?.write_mode?.enum).toEqual(['upsert_keep_deletes', 'upsert', 'append']);
+    expect(flink?.properties?.write_mode?.ui?.unavailable).toEqual({ append: FLINK_NO_APPEND });
+    expect(optionsSchemaFor(schema, 'flink-cdc', { debeziumOffered: true })?.properties?.write_mode?.ui?.unavailable?.append).toBe(FLINK_NO_APPEND + ' Choose Debezium above for a change log.');
+    expect(optionsSchemaFor(schema, 'debezium')?.properties?.write_mode?.ui).not.toHaveProperty('unavailable');
     expect(flink?.properties?.write_mode?.ui?.labels).toEqual({ upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'", upsert: 'Latest row; deletes removed' });
   });
   it('previews destinations', () => {

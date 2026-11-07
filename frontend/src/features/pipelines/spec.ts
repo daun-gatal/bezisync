@@ -343,7 +343,12 @@ export function flinkSinkOptions(schema: JsonSchema, options: Record<string, unk
   return by && typeof by === 'object' && Object.keys(by).length ? jsonbSorted({ ...out, partition_by: by }) : out;
 }
 
-export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: EngineId): JsonSchema | null {
+/** Why Flink CDC can't write an Iceberg change log (ADR 0007 P4): its writer always upserts by key. */
+export const FLINK_NO_APPEND = "Flink CDC's Iceberg writer always writes rows by the table's key, so it can't keep every change as its own row.";
+
+/** The destination options an engine has. On Flink CDC, Iceberg's change log is shown unavailable
+ *  with the reason, naming Debezium when it is a real choice (`debeziumOffered`). */
+export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: EngineId, opts: { debeziumOffered?: boolean } = {}): JsonSchema | null {
   if (!schema) return null;
   if (engine !== 'flink-cdc' || !schema.properties) return schema;
   const properties: NonNullable<JsonSchema['properties']> = {};
@@ -353,9 +358,15 @@ export function optionsSchemaFor(schema: JsonSchema | null | undefined, engine: 
       name === 'write_mode' && prop.enum
         ? {
             ...prop,
-            enum: prop.enum.filter((v) => v !== 'append'),
-            // Flink CDC marks a kept delete with its change type, not Debezium's __deleted.
-            ui: prop.ui && { ...prop.ui, labels: { ...prop.ui.labels, upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'" } },
+            // Flink CDC marks a kept delete with its change type, not Debezium's __deleted; a change log
+            // is shown, unavailable, with the reason.
+            ui: {
+              ...prop.ui,
+              labels: { ...prop.ui?.labels, upsert_keep_deletes: "Latest row; deletes kept with __op = '-D'" },
+              ...(prop.enum.includes('append')
+                ? { unavailable: { append: FLINK_NO_APPEND + (opts.debeziumOffered ? ' Choose Debezium above for a change log.' : '') } }
+                : {}),
+            },
           }
         : prop;
   }
