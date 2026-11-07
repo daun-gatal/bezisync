@@ -400,15 +400,16 @@ func TestIcebergPartitionKey(t *testing.T) {
 		"a routed table bucketed by its key": {info: orders, opts: recorded("id"), mutate: func(s *domain.PipelineSpec) {
 			s.Transforms = []domain.Transform{{Type: "route", Routes: []domain.Route{{Match: "shop.orders", To: "all"}}}}
 		}, cat: missing, want: ""},
-		"E18 MongoDB":                              {info: orders, opts: recorded(""), source: "mongodb", cat: missing, want: "-"},
-		"E10 live table off its identity":          {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: "may already hold duplicate rows"},
-		"E14 live Flink table off its identity":    {flink: true, info: orders, opts: by(field("created_at", "day", 0)), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: "identity id"},
-		"live table bucketed by its identity":      {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"bucket[16]", "id"})}}, want: ""},
-		"X9 live table without identifier fields":  {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, false, [2]string{"day", "created_at"})}}, want: ""},
-		"live table, change log":                   {info: orders, opts: with(recorded("id"), "write_mode", "append"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: ""},
-		"live table: what is asked doesn't matter": {info: orders, opts: by(field("created_at", "day", 0)), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"bucket[16]", "id"})}}, want: ""},
-		"E11 unreadable table":                     {info: orders, opts: recorded("id"), cat: fakeTables{err: errors.New("403")}, want: "warn:Couldn't read"},
-		"no catalog: checked as new":               {info: orders, opts: by(field("created_at", "day", 0)), want: "day(created_at)"},
+		"E18 MongoDB":                                      {info: orders, opts: recorded(""), source: "mongodb", cat: missing, want: "-"},
+		"E10 live table off its identity":                  {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: "may already hold duplicate rows"},
+		"E14 live Flink table off its identity":            {flink: true, info: orders, opts: by(field("created_at", "day", 0)), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: "identity id"},
+		"live table bucketed by its identity":              {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"bucket[16]", "id"})}}, want: ""},
+		"X9 live table without identifier fields":          {info: orders, opts: recorded("id"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, false, [2]string{"day", "created_at"})}}, want: ""},
+		"X9 on Flink CDC: a keyless live table is blocked": {flink: true, info: orders, opts: by(field("id", "bucket", 4)), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, false)}}, want: "keyless:"},
+		"live table, change log":                           {info: orders, opts: with(recorded("id"), "write_mode", "append"), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"day", "created_at"})}}, want: ""},
+		"live table: what is asked doesn't matter":         {info: orders, opts: by(field("created_at", "day", 0)), cat: fakeTables{tables: map[string]*table.Table{"cdc_shop_orders": liveTable(t, true, [2]string{"bucket[16]", "id"})}}, want: ""},
+		"E11 unreadable table":                             {info: orders, opts: recorded("id"), cat: fakeTables{err: errors.New("403")}, want: "warn:Couldn't read"},
+		"no catalog: checked as new":                       {info: orders, opts: by(field("created_at", "day", 0)), want: "day(created_at)"},
 	}
 	for name, c := range cases {
 		spec := partitionSpec([]string{"shop.orders"}, nil)
@@ -436,6 +437,10 @@ func TestIcebergPartitionKey(t *testing.T) {
 			}
 		case c.want == "":
 			if len(got) != 1 || got[0].Status != checks.Pass {
+				t.Errorf("%s: %+v", name, got)
+			}
+		case c.want == "keyless:":
+			if len(got) != 2 || got[0].Code != "iceberg_flink_keyless_table" || !got[0].Blocking || !strings.Contains(got[0].Message, "lake.cdc_shop_orders") || got[1].Status != checks.Pass {
 				t.Errorf("%s: %+v", name, got)
 			}
 		case strings.HasPrefix(c.want, "warn:"):

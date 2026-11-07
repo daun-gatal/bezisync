@@ -475,7 +475,7 @@ func partitionKeyChecks(ctx context.Context, cat icebergTables, cfg icebergConfi
 		}
 		return nil
 	}
-	var unsafe, atRisk, unread []string
+	var unsafe, atRisk, unread, keyless []string
 	checked := false
 	for _, t := range facts.Tables {
 		id := t.Identifier()
@@ -484,6 +484,9 @@ func partitionKeyChecks(ctx context.Context, cat icebergTables, cfg icebergConfi
 			switch {
 			case err == nil:
 				checked = true
+				if facts.FlinkCDC && len(tbl.Schema().IdentifierFieldIDs) == 0 {
+					keyless = append(keyless, dest)
+				}
 				if msg := livePartitionRisk(tbl, facts); msg != "" {
 					atRisk = append(atRisk, dest+" "+msg)
 				}
@@ -520,12 +523,19 @@ func partitionKeyChecks(ctx context.Context, cat icebergTables, cfg icebergConfi
 			Fix: &checks.Fix{Kind: "text", Who: "you", Code: "Drop and recreate them (Positions → Start over, dropping destinations). Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates " +
 				"(SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1)."}})
 	}
+	if len(keyless) > 0 {
+		// Flink CDC 3.7.0 appends to a table without identifier fields, and writes a delete and the old
+		// values of an update as ordinary rows (fixed upstream in FLINK-41057, after 3.7.0).
+		out = append(out, checks.Check{Code: "iceberg_flink_keyless_table", Title: "Table without a key", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
+			Message: "These tables exist without identifier fields (no row key). Flink CDC would write into them every delete, and the old values of every update, as ordinary rows: " + strings.Join(keyless, ", ") + ".",
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Drop them and let the pipeline create them with the table's key (Positions → Start over, dropping destinations), or write them with a Debezium pipeline, which appends every change correctly."}})
+	}
 	if len(unread) > 0 {
 		out = append(out, checks.Check{Code: "iceberg_partition_key", Title: "Partitioning", Status: checks.Warn, Category: checks.CatDestination,
 			Message: "Couldn't read these tables from the catalog, so their partitioning against their key is unchecked: " + strings.Join(unread, ", ") + ".",
 			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Check the catalog connection's access to the namespace, then run preflight again."}})
 	}
-	if len(out) == 0 && checked {
+	if len(unsafe)+len(atRisk)+len(unread) == 0 && checked {
 		out = append(out, checks.Check{Code: "iceberg_partition_key", Title: "Partitioning", Status: checks.Pass, Category: checks.CatDestination,
 			Message: "Every upserted table is partitioned by its key columns (or not at all), so updates and deletes reach the rows they replace."})
 	}

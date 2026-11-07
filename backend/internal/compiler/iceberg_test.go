@@ -162,7 +162,7 @@ func TestCompileIcebergRefuses(t *testing.T) {
 		code   string
 	}{
 		{"rest without uri", map[string]any{"catalog_type": "rest", "warehouse": "lake"}, nil, "iceberg_config"},
-		{"expansion in a value", map[string]any{"catalog_type": "rest", "uri": "https://${HOST}", "warehouse": "lake"}, nil, "iceberg_config"},
+		{"expansion in a value", map[string]any{"catalog_type": "rest", "uri": "https://${HOST}", "warehouse": "lake"}, nil, "connection_config"},
 		{"glue without s3 warehouse", map[string]any{"catalog_type": "glue", "warehouse": "lake", "region": "eu-west-1"}, nil, "iceberg_config"},
 		{"dots-free naming rules", ok, func(s *domain.PipelineSpec) { s.Sink.Naming = "cdc-{schema}-{table}" }, "naming_invalid"},
 		{"outbox events", ok, func(s *domain.PipelineSpec) { s.Transforms = []domain.Transform{{Type: "outbox"}} }, "transform_unsupported"},

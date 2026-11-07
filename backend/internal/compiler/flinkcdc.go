@@ -90,6 +90,9 @@ var flinkStartupModes = map[string]string{"initial": "initial", "when_needed": "
 
 // CompileFlink compiles a Flink CDC pipeline; image is the Flink CDC image to run.
 func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved, image string, in FlinkInput) (*FlinkCompiled, error) {
+	if err := noConfigExpressions(source, sink); err != nil {
+		return nil, err
+	}
 	spec := c.Spec
 	if image == "" {
 		return nil, problem.New(422, "engine_unavailable", "No Flink CDC image is registered: an Admin adds one in Settings → Engine versions.")
