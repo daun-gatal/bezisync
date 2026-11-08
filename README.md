@@ -30,8 +30,9 @@ to Kafka, Iceberg or a dozen other destinations — with the mistakes caught bef
 | 🙈 **Personal data, chosen per pipeline** | Mask, remove or keep each column — never a silent leak. |
 | 🤖 **AI agents over MCP** | Agents get exactly their person's permissions, and never a credential. |
 
-**Sources:** PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, MongoDB, CockroachDB, Vitess, Google Cloud Spanner.<br>
-**Destinations:** Kafka, Apache Iceberg, PostgreSQL / MySQL / MariaDB / SQL Server, Pub/Sub, Kinesis, SQS, SNS, Azure Event Hubs, Pulsar, Redis Streams, NATS, HTTP; with the optional Flink CDC engine also StarRocks, Apache Doris, Apache Fluss, Apache Paimon, OceanBase and Elasticsearch.<br>
+**Engines:** each pipeline runs on **Debezium Server** or **[Flink CDC](docs/README.md#flink-cdc-engine)**, chosen per pipeline ([which to choose](docs/README.md#choose-an-engine)).<br>
+**Sources:** PostgreSQL, MySQL, MariaDB, SQL Server, Oracle (both engines); MongoDB, CockroachDB, Vitess, Google Cloud Spanner (Debezium).<br>
+**Destinations:** Kafka and Apache Iceberg (both engines); PostgreSQL / MySQL / MariaDB / SQL Server, Pub/Sub, Kinesis, SQS, SNS, Azure Event Hubs, Pulsar, Redis Streams, NATS, HTTP (Debezium); StarRocks, Apache Doris, Apache Fluss, Apache Paimon, OceanBase, Elasticsearch (Flink CDC).<br>
 **Runtimes:** Docker or Kubernetes, in your cluster or remote through an outbound-only agent.
 
 ## Quick start

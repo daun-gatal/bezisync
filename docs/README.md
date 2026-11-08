@@ -1,11 +1,13 @@
 # BeziSync guide
 
-BeziSync is a self-service control plane for [Debezium Server](https://debezium.io/documentation/reference/stable/operations/debezium-server.html):
-platform teams connect runtimes and set guardrails once; anyone can then stream changes from a
-database to a destination safely. This guide covers installing, using and operating it.
+BeziSync is a self-service control plane for change data capture: platform teams connect runtimes
+and set guardrails once; anyone can then stream changes from a database to a destination safely.
+Each pipeline runs on one of two engines, [Debezium Server](https://debezium.io/documentation/reference/stable/operations/debezium-server.html)
+or [Flink CDC](https://nightlies.apache.org/flink/flink-cdc-docs-stable/) (see [Choose an
+engine](#choose-an-engine)). This guide covers installing, using and operating it.
 
-- [Install](#install) · [Concepts](#concepts) · [Your first pipeline](#your-first-pipeline) · [Sources](#sources)
-- [Destinations](#destinations) · [Databases behind a bastion (SSH)](#databases-behind-a-bastion-ssh) · [Operate](#operate) · [Manage runtimes](#manage-runtimes) · [Remote runtimes (agents)](#remote-runtimes-agents) · [Google GKE and Amazon EKS](#google-gke-and-amazon-eks) · [Engine versions](#engine-versions) · [Flink CDC engine (optional)](#flink-cdc-engine-optional)
+- [Install](#install) · [Concepts](#concepts) · [Your first pipeline](#your-first-pipeline) · [Choose an engine](#choose-an-engine) · [Sources](#sources)
+- [Destinations](#destinations) · [Databases behind a bastion (SSH)](#databases-behind-a-bastion-ssh) · [Operate](#operate) · [Manage runtimes](#manage-runtimes) · [Remote runtimes (agents)](#remote-runtimes-agents) · [Google GKE and Amazon EKS](#google-gke-and-amazon-eks) · [Engine versions](#engine-versions) · [Flink CDC engine](#flink-cdc-engine)
 - [Guardrails: policies, approvals, templates](#guardrails-policies-approvals-templates)
 - [Secrets and secret stores](#secrets-and-secret-stores) · [Single sign-on](#single-sign-on)
 - [Config-as-code and the CLI](#config-as-code-and-the-cli) · [Adopt an existing Debezium Server](#adopt-an-existing-debezium-server)
@@ -60,8 +62,9 @@ back it up.
 |---|---|
 | Project | Isolation boundary (e.g. `staging`, `prod`) with members, runtimes, connections, pipelines and policies |
 | Runtime | Where connectors run: a Kubernetes namespace or a Docker host, directly or through an agent |
-| Connection | A reusable source (PostgreSQL, MySQL/MariaDB, SQL Server, MongoDB, Oracle, CockroachDB, Vitess, Google Cloud Spanner) or destination (Kafka, HTTP, Pub/Sub, Kinesis, Redis Streams, NATS JetStream, Apache Iceberg, PostgreSQL / MySQL / MariaDB / SQL Server through JDBC, Amazon SQS, Amazon SNS, Azure Event Hubs, Apache Pulsar) |
+| Connection | A reusable source (PostgreSQL, MySQL/MariaDB, SQL Server, MongoDB, Oracle, CockroachDB, Vitess, Google Cloud Spanner) or destination (Kafka, HTTP, Pub/Sub, Kinesis, Redis Streams, NATS JetStream, Apache Iceberg, PostgreSQL / MySQL / MariaDB / SQL Server through JDBC, Amazon SQS, Amazon SNS, Azure Event Hubs, Apache Pulsar, StarRocks, Apache Doris, Apache Fluss, Elasticsearch, Apache Paimon, OceanBase) |
 | Pipeline | One source → one destination, the tables, format, transforms and settings. Every saved change is a **version**; deploying runs one version |
+| Engine | What runs a pipeline: **Debezium** (one Debezium Server) or **Flink CDC** (a small Flink cluster). Chosen per pipeline in the Destination step and fixed at its first deploy; see [Choose an engine](#choose-an-engine) |
 | Health | Healthy · Lagging · At risk (source impact) · Down · Unknown. Never green without fresh evidence |
 
 **Admin** is account-wide: Admins open every project with every permission and are the only ones who
@@ -81,7 +84,7 @@ members see a dismissible "New here?" card until they open the Tour.
    retention, keys…) and shows each failure with the exact fix for your provider (self-hosted, RDS,
    Cloud SQL, Azure…) and a "send to my DBA" message. Add the destination the same way.
 3. **New pipeline:** pick the source (or start from a template), select tables and choose what
-   happens to personal data (see [Personal data](#personal-data)), pick the destination and naming, shape the events (optional,
+   happens to personal data (see [Personal data](#personal-data)), pick the destination, its naming and, where it offers both, the engine (see [Choose an engine](#choose-an-engine)), shape the events (optional,
    see below), review the generated `application.properties`, and deploy. A step opens once the
    ones before it are done, and leaving a step by any route saves it. On **Review**, settings save
    as you change them and the final checks re-run on their own; Deploy says why while it is
@@ -89,22 +92,80 @@ members see a dismissible "New here?" card until they open the Tour.
    reason and never skips configuration, runtime or policy failures. Closing a fresh draft asks
    whether to keep or delete it.
 
+## Choose an engine
+
+Each pipeline runs on one of two engines, picked in the wizard's Destination step:
+
+- **Debezium** runs each pipeline as its own Debezium Server. It reads every source and writes
+  every destination except the six that only Flink CDC writes. It is the default and always available.
+- **Flink CDC** runs each pipeline as its own small Flink cluster: a *JobManager* that coordinates
+  and *TaskManagers* whose *readers* copy and stream the tables. It reads MySQL/MariaDB, PostgreSQL,
+  SQL Server and Oracle, and keeps their tables in sync in lakehouse, analytics and search stores
+  and in Kafka. It is available once an Admin registers a Flink CDC image (see [Flink CDC
+  engine](#flink-cdc-engine)); until then the wizard shows its destinations as unavailable, with
+  the reason. **Policies → Allowed engines** can limit the engines a project's pipelines use.
+
+| To… | Destinations | Engine |
+|---|---|---|
+| Stream changes to services as events | Kafka | Debezium (default) or Flink CDC |
+| | Pub/Sub, Kinesis, Amazon SQS and SNS, Azure Event Hubs, Apache Pulsar, Redis Streams, NATS JetStream, HTTP | Debezium |
+| Keep a copy of tables in another database | PostgreSQL, MySQL, MariaDB, SQL Server (JDBC) | Debezium |
+| | OceanBase | Flink CDC |
+| Keep lakehouse tables | Apache Iceberg | Debezium (default) or Flink CDC |
+| | Apache Paimon, Apache Fluss | Flink CDC |
+| Query fresh rows in an analytics database | StarRocks, Apache Doris | Flink CDC |
+| Search the rows | Elasticsearch | Flink CDC |
+
+MongoDB, CockroachDB, Vitess and Google Cloud Spanner are read by Debezium only, so their pipelines
+write the Debezium destinations (see [Sources](#sources) for what each source does on each engine).
+
+**When the destination takes both (Iceberg, Kafka).** Choose **Flink CDC** for large tables whose
+first copy should run in parallel, for source schema changes applied to the destination tables, or
+to restore an earlier saved position. Choose **Debezium** for an Iceberg change log (*every change
+appended*), Iceberg's automatic partitioning and the time of the change (`__source_ts_ms`), Kafka
+records in Debezium's formats and event shapes (on Flink CDC they are always JSON without the
+schema, in its own change envelope: see [Kafka on Flink CDC](#kafka-on-flink-cdc)), masked columns,
+or copying one table again while the others stream.
+
+| | Debezium | Flink CDC |
+|---|---|---|
+| Runs as | One Debezium Server container | A JobManager and one or more TaskManagers |
+| Smallest size | Small: 0.5 CPU, 768 MiB | Small: one TaskManager (1 CPU, 2 GiB, 2 readers) and a JobManager (1 to 1.5 GiB) |
+| First copy | Debezium's snapshot | Split into chunks, copied by every reader at once (2, 4 or 8 by size, or a custom cluster) |
+| Copy one table again while streaming | Yes, on the Snapshots tab (most sources) | No: Start over copies every table |
+| Source schema changes | New columns added (Iceberg, JDBC); others depend on the destination | Applied to the destination tables, ignored, or stop the pipeline, as you choose |
+| Where it resumes from | Offsets kept in BeziSync's PostgreSQL, which you can view and edit | Saved positions (Positions tab): restore one, or start over from scratch, from now or (MySQL, SQL Server) from a time |
+| After the first deploy | Tables can be added; size can change | Tables can be added (Oracle: only after Start over); memory and TaskManagers can change, the number of readers only with Start over |
+| Personal data | Mask, remove or keep each column | Remove or keep (no masking) |
+| Transforms | Every step but computed columns, including value formats, outbox, flattening, script filters and custom steps | Filters, renames, added fields, routes, keep deleted rows, cut text and computed columns (expressions in Expert mode) |
+| Delivery canary | Where the source and destination allow it | Off |
+| What the source needs | What the checks list for Debezium | The same, plus: PostgreSQL tables with `REPLICA IDENTITY FULL` and 1 + readers free replication slots during the first copy; MySQL Connector/J in the image; for Oracle, the list under *Oracle on Flink CDC* |
+| Image | Debezium Server images listed under [Engine versions](#engine-versions) (Iceberg runs its own build) | One an Admin builds, scans and registers (BeziSync publishes none) |
+
+**The engine is fixed at the first deploy.** Until then the Destination step can switch it. After
+that, create a new pipeline on the other engine: it makes its own first copy and keeps its own
+position. Delete the old pipeline once the new one is Healthy. Consumers of a Kafka pipeline get a
+different record shape after such a switch.
+
 ## Sources
 
 Every source runs the readiness checks of its own database, each failure with the exact fix for the
 provider, and shows **source protection** in its own terms (see [Operate](#operate)). Sources Debezium
 marks *incubating* carry a **Preview** badge when you add them. What a source can do decides what the
 wizard offers: the snapshot modes on Review, re-copies on the Snapshots tab, masking, message keys
-and the delivery canary.
+and the delivery canary. The first four columns describe Debezium; the last says whether
+[Flink CDC](#flink-cdc-engine) reads the source too. On Flink CDC every source copies its tables in
+parallel chunks, copies them again only all together (Start over), can't mask and runs no canary
+(see [Choose an engine](#choose-an-engine)).
 
-| Source | Copies existing rows | Re-copies while streaming | Mask columns | Delivery canary |
-|---|---|---|---|---|
-| PostgreSQL, MySQL / MariaDB, SQL Server | every mode | yes | yes | PostgreSQL, MySQL |
-| MongoDB | every mode | yes | no | no |
-| Oracle | every mode | yes | yes | yes |
-| CockroachDB | every mode | yes | yes | yes |
-| Vitess | "Copy existing rows" or "Only new changes" | no: reset the position from scratch | yes | no |
-| Google Cloud Spanner | no: it streams from its first start | no | no (columns can be removed) | no |
+| Source | Copies existing rows | Re-copies while streaming | Mask columns | Delivery canary | Flink CDC |
+|---|---|---|---|---|---|
+| PostgreSQL, MySQL / MariaDB, SQL Server | every mode | yes | yes | PostgreSQL, MySQL | yes (MySQL needs Connector/J in the image) |
+| MongoDB | every mode | yes | no | no | no |
+| Oracle | every mode | yes | yes | yes | yes, narrower: see *Oracle on Flink CDC* |
+| CockroachDB | every mode | yes | yes | yes | no |
+| Vitess | "Copy existing rows" or "Only new changes" | no: reset the position from scratch | yes | no | no |
+| Google Cloud Spanner | no: it streams from its first start | no | no (columns can be removed) | no | no |
 
 ### Oracle
 
@@ -127,7 +188,7 @@ GRANT script for whatever the user lacks (`rdsadmin` procedures on RDS).
 - Checks warn when the archived logs reach back less than a day (on RDS: `archivelog retention
   hours`) and when the first copy may outlast `UNDO_RETENTION` (ORA-01555).
 - The connection is plain TCP; use Oracle Native Network Encryption on the server to encrypt it.
-- Oracle can also run on Flink CDC (Iceberg, Kafka, StarRocks, Doris, Fluss, Elasticsearch, Paimon, OceanBase), with narrower support and more grants: see [Oracle on Flink CDC](#flink-cdc-engine-optional).
+- Oracle can also run on Flink CDC (Iceberg, Kafka, StarRocks, Doris, Fluss, Elasticsearch, Paimon, OceanBase), with narrower support and more grants: see [Oracle on Flink CDC](#flink-cdc-engine).
 
 ### CockroachDB
 
@@ -270,7 +331,9 @@ project policy *Allow advanced properties*; the ones that pass show in preflight
 
 Each destination states what it needs from a pipeline, and the wizard only offers that: the names
 it accepts (with a live preview), its event formats, the event shape it requires, its own
-pipeline settings and the smallest connector size it runs in. Preflight checks the rest.
+pipeline settings and the smallest connector size it runs in. Preflight checks the rest. Which
+engine writes each destination is in [Choose an engine](#choose-an-engine): Iceberg and Kafka take
+both, StarRocks, Doris, Fluss, Elasticsearch, Paimon and OceanBase only Flink CDC, the rest only Debezium.
 
 ### Apache Iceberg
 
@@ -362,7 +425,7 @@ table (1 on a single-node cluster). Flink CDC's StarRocks connector carries its 
 - **Timestamps** arrive to the second: Flink CDC's StarRocks connector writes no fractions.
 - **Preflight** signs in over the MySQL protocol, creates and drops a test table in the database,
   and shows the `GRANT` statements the user needs when it can't. Every table needs a key
-  (`flink_primary_key`). The **Events** tab and the delivery canary read rows back.
+  (`flink_primary_key`). The **Events** tab reads rows back (Flink CDC pipelines run no delivery canary).
 - **No TLS**: Stream Load and the MySQL protocol connection are plain text upstream. Keep StarRocks
   and the runtime in a network you trust.
 - Deleting a pipeline with "drop destinations" drops its tables.
@@ -666,7 +729,7 @@ network and says so. Checks on the Connections page always run from BeziSync.
 and **Flink CDC**. On the Flink CDC tab Admins add, label, deprecate and remove images and choose
 the default, which pipelines that pin no image (`flinkCdcImage` in YAML) run from their next deploy;
 running pipelines are not restarted. Flink CDC is off until the tab lists an image (see [Flink CDC
-engine](#flink-cdc-engine-optional)). Version counts, the version column and bulk moves are for
+engine](#flink-cdc-engine)). Version counts, the version column and bulk moves are for
 Debezium pipelines.
 
 The Debezium tab is the one list of Debezium Server images every project picks from, with how many pipelines run each one per project (each count links to that project's
@@ -697,20 +760,23 @@ deploying the previous one. Before you confirm, the dialog says what the release
 pipeline's settings: a tuned setting it doesn't have refuses that pipeline's change until you remove
 it, a renamed one moves to its new key, and raw properties are listed as not checked.
 
-## Flink CDC engine (optional)
+## Flink CDC engine
 
-Every pipeline runs on an engine. **Debezium** runs every pipeline unless you choose otherwise and
-is always available. **Flink CDC** keeps database tables in sync in analytics and lakehouse stores:
-it reads MySQL/MariaDB, PostgreSQL, SQL Server and Oracle and writes Iceberg, StarRocks, Doris, Fluss,
-Kafka, Elasticsearch, Apache Paimon and OceanBase (all but Iceberg and Kafka only through Flink CDC). It copies large tables in parallel chunks and
-applies schema changes to the destination tables. Each pipeline runs its own small Flink cluster (a
-JobManager and TaskManagers), so it needs more memory than a Debezium pipeline.
+<a id="flink-cdc-engine-optional"></a>
 
-Flink CDC is **off until an Admin registers a Flink CDC image** under **Settings → Engine versions
-→ Flink CDC** (or `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`). BeziSync publishes no Flink CDC image: build
-one on the official Flink image (`flink:2.2.1-java17`) with Flink CDC 3.7.0 in this layout, and push
-it to a registry your runtimes can pull from. Until an image is registered the wizard shows
-the Flink CDC-only destinations as unavailable with the reason, and Iceberg pipelines run on Debezium.
+Flink CDC is the second engine a pipeline can run on, next to Debezium: it reads MySQL/MariaDB,
+PostgreSQL, SQL Server and Oracle and keeps their tables in sync in Iceberg, StarRocks, Doris, Fluss,
+Elasticsearch, Apache Paimon, OceanBase and Kafka. It copies large tables in parallel chunks, applies
+schema changes to the destination tables and keeps saved positions you can restore. Each pipeline
+runs its own small Flink cluster (a JobManager and TaskManagers), so it needs more CPU and memory
+than a Debezium pipeline. [Choose an engine](#choose-an-engine) compares the two.
+
+**Set it up: register an image.** An Admin makes Flink CDC available by registering a Flink CDC
+image under **Settings → Engine versions → Flink CDC** (or `BEZISYNC_FLINK_CDC_DEFAULT_IMAGE`).
+BeziSync publishes no Flink CDC image: build one on the official Flink image (`flink:2.2.1-java17`)
+with Flink CDC 3.7.0 in this layout, and push it to a registry your runtimes can pull from. Until an
+image is registered the wizard shows the Flink CDC-only destinations as unavailable with the reason,
+and Iceberg and Kafka pipelines run on Debezium.
 
 | Path | What |
 |---|---|
@@ -880,7 +946,7 @@ lists them with one choice each:
 
 - **Mask**: replaced by a salted SHA-256 hash, unique to the pipeline, so equal values still match
   for joins. Debezium hashes **text columns only**, so Mask is offered only for those (MongoDB can't
-  hash at all).
+  hash at all). Flink CDC has no hash function, so a Flink CDC pipeline offers Remove and Keep only.
 - **Remove**: left out of every event. Columns that can't be hashed are removed by default.
 - **Keep as is**: sent unchanged, on purpose; the choice is recorded in the spec (`keep`).
 
