@@ -234,7 +234,7 @@ func partitionChecks(ctx context.Context, cat icebergTables, cfg icebergConfig, 
 	case len(differ) > 0:
 		out = append(out, checks.Check{Code: "iceberg_partition_existing", Title: "Partitioning", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
 			Message: "These tables already exist partitioned otherwise, and Iceberg keeps a table's partitioning: " + strings.Join(differ, "; ") + ".",
-			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again."}})
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Partition by what the table has, or drop the table (with Spark, Trino or another engine on the same catalog), then Positions → Start over (copy the tables again) so the pipeline creates it."}})
 	case len(unread) > 0:
 		out = append(out, checks.Check{Code: "iceberg_partition_existing", Title: "Partitioning", Status: checks.Warn, Category: checks.CatDestination,
 			Message: "Couldn't read these tables from the catalog, so their partitioning is unchecked: " + strings.Join(unread, "; ") + ".",
@@ -535,7 +535,7 @@ func partitionKeyChecks(ctx context.Context, cat icebergTables, cfg icebergConfi
 	if len(atRisk) > 0 {
 		out = append(out, checks.Check{Code: "iceberg_partition_key", Title: "Partitioning", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
 			Message: "These tables exist partitioned by a column outside their row identity, so upserts leave old rows behind and the tables may already hold duplicate rows: " + strings.Join(atRisk, "; ") + ".",
-			Fix: &checks.Fix{Kind: "text", Who: "you", Code: "Drop and recreate them (Positions → Start over, dropping destinations). Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates " +
+			Fix: &checks.Fix{Kind: "text", Who: "you", Code: "Drop them (with Spark, Trino or another engine on the same catalog), then Positions → Start over (copy the tables again) so the pipeline creates them. Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates " +
 				"(SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1)."}})
 	}
 	if len(keyless) > 0 {
@@ -543,7 +543,7 @@ func partitionKeyChecks(ctx context.Context, cat icebergTables, cfg icebergConfi
 		// values of an update as ordinary rows (fixed upstream in FLINK-41057, after 3.7.0).
 		out = append(out, checks.Check{Code: "iceberg_flink_keyless_table", Title: "Table without a key", Status: checks.Fail, Blocking: true, Category: checks.CatDestination,
 			Message: "These tables exist without identifier fields (no row key). Flink CDC would write into them every delete, and the old values of every update, as ordinary rows: " + strings.Join(keyless, ", ") + ".",
-			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Drop them and let the pipeline create them with the table's key (Positions → Start over, dropping destinations), or write them with a Debezium pipeline, which appends every change correctly."}})
+			Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Drop them (with Spark, Trino or another engine on the same catalog) and use Positions → Start over (copy the tables again), so the pipeline creates them with the table's key, or write them with a Debezium pipeline, which appends every change correctly."}})
 	}
 	if len(unread) > 0 {
 		out = append(out, checks.Check{Code: "iceberg_partition_key", Title: "Partitioning", Status: checks.Warn, Category: checks.CatDestination,

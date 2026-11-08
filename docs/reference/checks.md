@@ -1533,7 +1533,7 @@ ALTER TABLE … SET IDENTIFIER FIELDS <key columns> (Spark), or drop the table s
 Fix:
 
 ```
-Drop them and let the pipeline create them with the table's key (Positions → Start over, dropping destinations), or write them with a Debezium pipeline, which appends every change correctly.
+Drop them (with Spark, Trino or another engine on the same catalog) and use Positions → Start over (copy the tables again), so the pipeline creates them with the table's key, or write them with a Debezium pipeline, which appends every change correctly.
 ```
 
 <a id="iceberg-key-columns"></a>
@@ -1598,7 +1598,7 @@ Run preflight again once the source is reachable.
 Fix:
 
 ```
-Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again.
+Partition by what the table has, or drop the table (with Spark, Trino or another engine on the same catalog), then Positions → Start over (copy the tables again) so the pipeline creates it.
 ```
 
 Fix:
@@ -1623,7 +1623,7 @@ In the Transform step (Partition by), partition these tables by their key column
 Fix:
 
 ```
-Drop and recreate them (Positions → Start over, dropping destinations). Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates (SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1).
+Drop them (with Spark, Trino or another engine on the same catalog), then Positions → Start over (copy the tables again) so the pipeline creates them. Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates (SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1).
 ```
 
 Fix:

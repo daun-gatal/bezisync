@@ -136,7 +136,7 @@ var fatal = []struct {
 	code, text string
 }{
 	{regexp.MustCompile(`Unable to coerce data record`), "destination_mismatch",
-		"The destination tables no longer match what this pipeline writes (a destination was renamed or changed). Start over to copy the tables again."},
+		"The destination tables no longer match what this pipeline writes (a destination was renamed or changed). Pause the pipeline and use Positions → Start over: BeziSync reads the tables first and writes their columns in place, or says what to change."},
 	{regexp.MustCompile(`TableNotExistException|NoSuchTableException|Table does not exist|Unknown table`), "destination_missing",
 		"A destination table the saved position refers to is gone. Start over to create and copy the tables again."},
 	{regexp.MustCompile(`Before data is null for UPDATE/DELETE event`), "replica_identity",
