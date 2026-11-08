@@ -2868,10 +2868,6 @@
               }
             ]
           },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
           "key_problem": {
             "anyOf": [
               {
@@ -2883,6 +2879,10 @@
             ],
             "description": "For a column: why it can't be in a Flink CDC primary key, given the columns sent (ADR 0010); null when it can.",
             "title": "Key Problem"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
