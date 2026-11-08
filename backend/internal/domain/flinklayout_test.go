@@ -6,7 +6,9 @@ import (
 	"testing"
 )
 
-func col(name string) DestColumn { return DestColumn{Name: name, Type: "VARCHAR", Raw: "string", Nullable: true} }
+func col(name string) DestColumn {
+	return DestColumn{Name: name, Type: "VARCHAR", Raw: "string", Nullable: true}
+}
 
 func names(cols []LayoutColumn) []string {
 	var out []string

@@ -33,7 +33,7 @@ values name their own column):
 | E5b | A step's column removed, then deploy (resume) | The column stays, NULL. |
 | E6 | A start **without** a saved position into an **existing** table whose columns differ | Iceberg and Paimon write **by position**: values shift. `IcebergMetadataApplier.applyCreateTable` is `if (!tableExists) create`; `IcebergWriter` builds rows from the job's schema and writes them with the table's row type; Paimon's writer builds a `GenericRow` the same way. |
 | E7 | After E1–E4, a start without a saved position | `*` expands in the source's **current** order (`id, bb, n, f1, __op`) while the table is `id, a, f1, __op, b, n, bb`: every such start after a live source change mis-aligns a positional table, even with no step changed. |
-| E8 | StarRocks with "keep deleted rows" | The writer puts its own `__op` key (0 upsert, 1 delete) into every row's JSON, after the row's columns: BeziSync's soft-delete column `__op` is overwritten, and StarRocks reads `__op` as its delete marker. |
+| E8 | StarRocks with "keep deleted rows" | StarRocks refuses a column named `__op` ("a system reserved name": its stream load reads `__op` as the upsert/delete marker, and the 3.7.0 writer puts its own `__op` key, 0 or 1, into every row's JSON): the table is never created and the job fails. Keeping deleted rows has never worked on StarRocks. |
 
 So a **resume never shifts values but ignores column changes**, and a **start without a saved position shifts
 values on positional destinations**. Every Start over is such a start, and so are hidden ones the helper makes
@@ -79,8 +79,10 @@ names, step columns, the soft-delete column) and the destination's columns:
   next deploy (the Hold behaviour), and the Flink settings say so.
 
 Refused (blocking `flink_destination_columns`, never forced): a retired column that is a key, a partition source or
-`NOT NULL` in the table; a table type BeziSync can't map (D4); a positional table it can't read; an existing Fluss
-table; a type the table holds that differs from the produced one (other than the widenings Iceberg and Paimon allow).
+`NOT NULL` in the table; a table type BeziSync can't map (D4); a positional table it can't read; a type the table holds that differs from the produced one (other than the widenings Iceberg and Paimon allow).
+
+Fluss: BeziSync can't read its tables (no client), so a planned start into Fluss is a warning (`flink_destination_columns`,
+never a pass): Fluss maps columns by name and silently drops a column an existing table lacks.
 
 ### D2 — A column change on a pipeline with a saved position is refused
 
@@ -122,8 +124,8 @@ restored (`position_before_layout`): its job wrote other columns.
 
 ### D7 — StarRocks keeps deleted rows under `__bz_op`
 
-On StarRocks the soft-delete column is `__bz_op` (E8); existing StarRocks pipelines that keep deleted rows get a
-blocking finding whose fix is Start over (the column change of D2).
+On StarRocks the soft-delete column is `__bz_op` (E8). No working StarRocks pipeline has an `__op` column (the table
+was never created), so nothing migrates.
 
 ### Also fixed
 
@@ -164,14 +166,13 @@ Go tests per commit; `make verify`; e2e `32-flink-cdc`, `34-flink-sinks`, `35-fl
 | L8 | Retired column is a key / partition source / NOT NULL | blocked `flink_destination_columns` | planner test |
 | L9 | Positional table unreadable (catalog error) | blocked, never a pass | services test |
 | L10 | Iceberg/Paimon type BeziSync can't map | blocked, names the column and type | planner test |
-| L11 | Existing Fluss table at a planned start | blocked | services test |
+| L11 | Fluss at a planned start (BeziSync can't read its tables) | warning: an existing table drops the columns it lacks; never a pass | services test |
 | L12 | Routed many-to-one destination | one layout per destination; each member writes it, NULL for what it lacks | planner + compiler test |
 | L13 | Live source ADD after a pinned layout | held (not written) until the next deploy; Flink settings say so | e2e 35 |
 | L14 | Helper: no position, `fresh_start` unset | `no_position`, doesn't start | flinkhelper test |
 | L15 | Helper: `fresh_start`, but something was saved above the floor | `no_position` | flinkhelper test |
 | L16 | Restore a position at or below the layout floor | 409 `position_before_layout` | services test |
 | L17 | StarRocks soft delete | column `__bz_op` with `+I/-D`; rows kept | compiler test; e2e 35 |
-| L18 | Existing StarRocks soft-delete pipeline | blocking finding, fix Start over | services test |
 | L19 | MCP `update_pipeline` with one field | the rest of the spec kept; `null` removes | `TestMCPToolsFollowRolesTokensAndSettings` |
 | L20 | Kafka / Elasticsearch | nothing to add; order irrelevant; Elasticsearch `strict` refused | connectors test |
 | L21 | Computed column added to an existing table | wrapped in `CAST` to its type; the table column has it | planner + compiler test |
