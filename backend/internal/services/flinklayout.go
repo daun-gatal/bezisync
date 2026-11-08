@@ -316,6 +316,21 @@ func flinkLayoutChecks(ctx context.Context, q db.Querier, p *models.Pipeline, sp
 				"or change the destination tables (or name new ones in the Destination step), then run preflight again."}}}, nil
 	}
 	var out []checks.Check
+	if snk, err := connectors.GetSink(sink.Type); err == nil {
+		if byHand, ok := snk.(connectors.FlinkColumnsByHand); ok {
+			var stmts []string
+			for _, dest := range layoutKeys(plan.tables) {
+				if add := plan.tables[dest].Add; len(add) > 0 {
+					stmts = append(stmts, byHand.FlinkAddStatements(dest, add)...)
+				}
+			}
+			if len(stmts) > 0 {
+				return []checks.Check{{Code: "flink_destination_columns", Title: "Destination columns", Category: checks.CatDestination, Status: checks.Fail, Blocking: true,
+					Message: "The pipeline writes columns these tables don't have, and BeziSync can't add them to " + sink.Type + " tables.",
+					Fix:     &checks.Fix{Kind: "sql", Who: "data engineer", Code: strings.Join(stmts, "\n")}}}, nil
+			}
+		}
+	}
 	if len(plan.warnings) > 0 {
 		out = append(out, checks.Check{Code: "flink_destination_columns", Title: "Destination columns", Category: checks.CatDestination, Status: checks.Warn,
 			Message: strings.Join(plan.warnings, " ")})

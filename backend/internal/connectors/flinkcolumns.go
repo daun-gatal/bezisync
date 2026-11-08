@@ -30,6 +30,12 @@ type FlinkColumns interface {
 	AddFlinkColumns(ctx context.Context, conn Resolved, destination string, cols []domain.FlinkColumn) ([]string, error)
 }
 
+// FlinkColumnsByHand is a Flink CDC destination whose tables BeziSync reads but can't change
+// (Paimon): AddFlinkColumns refuses, and these are the statements someone runs instead.
+type FlinkColumnsByHand interface {
+	FlinkAddStatements(destination string, cols []domain.FlinkColumn) []string
+}
+
 // NoFlinkTable is a Flink CDC destination without tables to plan: Kafka (events) and
 // Elasticsearch (documents, mapped by name as they come).
 type NoFlinkTable interface{ NoFlinkTable() }
@@ -215,11 +221,16 @@ func (s *paimonSink) AddFlinkColumns(_ context.Context, _ Resolved, destination 
 	if len(cols) == 0 {
 		return nil, nil
 	}
+	return nil, &ErrNotSupported{Msg: "BeziSync can't change Paimon tables. Add the columns with Flink SQL or Spark on the same catalog, then start again:\n" +
+		strings.Join(s.FlinkAddStatements(destination, cols), "\n")}
+}
+
+func (s *paimonSink) FlinkAddStatements(destination string, cols []domain.FlinkColumn) []string {
 	var stmts []string
 	for _, c := range cols {
 		stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ADD %s %s;", destination, olapQuote(c.Name), paimonTypeOf(c.Type)))
 	}
-	return nil, &ErrNotSupported{Msg: "BeziSync can't change Paimon tables. Add the columns with Flink SQL or Spark on the same catalog, then start again:\n" + strings.Join(stmts, "\n")}
+	return stmts
 }
 
 func paimonTypeOf(flinkType string) string {
