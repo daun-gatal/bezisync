@@ -60,11 +60,12 @@ async function registerFlinkImage(api: Api): Promise<void> {
   await api.send('POST', '/api/v1/debezium-catalog', { image: FLINK_IMAGE, engine: 'flink-cdc', is_default: true, label: 'e2e' }, 201);
 }
 
-/** The rows the destination holds, by id (Kafka: the last change per key). */
+/** The rows the destination holds, by id (Kafka: the newest change per key). */
 async function rows(api: Api, url: string, table: string): Promise<Map<number, Record<string, unknown>>> {
   const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=500`);
   const out = new Map<number, Record<string, unknown>>();
-  for (const r of [...e.records].reverse()) {
+  // Kafka lists a key's changes oldest first: the last one wins. Tables hold one row per id.
+  for (const r of e.records) {
     const v = r.value;
     const row = (v && 'after' in v ? (v.after as Record<string, unknown> | null) : v) ?? null;
     const id = Number(row?.id ?? NaN);
