@@ -163,7 +163,13 @@ async function journey(j: Journey) {
   await api.send('POST', `${url}/pause`);
   await lifecycle(api, url, 'paused', 300_000);
   const before = await api.get<{ positions: { id: number }[] }>(`${url}/positions`);
-  await api.send('POST', `${url}/offsets/reset`, { mode: 'skip_to_now', confirm: name });
+  // The cluster saves its position while it stops: Start over waits for that.
+  await waitFor(`${j.type}: Start over once the pipeline has stopped`, async () => {
+    const res = await api.raw('POST', `${url}/offsets/reset`, { mode: 'skip_to_now', confirm: name });
+    if (res.status() === 409 && (await res.json()).code === 'still_running') return false;
+    expect(res.status(), await res.text()).toBe(200);
+    return true;
+  }, 300_000, 5_000);
   const planned = await api.send<{ sections: { report: { checks: Check[] } }[] }>('POST', `${url}/preflight`, {});
   const destCheck = planned.sections.flatMap((s) => s.report.checks).find((c) => c.code === 'flink_destination_columns');
   if (j.byHand) {
@@ -204,7 +210,11 @@ async function journey(j: Journey) {
   await api.send('POST', `${url}/pause`);
   await lifecycle(api, url, 'paused', 300_000);
   const old = before.positions[before.positions.length - 1];
-  const restore = await api.raw('POST', `${url}/positions/${old.id}/restore`, { confirm: name });
+  let restore = await api.raw('POST', `${url}/positions/${old.id}/restore`, { confirm: name });
+  await waitFor(`${j.type}: the restore answered once the pipeline has stopped`, async () => {
+    restore = await api.raw('POST', `${url}/positions/${old.id}/restore`, { confirm: name });
+    return !(restore.status() === 409 && (await restore.json()).code === 'still_running');
+  }, 300_000, 5_000);
   expect(restore.status(), await restore.text()).toBe(409);
   expect(await restore.text()).toMatch(/position_before_(layout|tables)|started over/);
 
