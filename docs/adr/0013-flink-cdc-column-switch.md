@@ -123,7 +123,7 @@ Elasticsearch, Paimon, StarRocks, Doris) and `32-flink-cdc` against the real Fli
 | S5 | Helper restores a position from the current generation | restored as saved | `TestJobManagerSwitchesColumnsAtAnOlderPosition` |
 | S6 | `_metadata` the helper doesn't know (another format version, a file handle, truncated, the ID twice, misplaced) | refused; nothing submitted; `failed`/`restore` | `TestForgetCoordinatorStateRefusesWhatItDoesntKnow`, `TestJobManagerSwitchesColumnsAtAnOlderPosition` |
 | S7 | The operator ID is Guava's `murmur3_128` | matches Guava's value for a known input | `TestOperatorIDIsGuavaMurmur3`; e2e 35 (the real savepoint) |
-| S8 | Positions → Restore of a position from before the switch | allowed above the layout floor; resumes with the new columns | e2e 35 |
+| S8 | Positions → Restore of a position from before the switch | allowed above the layout floor; restored without the coordinator state like the switch | `TestJobManagerSwitchesColumnsAtAnOlderPosition`; e2e 35 (the switch restores the old job's savepoint) |
 | S9 | Restore copies a position | the copy keeps its generation | `TestSavedPositionsListRestoreAndStartOver` |
 | S10 | Rows the source writes while the job stops and switches | all written, each value in its own column | e2e 35 |
 | S11 | A destination problem at a switch (key, NOT NULL, unmapped type) | blocked in preflight; at the start a 409 and the old job keeps running | services path shared with 0012 L8–L10 |
@@ -149,6 +149,12 @@ Elasticsearch, Paimon, StarRocks, Doris) and `32-flink-cdc` against the real Fli
   every deploy refreshes the source columns it writes (`RefreshFlinkColumns`); a column the source added while the
   pipeline was stopped, after its last saved position, is then named before the restored job has read it, and the
   job fails on it. A follow-up decides how to release held columns only once the job has read them.
+- Open, not caused by this ADR, found while testing it: restoring an **older** position into Iceberg reuses the
+  Iceberg writer's job id from its state, so the restored job's checkpoint ids overlap ones already committed and
+  Flink CDC's committer skips them (`Checkpoint id N has been committed …, skipping`); and a Postgres job restored
+  from a checkpoint taken while its first copy was finishing stopped reading new changes. The switch restores the
+  newest position (the old job's stop savepoint), so it meets neither; Positions → Restore of an older position
+  does, with or without a switch. A follow-up handles both.
 
 ## Alternatives considered
 

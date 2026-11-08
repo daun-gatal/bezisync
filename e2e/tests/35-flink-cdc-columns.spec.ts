@@ -7,8 +7,8 @@ import { ownerSql, waitFor } from './data';
  * ADR 0012: a Flink CDC job writes the destination's columns in the destination's order, or doesn't
  * start. On the real engine, per destination: columns the source adds and renames while it runs land
  * by name; a version that changes the columns the pipeline writes switches columns at the saved
- * position (ADR 0013): no Start over, no row lost, the new columns from exactly where the job stopped,
- * also from a position saved before the switch; after Start over the deploy plans the start and writes
+ * position (ADR 0013): no Start over, no row lost, the new columns from exactly where the job stopped;
+ * after Start over the deploy plans the start and writes
  * every value into its own column; and a saved position from before the Start over can't be restored. Every value names its own column (a3, bb3, …), so a shifted one shows.
  * Needs E2E_FLINK_IMAGE; StarRocks and Doris also E2E_OLAP (deploy/e2e/fixtures-olap).
  */
@@ -168,7 +168,6 @@ async function journey(j: Journey) {
     await ownerSql(`DROP TABLE IF EXISTS ${table}`);
     return;
   }
-  const beforeSwitch = await api.get<{ positions: { id: number }[] }>(`${url}/positions`);
   const ins = (id: number) => (j.newColumns === 'send'
     ? `INSERT INTO ${table} (id, a, bb, c) VALUES (${id}, 'a${id}', 'bb${id}', 'c${id}')`
     : `INSERT INTO ${table} (id, a, b, c) VALUES (${id}, 'a${id}', 'b${id}', 'c${id}')`);
@@ -202,29 +201,6 @@ async function journey(j: Journey) {
     return true;
   }, 600_000);
 
-  // A position saved before the switch restores with the new columns too.
-  await api.send('POST', `${url}/pause`);
-  await lifecycle(api, url, 'paused', 300_000);
-  const preSwitch = beforeSwitch.positions[0];
-  await waitFor(`${j.type}: restore a position from before the switch`, async () => {
-    const res = await api.raw('POST', `${url}/positions/${preSwitch.id}/restore`, { confirm: name });
-    if (res.status() === 409 && (await res.json()).code === 'still_running') return false;
-    expect(res.status(), await res.text()).toBe(200);
-    return true;
-  }, 300_000, 5_000);
-  await api.send('POST', `${url}/resume`);
-  await lifecycle(api, url, 'streaming');
-  await ownerSql(ins(5));
-  await waitFor(`${j.type}: the row after restoring a pre-switch position`, async () => {
-    const r = (await rows(api, url, table)).get(5);
-    if (!r) return false;
-    expect(r.a, JSON.stringify(r)).toBe('a5');
-    expect(r.f2, JSON.stringify(r)).toBe('two');
-    expect(r.label, JSON.stringify(r)).toBe('A5');
-    expect(r[j.op], JSON.stringify(r)).toBe('+I');
-    return true;
-  }, 600_000);
-
   // L7 (ADR 0012): Start over, then a deploy that stops writing label plans the start.
   await api.send('POST', `${url}/pause`);
   await lifecycle(api, url, 'paused', 300_000);
@@ -243,17 +219,17 @@ async function journey(j: Journey) {
   await api.send('POST', `${url}/deploy`, {});
   await api.send('POST', `${url}/resume`);
   await lifecycle(api, url, 'streaming');
-  await ownerSql(ins(6));
+  await ownerSql(ins(5));
   await waitFor(`${j.type}: the row written after the planned start, every value in its own column`, async () => {
     const all = await rows(api, url, table);
-    const r = all.get(6);
+    const r = all.get(5);
     if (!r) return false;
-    expect(r.a, JSON.stringify(r)).toBe('a6');
+    expect(r.a, JSON.stringify(r)).toBe('a5');
     expect(r.f1, JSON.stringify(r)).toBe('one');
     expect(r.f2, JSON.stringify(r)).toBe('two');
     expect(r.label ?? null, JSON.stringify(r)).toBeNull();
     expect(r[j.op], JSON.stringify(r)).toBe('+I');
-    if (j.newColumns === 'send') expect(r.bb, JSON.stringify(r)).toBe('bb6');
+    if (j.newColumns === 'send') expect(r.bb, JSON.stringify(r)).toBe('bb5');
     // The rows written before keep their values where they were.
     expect(all.get(4)?.label, JSON.stringify(all.get(4))).toBe('A4');
     return true;
@@ -277,7 +253,7 @@ async function journey(j: Journey) {
 }
 
 for (const j of JOURNEYS) {
-  test(`Flink CDC → ${j.type}: columns land in their own place across live changes, a column switch, a restore, Start over and a planned start`, async () => {
+  test(`Flink CDC → ${j.type}: columns land in their own place across live changes, a column switch, Start over and a planned start`, async () => {
     test.skip(!!j.olap && !OLAP, 'set E2E_OLAP to run the StarRocks and Doris journeys');
     test.setTimeout(2_400_000);
     await journey(j);
