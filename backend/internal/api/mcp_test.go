@@ -142,6 +142,18 @@ func TestMCPToolsFollowRolesTokensAndSettings(t *testing.T) {
 	if isErr || !strings.Contains(text, `"current_version": 1`) {
 		t.Fatal(text)
 	}
+	// Only the fields sent change: a naming-only spec keeps the tables, snapshot and transforms
+	// (the API itself takes a whole spec), and null removes a field.
+	text, isErr = callTool(t, e.srv, adminTok, "update_pipeline", map[string]any{"pipeline": "orders-cdc",
+		"spec": map[string]any{"sink": map[string]any{"naming": "kept_{table}"}}})
+	if isErr || !strings.Contains(text, `"kept_{table}"`) || !strings.Contains(text, `"shop.refunds"`) || !strings.Contains(text, `"type": "unwrap"`) {
+		t.Fatal(text)
+	}
+	text, isErr = callTool(t, e.srv, adminTok, "update_pipeline", map[string]any{"pipeline": "orders-cdc",
+		"spec": map[string]any{"sink": map[string]any{"naming": nil}}})
+	if isErr || strings.Contains(text, `"kept_{table}"`) || !strings.Contains(text, `"shop.refunds"`) {
+		t.Fatal(text)
+	}
 	// Errors come back as the API's explanation.
 	if text, isErr := callTool(t, e.srv, adminTok, "get_pipeline", map[string]any{"pipeline": "nope"}); !isErr || !strings.Contains(text, `No pipeline named "nope"`) {
 		t.Fatal(text)

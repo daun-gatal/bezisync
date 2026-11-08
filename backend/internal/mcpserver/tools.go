@@ -317,6 +317,27 @@ func (cl *call) withVersion(path string, body any) (any, error) {
 	return decode(status, raw)
 }
 
+// mergeSpec applies patch to base like a JSON merge patch (RFC 7386): an object is merged key by
+// key, null removes the key, and any other value (lists included) replaces it. base is not changed.
+func mergeSpec(base, patch map[string]any) map[string]any {
+	out := make(map[string]any, len(base)+len(patch))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range patch {
+		switch pv := v.(type) {
+		case nil:
+			delete(out, k)
+		case map[string]any:
+			bv, _ := out[k].(map[string]any)
+			out[k] = mergeSpec(bv, pv)
+		default:
+			out[k] = v
+		}
+	}
+	return out
+}
+
 func expectedVersion() Param {
 	return opt("expected_version", num("The version you read. Leave it out to change the current version (someone else's change in between is then overwritten)."))
 }

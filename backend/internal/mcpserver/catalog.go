@@ -286,6 +286,21 @@ func buildCatalog() []*Tool {
 					return nil, err
 				}
 				body := cl.body("spec", "name", "description", "owner", "labels", "note", "engine")
+				// The API takes a whole spec; the tool promises that only the fields sent change, so
+				// the sent spec is merged onto the current one (an object key by key, anything else
+				// replaced, null removes). If-Match still refuses a version someone changed meanwhile.
+				if patch, ok := body["spec"].(map[string]any); ok {
+					cur, err := cl.do(http.MethodGet, p, nil)
+					if err != nil {
+						return nil, err
+					}
+					m, _ := cur.(map[string]any)
+					base, _ := m["spec"].(map[string]any)
+					body["spec"] = mergeSpec(base, patch)
+					if !cl.has("expected_version") {
+						cl.args["expected_version"] = m["version"]
+					}
+				}
 				if cl.has("destination") {
 					if body["sink_id"], err = cl.connection("destination"); err != nil {
 						return nil, err
