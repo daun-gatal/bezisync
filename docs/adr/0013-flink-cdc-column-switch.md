@@ -100,7 +100,7 @@ Doris and OceanBase map by name.
 
 ### Implementation plan
 
-One PR (on top of 0012's), one commit per step, each passing `make verify-quick` on what it touches:
+One PR, one commit per step, each passing `make verify-quick` on what it touches:
 
 1. `flinkhelper`: `ForgetCoordinatorState`, the generation in settings, the state table and `extract`.
 2. `services`, `compiler`: `flink_written`, the switch in `EnsureFlinkStartPlanned`, `flink_columns_changed`,
