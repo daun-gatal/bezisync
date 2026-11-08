@@ -51,3 +51,4 @@ The other options, and why they lost.
 | [0011](0011-wizard-follows-source-and-engine.md) | The wizard follows the source and the engine | Accepted |
 | [0012](0012-flink-cdc-column-layout.md) | Flink CDC writes the destination's columns in the destination's order, or doesn't start | Accepted (D2 replaced by 0013) |
 | [0013](0013-flink-cdc-column-switch.md) | Flink CDC switches columns at the saved position | Accepted |
+| [0014](0014-flink-cdc-restore-checkpoint-ids.md) | A restored Flink CDC job numbers its checkpoints past every one the pipeline reached | Accepted |
