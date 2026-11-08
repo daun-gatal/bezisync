@@ -911,6 +911,7 @@ export function computedNeverEmpty(t: TransformStep, notNull: (column: string) =
  *  expression is asked of the server (expressions:check: key_problem). */
 export function computedKeyProblem(t: TransformStep, table: TableInfo): string | null {
   const out = t.function ? COMPUTED_FUNCTIONS[t.function]?.out : undefined;
+  if (out === 'date') return 'A computed key column is text or a whole number. To partition by a date, put the timestamp column itself in the key and partition it by its day under Partition by.';
   if (!out || !KEY_KINDS.includes(out)) return 'A computed key column is text or a whole number.';
   const notNull = (c: string) => table.primaryKey.includes(c) || table.columns.some((x) => x.name === c && x.nullable === false);
   // Every column it reads must be NOT NULL: a value standing in for an empty one would give those

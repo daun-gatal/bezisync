@@ -63,6 +63,8 @@ describe('unfit key columns', () => {
     expect(computedKeyProblem(cc('k', 'to_integer', [{ column: 'code' }]), table)).toMatch(/no value for some rows/);
     expect(computedKeyProblem(cc('k', 'abs', [{ column: 'id' }]), table)).toMatch(/text or a whole number/);
     expect(computedKeyProblem(cc('k', 'year', [{ column: 'made' }]), table)).toBeNull();
+    // A date can't be a key: the reason points at partitioning the timestamp by its day (domain.ComputedKeyProblem).
+    expect(computedKeyProblem(cc('k', 'parse_date', [{ column: 'code' }, { text: 'yyyy-MM-dd' }]), table)).toMatch(/partition it by its day under Partition by/);
     // A column without nullability from discovery counts as one that can be empty.
     expect(computedKeyProblem(cc('k', 'upper', [{ column: 'code' }]), { ...table, columns: table.columns.map((c) => ({ name: c.name, type: c.type })) })).toMatch(/can be empty/i);
   });

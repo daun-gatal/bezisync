@@ -781,12 +781,15 @@ export function KeysEditor({
   ctx,
   onChange,
   expressionWhy = {},
+  expressionKind = {},
 }: {
   keys: Record<string, string[]>;
   ctx: EditorContext;
   onChange: (k: Record<string, string[]>) => void;
   /** The server's answer for expression columns, table → column → why (undefined: checking). */
   expressionWhy?: Record<string, Record<string, string | null>>;
+  /** The kind each expression column writes, from the same check. */
+  expressionKind?: Record<string, Record<string, string>>;
 }) {
   // Rows being edited stay open while columns are ticked (tables without a key start open).
   const [editing, setEditing] = useState<Set<string>>(new Set([...Object.keys(keys), ...ctx.tables.filter((t) => !t.primaryKey.length).map((t) => t.name)]));
@@ -801,14 +804,17 @@ export function KeysEditor({
           const choices = keyChoices(t, ctx.spec, steps, ctx.flink, ctx.sourceType).map((c) => {
             if (c.expression === undefined) return c;
             if (!c.expression.trim()) return { ...c, why: 'Its expression is empty.' };
+            c = { ...c, type: expressionKind[t.name]?.[c.value] ?? c.type };
             const why = expressionWhy[t.name]?.[c.value];
             return why === undefined || why === 'Checking its expression…' ? { ...c, checking: true } : why ? { ...c, why } : c;
           });
           const dangling = (cols ?? []).filter((c) => !choices.some((x) => x.value === c));
           const error = ctx.flink ? flinkKeyProblem(t, { ...ctx.spec, keys }, steps, expressionWhy[t.name]) : null;
           const computed = ctx.flink ? (cols ?? []).filter((c) => choices.some((x) => x.value === c && x.from === 'computed')) : [];
-          // Flink CDC writes an empty key column as '' (seen on Iceberg): those rows share one key.
-          const nullable = ctx.flink
+          // Flink CDC writes an empty key column as '' (seen on Iceberg): those rows share one key,
+          // unless the key also holds the whole primary key (domain.FlinkKeyWarnings).
+          const keepsPk = t.primaryKey.length > 0 && t.primaryKey.every((c) => cols?.includes(c));
+          const nullable = ctx.flink && !keepsPk
             ? (cols ?? []).filter((c) => !t.primaryKey.includes(c) && t.columns.some((x) => x.name === c && x.nullable !== false) && choices.some((x) => x.value === c && x.from === 'column'))
             : [];
           const put = (next: string[]) => {
