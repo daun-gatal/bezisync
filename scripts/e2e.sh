@@ -7,6 +7,7 @@
 #   E2E_GREP="pipeline" scripts/e2e.sh   # run a subset
 #   scripts/e2e.sh quick tests/23-admin.spec.ts …   # iterate: reuse the cluster and deployment
 #   E2E_FLINK_IMAGE=bezisync-local/flink-cdc:e2e scripts/e2e.sh …   # also run the Flink CDC journeys
+#   E2E_OLAP=1 …                                  # also StarRocks and Doris (35-flink-cdc-columns)
 #
 # Quick mode tags images by the content of their source, so only changed images are rebuilt
 # and imported; it upgrades the running release in place (its database and the data-plane
@@ -136,6 +137,7 @@ deploy_in_place() {
   kubectl -n "$DATA_NS" wait --for=condition=ready pod -l app.bezisync.io/fixture=true --timeout=5s >/dev/null 2>&1 || return 1
   log "applying data plane fixtures"
   kubectl apply -n "$DATA_NS" -f "$ROOT/deploy/e2e/fixtures/" >/dev/null
+  apply_optional_fixtures
   log "upgrading the running release in place (backend $BACKEND_TAG, web $WEB_TAG)"
   helm upgrade bezisync "$ROOT/deploy/helm/bezisync" -n "$NS" \
     -f "$ROOT/deploy/e2e/values.yaml" --set image.tag="$BACKEND_TAG" --set webImage.tag="$WEB_TAG" \
@@ -156,6 +158,7 @@ deploy() {
   if compgen -G "$ROOT/deploy/e2e/fixtures/*.yaml" >/dev/null; then
     log "applying data plane fixtures"
     kubectl apply -n "$DATA_NS" -f "$ROOT/deploy/e2e/fixtures/" >/dev/null
+    apply_optional_fixtures
   fi
   log "helm install"
   helm upgrade --install bezisync "$ROOT/deploy/helm/bezisync" -n "$NS" \
@@ -166,6 +169,15 @@ deploy() {
     kubectl -n "$DATA_NS" wait --for=condition=ready pod -l app.bezisync.io/fixture=true --timeout=15m >/dev/null \
       || { diagnose "$DATA_NS"; exit 1; }
     prepare_dind
+  fi
+}
+
+# Opt-in fixtures: E2E_OLAP=1 adds StarRocks and Doris (deploy/e2e/fixtures-olap, 3 GiB each) for
+# 35-flink-cdc-columns.
+apply_optional_fixtures() {
+  if [ -n "${E2E_OLAP:-}" ]; then
+    log "applying StarRocks and Doris fixtures (E2E_OLAP)"
+    kubectl apply -n "$DATA_NS" -f "$ROOT/deploy/e2e/fixtures-olap/" >/dev/null
   fi
 }
 
@@ -219,7 +231,7 @@ run_tests() {
   sed "s#https://${HOST_IP}:${API_PORT}#https://${K3S}:6443#" "$KUBECONFIG" > "$STATE/kube/config"
   docker create --name "$name" --label "$LABEL" --network "$NET" \
     -e BASE_URL="http://${K3S}:30080" -e ADMIN_PASSWORD=e2e-admin-password -e CI=1 \
-    -e KUBECONFIG=/e2e/.kube/config -e AGENT_NS="$AGENT_NS" -e DATA_NS="$DATA_NS" -e E2E_TAG="$BACKEND_TAG" -e CUSTOM_IMAGE="$CUSTOM_IMAGE" -e E2E_FLINK_IMAGE="${E2E_FLINK_IMAGE:-}" \
+    -e KUBECONFIG=/e2e/.kube/config -e AGENT_NS="$AGENT_NS" -e DATA_NS="$DATA_NS" -e E2E_TAG="$BACKEND_TAG" -e CUSTOM_IMAGE="$CUSTOM_IMAGE" -e E2E_FLINK_IMAGE="${E2E_FLINK_IMAGE:-}" -e E2E_OLAP="${E2E_OLAP:-}" \
     "bezisync-local/e2e:$RUNNER_TAG" ${E2E_GREP:+--grep "$E2E_GREP"} "${SPECS[@]}" >/dev/null
   docker cp "$STATE/kube" "$name:/e2e/.kube" >/dev/null
   docker cp "$ROOT/deploy" "$name:/e2e/deploy" >/dev/null
