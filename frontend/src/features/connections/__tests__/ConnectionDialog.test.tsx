@@ -20,7 +20,18 @@ const types = [
     kind: 'sink', type: 'doris', title: 'Apache Doris', description: 'doris tables', presets: [], config_schema: { properties: {} }, secret_schema: { properties: {} },
     engines: ['flink-cdc'], available: true,
   },
+  // Written by both engines.
+  { kind: 'sink', type: 'kafka', title: 'Kafka', description: 'topics', presets: [], config_schema: { properties: {} }, secret_schema: { properties: {} } },
 ];
+
+const engines = [
+  { id: 'debezium', title: 'Debezium', available: true, reason: null, default_image: 'x', sources: null, sinks: null, except_sinks: ['starrocks', 'doris'] },
+  { id: 'flink-cdc', title: 'Flink CDC', available: true, reason: null, default_image: 'y', sources: ['mysql', 'postgresql'], sinks: ['starrocks', 'doris', 'kafka'], except_sinks: null, event_sinks: ['kafka'] },
+];
+vi.mock('@/lib/engines', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/engines')>()),
+  useEngines: () => ({ data: engines, isPending: false }),
+}));
 
 const me = {
   user: { id: 'u', email: 'a@b.c', name: '', is_superuser: true, ui_mode: 'guided' },
@@ -122,5 +133,34 @@ describe('Flink CDC destinations', () => {
     expect(doris).toBeEnabled();
     expect(doris).toHaveTextContent('Flink CDC');
     expect(doris).toHaveTextContent('doris tables');
+  });
+});
+
+// ADR 0011: from the wizard, only the types this source can go to under the project's policies.
+describe('Add a destination from the wizard', () => {
+  const open = (fitting: Parameters<typeof ConnectionDialog>[0]['fitting']) =>
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProjectProvider me={me} project={me.projects[0]!}>
+          <ConnectionDialog open onOpenChange={() => undefined} kind="sink" fitting={fitting} />
+        </ProjectProvider>
+      </QueryClientProvider>,
+    );
+  it('leaves out the types no engine runs from the source', async () => {
+    open({ sourceType: 'mongodb' });
+    expect(await screen.findByRole('button', { name: /Kafka/ })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /StarRocks/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Apache Doris/ })).toBeNull();
+  });
+  it('leaves out what only a disallowed engine writes, and the types the policy leaves out', async () => {
+    open({ sourceType: 'postgresql', policy: { allowed_engines: ['debezium'], allowed_sink_types: ['kafka', 'starrocks'] } });
+    expect(await screen.findByRole('button', { name: /Kafka/ })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /Apache Doris/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /StarRocks/ })).toBeNull();
+  });
+  it('keeps every type when the policies are unreadable', async () => {
+    open({ sourceType: 'postgresql', policy: { allowed_engines: [], allowed_sink_types: [], unreadable: true } });
+    expect(await screen.findByRole('button', { name: /Apache Doris/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Kafka/ })).toBeEnabled();
   });
 });

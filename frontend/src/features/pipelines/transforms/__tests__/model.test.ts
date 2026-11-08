@@ -448,3 +448,29 @@ describe('the shape as the compiler builds it', () => {
     expect(shapeFields([], { unwrap: iceberg })).toEqual(['op', 'source.ts_ms']);
   });
 });
+
+// ADR 0011: Flink CDC's screens say rows of tables, or events in topics on Kafka.
+import { flinkWords } from '../model';
+describe('flinkWords', () => {
+  it('keeps the table wording for destinations Flink CDC writes as tables', () => {
+    const w = flinkWords(false);
+    expect(w.heading).toBe('Which rows and columns reach each table?');
+    expect([w.keep, w.fields, w.key, w.target, w.titles.filter]).toEqual(['Keep rows', 'Columns · order matters', 'Primary key', 'table', 'Keep only some rows']);
+  });
+  it('says events, fields, topics and message key on an event destination', () => {
+    const w = flinkWords(true);
+    expect([w.heading, w.keep, w.fields, w.key, w.target]).toEqual(['How should events look?', 'Keep events', 'Fields · order matters', 'Message key', 'topic']);
+    expect([w.titles.filter, w.titles.rename, w.titles.add_field, w.titles.computed]).toEqual(['Keep only some events', 'Rename fields', 'Add a field', 'Computed field']);
+    // No table or column wording anywhere a person reads it.
+    const text = [w.heading, w.intro, w.keep, w.fields, w.key, w.unkeyed, w.filterWhere, w.filterNote, w.filterDropped, w.softDelete, w.softAdded,
+      w.computedHelp, w.leftOut, w.nullableKey('a', true), w.computedKey('a', true), w.previewTitle, w.noKey, w.summary, ...Object.values(w.titles)].join(' ');
+    // ("table" alone is the source table, which events still come from.)
+    expect(text).not.toMatch(/each table|the table keeps|reach the table|Destination table|Columns ·|Primary key|as a new row|Keep rows|in sync/);
+    expect(w.softDelete).toMatch(/insert event whose after carries __op = -D/);
+  });
+  it('names the left-out reason through keyChoices', () => {
+    const spec = fullSpec({ source: { tables: { include: ['public.orders'] }, columns: { 'public.orders': { exclude: ['status'] } } } } as never);
+    expect(keyChoices(orders, spec, [], true, 'postgresql', flinkWords(true).leftOut).find((c) => c.value === 'status')?.why).toBe('Left out of the events.');
+    expect(keyChoices(orders, spec, [], true, 'postgresql').find((c) => c.value === 'status')?.why).toBe('Left out of the table.');
+  });
+});

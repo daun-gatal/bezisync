@@ -333,3 +333,16 @@ describe('transformView with Keep deleted rows', () => {
     expect(output.find((r) => r.icon === 'delete')?.title).toBe('Deletes are dropped');
   });
 });
+
+describe('transformView on a Flink CDC event destination (ADR 0011)', () => {
+  it('describes events and the message key, not tables', () => {
+    const spec = fullSpec({ keys: { 'shop.orders': ['id'] }, transforms: [{ id: 'f1', type: 'filter', operations: ['insert', 'snapshot', 'update'], rules: [] }] } as never);
+    const ev = transformView(spec, { sinkType: 'kafka', events: true });
+    expect(ev.output.map((r) => r.title)).toEqual(['Debezium-style JSON events', 'Deletes are events', 'Chosen message key']);
+    expect(ev.steps[0]?.title).toBe('Keep only some events');
+    const rows = transformView(spec, { sinkType: 'iceberg' });
+    expect(rows.output[0]?.title).toBe('Tables kept in sync');
+    const soft = transformView(fullSpec({ transforms: [{ id: 's1', type: 'soft_delete' }] } as never), { sinkType: 'kafka', events: true });
+    expect(soft.output[1]).toMatchObject({ title: 'Deletes are sent as marked inserts', code: ['__op = -D'] });
+  });
+});

@@ -109,6 +109,8 @@ type engineRead struct {
 	Sources     []string `json:"sources"`
 	Sinks       []string `json:"sinks"`
 	ExceptSinks []string `json:"except_sinks"`
+	// EventSinks (Flink CDC): the destinations it writes as change events rather than tables.
+	EventSinks []string `json:"event_sinks,omitempty"`
 	// Flink CDC: the settings a pipeline may choose and the size presets.
 	Settings []engine.FlinkSetting `json:"settings,omitempty"`
 	Sizes    map[string]flinkSize  `json:"sizes,omitempty"`
@@ -171,6 +173,7 @@ func catalogRoutes(r chi.Router) {
 			}
 			e := engineRead{ID: string(id), Title: id.Title(), Available: a.Available}
 			e.Sources, e.Sinks, e.ExceptSinks = engine.Runs(id)
+			e.EventSinks = engine.EventSinks(id)
 			for _, s := range engine.Settings() {
 				if s.Engine == id {
 					e.Settings = append(e.Settings, s)

@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Empty, InlineError, Notice } from '@/components/ui/feedback';
+import { Empty, InlineError, Notice, Skeleton } from '@/components/ui/feedback';
 import { Check, Field, Input, RadioCards } from '@/components/ui/form';
 import { Card, QueryState } from '@/components/ui/layout';
 import { Select } from '@/components/ui/select';
@@ -9,12 +9,12 @@ import { Meta } from '@/components/ui/text';
 import { CheckList, reportBadge } from '@/components/CheckList';
 import { ConnectionDialog } from '@/features/connections/ConnectionDialog';
 import { allows, usePolicies } from '@/lib/policies';
-import { ENGINE_PITCH, ENGINE_TITLE, engineChoices, pickEngine, useEngines, type EngineId } from '@/lib/engines';
+import { ENGINE_TITLE, engineAllowed, engineChoices, enginePitch, hiddenLines, pickEngine, sinkFit, useEngines, writesEvents, type EngineId, type SinkFit } from '@/lib/engines';
 import { SchemaForm, cleanValues, defaultsOf, type FormValues, type JsonSchema } from '@/components/SchemaForm';
 import { DEFAULT_SINK_CAPS, sinkCapsOf, TYPE_LABEL, useCheckConnection, useConnections, useConnectorTypes, useDiscovery } from '@/lib/connections';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
-import { deriveSinkOptions, fullSpec, keepPartitionBy, optionsSchemaFor, sinkDestinationFor, sinkNamingError, specForEngine, type FullSpec } from '../spec';
+import { deriveSinkOptions, flinkEventFormat, fullSpec, keepPartitionBy, optionsSchemaFor, sinkDestinationFor, sinkNamingError, specForEngine, type FullSpec } from '../spec';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { ConnectionCards, StepHeader } from './shared';
 import { partitionByFor, partitionError, writtenByTable, type PartitionBy } from '../transforms/PartitionBy';
@@ -54,8 +54,28 @@ export function SinkStep({
   const types = useConnectorTypes(project.id);
   const engines = useEngines();
   const { save, pending, error } = useSaveSpec(pipeline);
-  const policies = usePolicies(project.id).data;
-  const sinks = (connections.data ?? []).filter((c) => c.kind === 'sink' && (allows(policies?.allowed_sink_types, c.type) || c.id === pipeline.sink?.id));
+  const policyQuery = usePolicies(project.id);
+  const policies = policyQuery.data;
+  // Unreadable policies hide nothing here: the server refuses saving with its own message.
+  const readable = policies && !policies.unreadable ? policies : undefined;
+  const sourceType = pipeline.source.type;
+  // Each destination is judged by the engines that run this source to it, the engines the project
+  // allows and whether they are on (ADR 0011). The pipeline's saved destination always shows.
+  const fits = new Map<string, SinkFit>();
+  const hidden: { name: string; why: string }[] = [];
+  const sinks = (connections.data ?? []).filter((c) => {
+    if (c.kind !== 'sink') return false;
+    if (c.id === pipeline.sink?.id) return true;
+    if (!allows(readable?.allowed_sink_types, c.type)) return false;
+    const fit = sinkFit(engines.data, sourceType, c.type, readable);
+    fits.set(c.id, fit);
+    if (fit.state === 'hidden') hidden.push({ name: c.name, why: fit.why });
+    return fit.state !== 'hidden';
+  });
+  const cardWhy = (c: { id: string }) => {
+    const fit = fits.get(c.id);
+    return fit?.state === 'unavailable' ? fit.why : null;
+  };
   const current = sinks.find((c) => c.id === sinkId);
   const report = check.data && check.variables?.id === current?.id ? check.data : current?.last_check;
   const caps = current ? sinkCapsOf(types.data, current.type) : DEFAULT_SINK_CAPS;
@@ -63,18 +83,20 @@ export function SinkStep({
   const nameError = sinkNamingError(naming, caps, tables, pipeline.name);
   const deployed = Boolean(pipeline.deployed_version);
   // The engines that can run this source to the chosen destination; a deployed pipeline keeps its own.
-  const choices = current ? engineChoices(engines.data, pipeline.source.type, current.type) : [];
+  const choices = current ? engineChoices(engines.data, sourceType, current.type) : [];
   const [picked, setPicked] = useState<EngineId | null>(null);
-  const engine: EngineId = deployed ? pipeline.engine : (picked ?? pickEngine(choices, pipeline.engine));
+  const engine: EngineId = deployed ? pipeline.engine : (picked ?? pickEngine(choices, pipeline.engine, readable));
   const flink = engine === 'flink-cdc';
+  // Flink CDC writes Kafka as change events and the other destinations as tables (ADR 0011).
+  const events = writesEvents(engines.data, engine, current?.type);
   // Debezium is a real choice for a change log only before the first deploy, where it runs this pair.
-  const debeziumOffered = !deployed && choices.some((e) => e.id === 'debezium' && e.available);
+  const debeziumOffered = !deployed && choices.some((e) => e.id === 'debezium' && e.available && engineAllowed(readable, e.id));
   const optionsSchema = optionsSchemaFor(caps.options_schema as JsonSchema | null, engine, { debeziumOffered });
   const masked = Object.values(spec.source.columns).reduce((n, r) => n + (r.mask?.length ?? 0), 0);
   const formats = FORMATS.filter((f) => caps.formats.includes(f.value));
   // A sink with one format (Iceberg reads Kafka Connect structs) uses it whatever the spec says.
   const forcedFormat = caps.formats.length === 1;
-  // Flink CDC writes tables: there is no event format to choose.
+  // Flink CDC writes tables, or Kafka in its one format: there is no event format to choose.
   const showFormat = !forcedFormat && !flink && caps.formats.length > 0;
   const registry = showFormat && (format.type === 'avro' || format.type === 'protobuf');
   const discovery = useDiscovery(project.id, pipeline.source.id);
@@ -104,12 +126,16 @@ export function SinkStep({
     setOptions(optionsSchema ? defaultsOf(optionsSchema) : {});
   }, [current, caps, types.data, deployed, forcedFormat, optionsSchema]);
   const chosen = choices.find((e) => e.id === engine);
+  // On Flink CDC Kafka the format is its JSON (specForEngine): compared and saved as such.
+  const savedFormat = flink && events ? flinkEventFormat(format) : format;
   const missing = !sinkId
     ? 'Choose a destination.'
     : current && engines.data && choices.length === 0
       ? `No engine runs ${TYPE_LABEL[pipeline.source.type] ?? pipeline.source.type} to ${TYPE_LABEL[current.type] ?? current.type}.`
       : current && engines.data && !chosen?.available
         ? (choices.find((e) => !e.available)?.reason ?? 'Its engine isn’t available.')
+      : current && engines.data && !engineAllowed(readable, engine)
+        ? `This project doesn’t allow pipelines on ${ENGINE_TITLE[engine]}.`
       : nameError
       ? 'Fix the destination naming.'
       : flink && optionsSchema?.properties?.write_mode?.ui?.unavailable?.[String(options.write_mode)]
@@ -120,13 +146,13 @@ export function SinkStep({
   const body = () => ({
     sink_id: sinkId,
     ...(engine !== pipeline.engine ? { engine } : {}),
-    spec: specForEngine({ ...spec, sink: { ...spec.sink, naming, format, options: savedOptions } }, engine),
+    spec: specForEngine({ ...spec, sink: { ...spec.sink, naming, format, options: savedOptions } }, engine, { events }),
   });
   const dirty = () =>
     sinkId !== pipeline.sink?.id ||
     engine !== pipeline.engine ||
     naming !== spec.sink.naming ||
-    JSON.stringify(format) !== JSON.stringify(spec.sink.format) ||
+    JSON.stringify(savedFormat) !== JSON.stringify(spec.sink.format) ||
     JSON.stringify(savedOptions) !== JSON.stringify(spec.sink.options);
   useImperativeHandle(handle, () => ({ dirty, commit: async () => (missing ? false : dirty() ? save(body()) : true) }));
   const isReady = !missing;
@@ -138,21 +164,29 @@ export function SinkStep({
         title="Where should changes go?"
         description={caps.naming.single ? 'Every table goes to the one destination this connection names.' : 'Each table gets its own destination.'}
       />
-      {policies?.allowed_sink_types ? (
-        <Notice tone="info">This project allows these destinations: {policies.allowed_sink_types.map((t) => TYPE_LABEL[t] ?? t).join(', ')}.</Notice>
+      {policies?.unreadable ? (
+        <Notice tone="warn">This project’s policies can’t be read, so changes are blocked until an Admin fixes them in Settings → Policies.</Notice>
+      ) : readable?.allowed_sink_types ? (
+        <Notice tone="info">This project allows these destinations: {readable.allowed_sink_types.map((t) => TYPE_LABEL[t] ?? t).join(', ')}.</Notice>
       ) : null}
       {deployed ? <Notice tone="info">The destination of a deployed pipeline can’t change.</Notice> : null}
       <QueryState query={connections} doing="Couldn’t load the destinations">
         {() =>
-          sinks.length === 0 && !can('connection.manage') ? (
+          // What fits is judged once the engines and policies are known, so cards don't disappear.
+          (engines.isPending || policyQuery.isPending) && !deployed ? (
+            <Skeleton lines={2} />
+          ) : sinks.length === 0 ? (
             <Card>
-              <Empty title="No destinations available">Ask an editor or an Admin to add a destination.</Empty>
+              <Empty title={`No destination takes ${TYPE_LABEL[sourceType] ?? sourceType} here`}>
+                {can('connection.manage') ? 'Add a destination below: it lists the types this source can go to.' : 'Ask an editor or an Admin to add a destination this source can go to.'}
+              </Empty>
             </Card>
           ) : (
-            <ConnectionCards label="Destination" items={sinks} selected={sinkId} onSelect={(c) => setSinkId(c.id)} disabled={deployed} />
+            <ConnectionCards label="Destination" items={sinks} selected={sinkId} onSelect={(c) => setSinkId(c.id)} disabled={deployed} why={cardWhy} />
           )
         }
       </QueryState>
+      {hidden.length && !deployed ? <HiddenSinks hidden={hidden} source={TYPE_LABEL[sourceType] ?? sourceType} /> : null}
       {can('connection.manage') && !deployed ? (
         <div>
           <Button icon={<Plus />} onClick={() => setAdding(true)}>
@@ -184,16 +218,19 @@ export function SinkStep({
             options={choices.map((e) => ({
               value: e.id,
               label: e.id === 'debezium' ? `${ENGINE_TITLE[e.id]} (default)` : ENGINE_TITLE[e.id],
-              description: ENGINE_PITCH[e.id],
-              disabled: (deployed || !e.available) && e.id !== engine,
-              why: deployed ? 'A deployed pipeline keeps its engine.' : (e.reason ?? null),
+              description: enginePitch(e.id, writesEvents(engines.data, e.id, current.type)),
+              disabled: (deployed || !e.available || !engineAllowed(readable, e.id)) && e.id !== engine,
+              why: deployed ? 'A deployed pipeline keeps its engine.' : !engineAllowed(readable, e.id) ? 'Not allowed in this project.' : (e.reason ?? null),
             }))}
           />
         </Card>
       ) : current && flink ? (
         <Notice tone="info" title="Runs on Flink CDC">
-          {TYPE_LABEL[current.type] ?? current.type} is written by Flink CDC: {ENGINE_PITCH['flink-cdc'].charAt(0).toLowerCase() + ENGINE_PITCH['flink-cdc'].slice(1)}
+          {TYPE_LABEL[current.type] ?? current.type} is written by Flink CDC: {lowerFirst(enginePitch('flink-cdc', events))}
         </Notice>
+      ) : null}
+      {current && flink && events ? (
+        <Meta className="block">Records are Flink CDC’s Debezium-style JSON (no schema): it has no other format.</Meta>
       ) : null}
       {flink && masked > 0 ? (
         <Notice tone="warn" title="Masked columns">
@@ -292,11 +329,29 @@ export function SinkStep({
         open={adding}
         onOpenChange={setAdding}
         kind="sink"
+        fitting={{ sourceType, policy: policies }}
         onSaved={(c) => {
           setSinkId(c.id);
           check.mutate({ id: c.id });
         }}
       />
+    </div>
+  );
+}
+
+function lowerFirst(s: string): string {
+  return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
+function HiddenSinks({ hidden, source }: { hidden: { name: string; why: string }[]; source: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 text-sm text-muted" data-testid="hidden-sinks">
+      <span>Not shown for {source}:</span>
+      {hiddenLines(hidden).map((l) => (
+        <span key={l} className="wrap-anywhere">
+          {l}
+        </span>
+      ))}
     </div>
   );
 }

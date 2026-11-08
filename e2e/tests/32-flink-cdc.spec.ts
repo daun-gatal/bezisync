@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { Api, choose, defaultProject, signIn, unique } from './helpers';
-import { ICEBERG_REST, ORACLE, ORACLE_XE, SOURCE_PG } from './fixtures';
+import { ICEBERG_REST, KAFKA, MONGO, ORACLE, ORACLE_XE, SOURCE_PG } from './fixtures';
 import { oracleSQL, ownerSql, waitFor } from './data';
 import { layoutProblems } from './layout';
 import { walkWizard } from './walk';
@@ -765,4 +765,143 @@ test('Flink CDC: the destination table shows types, and computed and added colum
   await api.send('DELETE', `${url}?drop_destinations=true`);
   await waitFor('Flink CDC pipeline deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
   await ownerSql(`DROP TABLE IF EXISTS ${table}`);
+});
+
+/*
+ * ADR 0011 (W-1, W-4, W-5, W-10, W-15): the Destination step offers what an allowed engine runs from
+ * the source, and names what it leaves out. Its own project, so its policies touch nothing else.
+ */
+test('Destination step: only what an allowed engine runs from the source, the rest named', async ({ page }) => {
+  test.setTimeout(240_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const tag = unique('fit');
+  const project = await api.send<{ id: string; slug: string }>('POST', '/api/v1/projects', { slug: tag.slice(0, 40), name: `Fit ${tag}` }, 201);
+  const base = `/api/v1/projects/${project.id}`;
+  const { password, ...pg } = SOURCE_PG;
+  const { password: mongoPassword, ...mongo } = MONGO;
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const mdb = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'mongodb', name: `mongo-${tag}`, config: { ...mongo, auth_source: 'admin' }, secrets: { password: mongoPassword } }, 201);
+  await api.send('POST', `${base}/connections`, { kind: 'sink', type: 'kafka', name: `kafka-${tag}`, config: { ...KAFKA, security_protocol: 'PLAINTEXT' }, secrets: {} }, 201);
+  await api.send('POST', `${base}/connections`, { kind: 'sink', type: 'starrocks', name: `sr-${tag}`, config: { host: 'starrocks-fe.invalid', user: 'root' }, secrets: {} }, 201);
+  await signIn(page);
+
+  // MongoDB: only Debezium reads it, and Debezium doesn't write StarRocks.
+  const fromMongo = await api.send<{ id: string }>('POST', `${base}/pipelines`, { name: `m-${tag}`, source_id: mdb.id, spec: { source: { tables: { include: ['shop.customers'] } } } }, 201);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${fromMongo.id}&step=sink`);
+  const cards = page.getByRole('radiogroup', { name: 'Destination' });
+  await expect(cards.getByRole('radio', { name: new RegExp(`kafka-${tag}`) })).toBeVisible();
+  await expect(cards.getByRole('radio', { name: new RegExp(`sr-${tag}`) })).toHaveCount(0);
+  await expect(page.getByTestId('hidden-sinks')).toContainText(`sr-${tag}: no engine runs this source to them.`);
+  await page.getByRole('button', { name: 'Add a destination' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('button', { name: /^Kafka/ })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /^StarRocks/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  // PostgreSQL, Debezium only: StarRocks is Flink CDC's, so it is left out for the policy.
+  await api.send('PUT', `${base}/policies`, { allowed_engines: ['debezium'] }, 200);
+  const fromPg = await api.send<{ id: string }>('POST', `${base}/pipelines`, { name: `p-${tag}`, source_id: src.id, spec: { source: { tables: { include: ['shop.orders'] } } } }, 201);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${fromPg.id}&step=sink`);
+  await expect(cards.getByRole('radio', { name: new RegExp(`kafka-${tag}`) })).toBeVisible();
+  await expect(page.getByTestId('hidden-sinks')).toContainText(`sr-${tag}: this project doesn’t allow Flink CDC, which writes them.`);
+
+  // Flink CDC only: StarRocks shows; Kafka (both engines) is picked on Flink CDC, Debezium disabled.
+  await api.send('PUT', `${base}/policies`, { allowed_engines: ['flink-cdc'] }, 200);
+  await page.reload();
+  await expect(cards.getByRole('radio', { name: new RegExp(`sr-${tag}`) })).toBeVisible();
+  await expect(page.getByTestId('hidden-sinks')).toHaveCount(0);
+  await cards.getByRole('radio', { name: new RegExp(`kafka-${tag}`) }).click();
+  const engine = page.getByRole('radiogroup', { name: 'Engine' });
+  await expect(engine.getByRole('radio', { name: /^Flink CDC/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(engine.getByRole('radio', { name: /^Debezium/ })).toContainText('Not allowed in this project.');
+  await page.getByRole('button', { name: 'Continue to transform →' }).click();
+  await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
+  const saved = await api.get<{ engine: string; spec: { sink: { format: { type: string; include_schema: boolean } } } }>(`${base}/pipelines/${fromPg.id}`);
+  expect(saved.engine).toBe('flink-cdc');
+  expect(saved.spec.sink.format).toMatchObject({ type: 'json', include_schema: false });
+
+  // A MongoDB draft now has nothing to go to (Flink CDC can't read it): the step says so.
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${fromMongo.id}&step=sink`);
+  await expect(page.getByText('No destination takes MongoDB here')).toBeVisible();
+  // And the Source step says why MongoDB can't be used.
+  await page.goto(`/p/${project.slug}/pipelines/new`);
+  await expect(page.getByRole('radiogroup', { name: 'Source' }).getByRole('radio', { name: new RegExp(`mongo-${tag}`) })).toContainText(
+    'This project allows only Flink CDC, which can’t read this source.',
+  );
+
+  await api.send('PUT', `${base}/policies`, {}, 200);
+  for (const id of [fromMongo.id, fromPg.id]) await api.send('DELETE', `${base}/pipelines/${id}`);
+});
+
+/*
+ * ADR 0011 (W-14, W-15): Flink CDC writes Kafka as change events, so the Transform step, its preview,
+ * Review and autosave speak events. The draft starts on Debezium with Avro; choosing Flink CDC in the
+ * Destination step saves Kafka's one format.
+ */
+test('Flink CDC → Kafka: the wizard speaks events, not tables', async ({ page }) => {
+  test.setTimeout(300_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('fkafka');
+  const { password, ...pg } = SOURCE_PG;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'kafka', name: `kafka-${tag}`, config: { ...KAFKA, security_protocol: 'PLAINTEXT' }, secrets: {} }, 201);
+  const avro = { type: 'avro', include_schema: false, registry_url: 'http://registry.invalid:8080/apis/registry/v2', registry_kind: 'apicurio' };
+  const p = await api.send<{ id: string; engine: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id,
+    spec: { source: { tables: { include: ['shop.orders'] } }, sink: { naming: `fk_${tag.replace(/-/g, '_')}_{table}`, format: avro }, snapshot: { mode: 'no_data' } },
+  }, 201);
+  expect(p.engine).toBe('debezium');
+  const url = `${base}/pipelines/${p.id}`;
+  await signIn(page);
+
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=sink`);
+  const engine = page.getByRole('radiogroup', { name: 'Engine' });
+  await expect(engine.getByRole('radio', { name: /^Flink CDC/ })).toContainText('Debezium-style JSON event');
+  await engine.getByRole('radio', { name: /^Flink CDC/ }).click();
+  await expect(page.getByLabel('Event format')).toHaveCount(0);
+  await expect(page.getByText('Records are Flink CDC’s Debezium-style JSON (no schema)')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to transform →' }).click();
+
+  await expect(page.getByRole('heading', { name: 'How should events look?' })).toBeVisible();
+  const saved = await api.get<{ engine: string; spec: { sink: { format: { type: string; include_schema: boolean; registry_url: string | null } } } }>(url);
+  expect(saved.engine).toBe('flink-cdc');
+  expect(saved.spec.sink.format).toMatchObject({ type: 'json', include_schema: false, registry_url: null });
+  await expect(page.getByText('Which rows and columns reach each table?')).toHaveCount(0);
+  await expect(page.getByText('Message key', { exact: true }).first()).toBeVisible();
+  const preview = page.getByRole('heading', { name: 'Events', exact: true });
+  await expect(preview).toBeVisible();
+  await expect(page.getByRole('definition').filter({ hasText: 'TableId' })).toContainText('id');
+  await expect(page.getByRole('columnheader', { name: 'Field' })).toBeVisible();
+  await expect(page.getByText('Destination table')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await expect(page.getByRole('button', { name: /^Keep only some events/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Rename fields/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Computed field/ })).toContainText('A new field');
+  await page.getByRole('button', { name: /^Keep deleted rows/ }).click();
+  // A new step opens for editing.
+  const soft = page.getByRole('region', { name: 'Step 1: Keep deleted rows' });
+  await expect(soft).toContainText('A delete is sent as an insert event marked __op = -D');
+  await expect(soft).toContainText('insert event whose after carries __op = -D');
+  await page.getByRole('button', { name: 'Add transform' }).click();
+  await page.getByRole('button', { name: /^Keep only some events/ }).click();
+  const filter = page.getByRole('region', { name: 'Step 1: Keep only some events' });
+  await expect(filter).toContainText('Events a filter drops never reach the topic');
+  await expect(page.getByText('Keep events', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(`kafka-${tag} · JSON events (Flink CDC)`)).toBeVisible();
+  await expect(page.getByText('Each change is sent as a Debezium-style JSON event')).toBeVisible();
+  await expect(page.getByText('Tables are kept in sync')).toHaveCount(0);
+  await expect(page.getByText('How much a restart may send again: consumers can see an event twice.')).toBeVisible();
+
+  // Every step round-trips on Flink CDC → Kafka.
+  await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+  await api.send('DELETE', url);
 });

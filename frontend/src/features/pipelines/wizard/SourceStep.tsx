@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/select';
 import { CheckList } from '@/components/CheckList';
 import { ConnectionDialog } from '@/features/connections/ConnectionDialog';
 import { allows, usePolicies } from '@/lib/policies';
+import { sinkFit, sourceFit, useEngines } from '@/lib/engines';
 import { templateSummary, useTemplates } from '@/lib/templates';
 import { TYPE_LABEL, useCheckConnection, useConnections } from '@/lib/connections';
 import { slugify } from '@/lib/format';
@@ -32,6 +33,19 @@ export function SourceStep({ pipeline, initialTemplate, onNext }: { pipeline?: P
     (c) => c.kind === 'source' && (allows(policies?.allowed_source_types, c.type) || c.id === pipeline?.source.id),
   );
   const current = sources.find((c) => c.id === selected);
+  const engines = useEngines().data;
+  // Unreadable policies judge nothing here (the server refuses with its own message).
+  const readable = policies && !policies.unreadable ? policies : undefined;
+  // A source no engine the project allows can read, and a template whose destination this source
+  // can't go to, say why instead of failing at Continue (ADR 0011).
+  const sourceWhy = (c: { type: string }) => (pipeline ? null : sourceFit(engines, c.type, readable));
+  const templateWhy = (t: { sink: { type: string; name: string } | null }) => {
+    if (!current || !t.sink) return null;
+    const fit = sinkFit(engines, current.type, t.sink.type, readable);
+    if (fit.state === 'hidden') return `Its destination ${t.sink.name} can’t be used with ${TYPE_LABEL[current.type] ?? current.type}: ${fit.why}.`;
+    return fit.state === 'unavailable' ? fit.why : null;
+  };
+  const blocked = !pipeline && current ? (sourceWhy(current) ?? (template ? templateWhy(template) : null)) : null;
   const report = check.data && check.variables?.id === selected ? check.data : current?.last_check;
 
   // A source picked for the first time (or checked long ago) is checked once; after that, "Re-check" is explicit.
@@ -84,7 +98,13 @@ export function SourceStep({ pipeline, initialTemplate, onNext }: { pipeline?: P
                 placeholder="Blank pipeline"
                 options={[
                   { value: '', label: 'Blank pipeline' },
-                  ...templates.data.map((t) => ({ value: t.id, label: t.title, description: t.description || undefined })),
+                  ...templates.data.map((t) => ({
+                    value: t.id,
+                    label: t.title,
+                    description: t.description || undefined,
+                    disabled: Boolean(templateWhy(t)) && t.id !== templateId,
+                    why: templateWhy(t),
+                  })),
                 ]}
               />
             )}
@@ -98,7 +118,7 @@ export function SourceStep({ pipeline, initialTemplate, onNext }: { pipeline?: P
               <Empty title="No sources available">Ask an editor or an Admin to add a source connection.</Empty>
             </Card>
           ) : (
-            <ConnectionCards label="Source" items={sources} selected={selected} onSelect={(c) => setSelected(c.id)} disabled={Boolean(pipeline)} />
+            <ConnectionCards label="Source" items={sources} selected={selected} onSelect={(c) => setSelected(c.id)} disabled={Boolean(pipeline)} why={sourceWhy} />
           )
         }
       </QueryState>
@@ -131,7 +151,13 @@ export function SourceStep({ pipeline, initialTemplate, onNext }: { pipeline?: P
       ) : null}
       <InlineError error={create.error} doing="Couldn’t create the draft" />
       <div className="flex justify-end">
-        <Button variant="primary" disabled={!current && !pipeline} why="Choose a source first." loading={create.isPending} onClick={next}>
+        <Button
+          variant="primary"
+          disabled={(!current && !pipeline) || Boolean(blocked)}
+          why={blocked ?? 'Choose a source first.'}
+          loading={create.isPending}
+          onClick={next}
+        >
           Continue to tables →
         </Button>
       </div>

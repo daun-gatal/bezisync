@@ -43,10 +43,16 @@ export function engineChoices(engines: Engine[] | undefined, sourceType: string,
 }
 
 /** The engine a pipeline gets for the pair: the current one while it still fits and is on, else
- *  the first available choice (the backend's ChooseEngine). */
-export function pickEngine(choices: Engine[], current: EngineId): EngineId {
-  if (choices.some((e) => e.id === current && e.available)) return current;
-  return choices.find((e) => e.available)?.id ?? current;
+ *  the first available choice, an engine the project allows before one it doesn't (the backend's
+ *  ChooseEngine). */
+export function pickEngine(choices: Engine[], current: EngineId, policy?: EnginePolicy): EngineId {
+  const on = choices.filter((e) => e.available);
+  const allowed = on.filter((e) => engineAllowed(policy, e.id));
+  for (const list of [allowed, on]) {
+    if (list.some((e) => e.id === current)) return current;
+    if (list.length) return list[0]!.id;
+  }
+  return current;
 }
 
 /** What each engine is for, in a line. */
@@ -108,4 +114,73 @@ export function flinkSpecBlock(c: FlinkChoices): Partial<FlinkChoices> {
     ...(keys.length ? { flink_conf: Object.fromEntries(keys.map((k) => [k, c.flink_conf[k]!])) } : {}),
     ...(c.cluster ? { cluster: clusterBlock(c.cluster) } : {}),
   };
+}
+
+/** The engine part of a project's policies, as the wizard reads it. Unreadable policies (or none
+ *  loaded yet) decide nothing here: the server refuses saving with its own message. */
+export interface EnginePolicy {
+  allowed_engines?: string[] | null;
+  unreadable?: boolean;
+}
+
+/** Does the project allow pipelines on the engine (domain.EngineViolation)? */
+export function engineAllowed(policy: EnginePolicy | undefined, id: EngineId): boolean {
+  if (!policy || policy.unreadable) return true;
+  return policy.allowed_engines === null || policy.allowed_engines === undefined || policy.allowed_engines.includes(id);
+}
+
+/** Whether a destination type can be used for a pipeline from sourceType (ADR 0011):
+ *  - ok: an allowed, available engine writes it (`engines` are those, in offer order);
+ *  - unavailable: allowed engines write it but none is on (an Admin can fix that: `why` says how);
+ *  - hidden: no engine runs the pair, or the project's policy allows none of those that do. */
+export type SinkFit = { state: 'ok'; engines: Engine[] } | { state: 'unavailable'; why: string } | { state: 'hidden'; why: string };
+
+export function sinkFit(engines: Engine[] | undefined, sourceType: string, sinkType: string, policy?: EnginePolicy): SinkFit {
+  // Before /engines answers nothing is judged (the step waits for it).
+  if (!engines) return { state: 'ok', engines: [] };
+  const choices = engineChoices(engines, sourceType, sinkType);
+  if (!choices.length) return { state: 'hidden', why: 'no engine runs this source to them' };
+  const allowed = choices.filter((e) => engineAllowed(policy, e.id));
+  if (!allowed.length) {
+    return { state: 'hidden', why: `this project doesn’t allow ${choices.map((e) => ENGINE_TITLE[e.id]).join(' or ')}, which ${choices.length === 1 ? 'writes' : 'write'} them` };
+  }
+  const on = allowed.filter((e) => e.available);
+  if (!on.length) return { state: 'unavailable', why: allowed.find((e) => e.reason)?.reason ?? `${ENGINE_TITLE[allowed[0]!.id]} isn’t available.` };
+  return { state: 'ok', engines: on };
+}
+
+/** Does any engine the project allows read the source? (Debezium reads every source; a project
+ *  that allows only Flink CDC can't use the others.) */
+export function sourceFit(engines: Engine[] | undefined, sourceType: string, policy?: EnginePolicy): string | null {
+  if (!engines) return null;
+  const readers = engines.filter((e) => runs(e, sourceType));
+  if (readers.some((e) => engineAllowed(policy, e.id))) return null;
+  const allowed = engines.filter((e) => engineAllowed(policy, e.id)).map((e) => ENGINE_TITLE[e.id]);
+  return allowed.length ? `This project allows only ${allowed.join(' and ')}, which can’t read this source.` : 'This project allows no engine.';
+}
+
+/** Does the engine write the destination as change events rather than as tables (ADR 0011)?
+ *  Debezium always does; Flink CDC only for its event sinks (Kafka). */
+export function writesEvents(engines: Engine[] | undefined, id: EngineId, sinkType: string | undefined): boolean {
+  if (id !== 'flink-cdc') return true;
+  const e = engines?.find((x) => x.id === id);
+  // Until /engines answers: Kafka, the one event sink the backend lists.
+  return (e?.event_sinks ?? ['kafka']).includes(sinkType ?? '');
+}
+
+/** What an engine is for on this destination, in a line. */
+export function enginePitch(id: EngineId, events: boolean): string {
+  if (id === 'flink-cdc' && events) return 'Streams every change as a Debezium-style JSON event: copies big tables in parallel chunks and keeps saved positions you can restore.';
+  return ENGINE_PITCH[id];
+}
+
+/** The destinations the wizard leaves out (sinkFit "hidden"), one line per reason with a few
+ *  names, so "where is my connection?" has an answer. */
+export function hiddenLines(hidden: { name: string; why: string }[]): string[] {
+  const byWhy = new Map<string, string[]>();
+  for (const h of hidden) byWhy.set(h.why, [...(byWhy.get(h.why) ?? []), h.name]);
+  return [...byWhy].map(([why, names]) => {
+    const shown = names.slice(0, 3).join(', ');
+    return `${names.length > 3 ? `${shown} and ${names.length - 3} more` : shown}: ${why}.`;
+  });
 }

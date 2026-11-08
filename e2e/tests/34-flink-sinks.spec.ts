@@ -101,6 +101,19 @@ async function journey(page: Page, j: Journey) {
       if (j.timestamp && rows.get(3)) expect(String(rows.get(3)?.at), 'S-10: written in UTC').toContain('03:04:05');
       return rows.get(1)?.status === 'changed' && rows.get(3)?.status === 'streamed' && (rows.get(2) === null || !rows.has(2));
     }, 600_000);
+    if (j.type === 'kafka') {
+      // W-19 (ADR 0011): what the Transform step's Events panel describes, read from the real topic:
+      // Debezium-style JSON (before, after, op, source; no schema), keyed by the table's id and its key.
+      const e = await api.get<{ records: { key: unknown; value: Record<string, unknown> | null }[] }>(`${url}/events?table=${table}&limit=200`);
+      const streamed = e.records.find((r) => (r.value?.after as Record<string, unknown> | null)?.id === 3);
+      expect(streamed, JSON.stringify(e.records.slice(0, 3))).toBeTruthy();
+      expect(Object.keys(streamed!.value!)).toEqual(expect.arrayContaining(['before', 'after', 'op', 'source']));
+      expect(streamed!.value).not.toHaveProperty('schema');
+      expect(streamed!.value!.op).toBe('c');
+      const key = typeof streamed!.key === 'string' ? streamed!.key : JSON.stringify(streamed!.key);
+      expect(key).toContain('TableId');
+      expect(key).toContain('3');
+    }
   } else {
     // No reader: the pipeline keeps streaming, and saves positions as it commits.
     await waitFor(`Flink CDC → ${j.type} saved a position`, async () => {

@@ -219,3 +219,21 @@ describe('steps compare equal with the server when nothing changed (ADR 0007 rev
     expect(pruneToTables(spec, ['shop.a', 'shop.b']).sink).toBe(spec.sink);
   });
 });
+
+describe('specForEngine on a Flink CDC event destination (ADR 0011)', () => {
+  const avro = { type: 'avro', include_schema: false, registry_url: 'http://r:8080', registry_kind: 'confluent' } as const;
+  const withFormat = (format: object) => fullSpec({ sink: { naming: '{table}', format, options: {} } } as never);
+  it('sets Kafka on Flink CDC to JSON without the schema, keeping the key order', () => {
+    const out = specForEngine(withFormat(avro), 'flink-cdc', { events: true }).sink.format;
+    expect(out).toEqual({ type: 'json', include_schema: false, registry_url: null, registry_kind: 'confluent' });
+    expect(Object.keys(out)).toEqual(Object.keys(withFormat(avro).sink.format));
+    const schema = specForEngine(withFormat({ type: 'json', include_schema: true, registry_url: null, registry_kind: 'apicurio' }), 'flink-cdc', { events: true });
+    expect(schema.sink.format.include_schema).toBe(false);
+  });
+  it('leaves the format alone elsewhere, and the same object when it already fits', () => {
+    expect(specForEngine(withFormat(avro), 'flink-cdc').sink.format.type).toBe('avro');
+    expect(specForEngine(withFormat(avro), 'debezium', { events: true }).sink.format.type).toBe('avro');
+    const json = withFormat({ type: 'json', include_schema: false, registry_url: null, registry_kind: 'apicurio' });
+    expect(specForEngine(json, 'flink-cdc', { events: true }).sink.format).toBe(json.sink.format);
+  });
+});

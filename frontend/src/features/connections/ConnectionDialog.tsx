@@ -8,7 +8,8 @@ import { InlineError, Pill, Skeleton } from '@/components/ui/feedback';
 import { Check, Field, Input, RadioCards, SlugInput, slugError } from '@/components/ui/form';
 import { cleanValues, defaultsOf, SchemaForm, type FormValues, type JsonSchema, type LinkOptions } from '@/components/SchemaForm';
 import { CheckList } from '@/components/CheckList';
-import { engineGate } from '@/lib/engines';
+import { engineGate, sinkFit, useEngines, type EnginePolicy } from '@/lib/engines';
+import { allows } from '@/lib/policies';
 import { slugify } from '@/lib/format';
 import { useSecretStores } from '@/lib/secretRefs';
 import { useProject } from '@/lib/session';
@@ -31,16 +32,27 @@ export function ConnectionDialog({
   kind,
   existing,
   onSaved,
+  fitting,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   kind: Kind;
   existing?: Connection;
   onSaved?: (conn: Connection) => void;
+  /** From the wizard: offer only destination types this source can go to under the project's
+   *  policies (ADR 0011). The Connections page passes nothing and lists every type. */
+  fitting?: { sourceType: string; policy?: (EnginePolicy & { allowed_sink_types?: string[] | null }) | undefined };
 }) {
   const { project, expert, can } = useProject();
   const types = useConnectorTypes(project.id);
-  const choices = useMemo(() => (types.data ?? []).filter((t) => t.kind === kind), [types.data, kind]);
+  const engines = useEngines();
+  const readable = fitting?.policy && !fitting.policy.unreadable ? fitting.policy : undefined;
+  // In the wizard: types no allowed engine runs from the source (or the policy leaves out) aren't
+  // offered; those whose engines are off say why (sinkFit).
+  const fitOf = (t: ConnectorType) => (fitting && kind === 'sink' ? sinkFit(engines.data, fitting.sourceType, t.type, readable) : null);
+  const choices = (types.data ?? []).filter(
+    (t) => t.kind === kind && (!fitting || kind !== 'sink' || (allows(readable?.allowed_sink_types, t.type) && fitOf(t)?.state !== 'hidden')),
+  );
   const [type, setType] = useState<ConnectorType | undefined>();
   const [provider, setProvider] = useState('self_hosted');
   const [name, setName] = useState('');
@@ -198,7 +210,9 @@ export function ConnectionDialog({
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-2.5">
           {choices.map((t) => {
             const gate = engineGate(t);
-            const off = gate !== null && !gate.available;
+            const fit = fitOf(t);
+            const off = fit ? fit.state === 'unavailable' : gate !== null && !gate.available;
+            const why = fit?.state === 'unavailable' ? fit.why : gate?.reason;
             return (
               <button
                 key={t.type}
@@ -226,7 +240,7 @@ export function ConnectionDialog({
                     </Pill>
                   ) : null}
                 </span>
-                <span className="text-sm text-muted">{off ? gate.reason : t.description}</span>
+                <span className="text-sm text-muted">{off ? why : t.description}</span>
               </button>
             );
           })}

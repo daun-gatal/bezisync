@@ -285,3 +285,47 @@ func TestFlinkRawOptionsAndExperimental(t *testing.T) {
 		t.Fatal(cls)
 	}
 }
+
+// ADR 0011: the default engine follows the project's allowed engines, and a Flink CDC Kafka
+// pipeline takes only JSON without the schema, refused at save (not first at compile).
+func TestEnginePolicyDefaultAndFlinkKafkaFormat(t *testing.T) {
+	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
+	l := e.admin.get("/api/v1/engines").expect(200).List()
+	if at(t, l[0], "event_sinks") != nil || len(at(t, l[1], "event_sinks").([]any)) != 1 || at(t, l[1], "event_sinks").([]any)[0] != "kafka" {
+		t.Fatal(l)
+	}
+	base := "/api/v1/projects/" + e.pid + "/pipelines"
+	e.admin.put("/api/v1/projects/"+e.pid+"/policies", map[string]any{"allowed_engines": []string{"flink-cdc"}}).expect(200)
+	// PostgreSQL → Kafka: both engines run it; only Flink CDC is allowed, so it is the default.
+	body := map[string]any{"name": "events", "source_id": e.ids.Source, "sink_id": e.ids.Sink}
+	if p := e.admin.post(base, body).expect(201); p.Str("engine") != "flink-cdc" {
+		t.Fatal(string(p.Raw))
+	}
+	avro := map[string]any{"type": "avro", "include_schema": false, "registry_url": "http://registry:8080/apis/registry/v2", "registry_kind": "apicurio"}
+	body["name"], body["spec"] = "events-avro", map[string]any{"sink": map[string]any{"format": avro}}
+	if r := e.admin.post(base, body).expect(422); r.Code() != "engine_settings" || !strings.Contains(r.Str("detail"), "JSON without a schema") {
+		t.Fatal(string(r.Raw))
+	}
+	schema := map[string]any{"type": "json", "include_schema": true}
+	body["spec"] = map[string]any{"sink": map[string]any{"format": schema}}
+	if r := e.admin.post(base, body).expect(422); r.Code() != "engine_settings" {
+		t.Fatal(string(r.Raw))
+	}
+	// With every engine allowed the default is Debezium again, and Avro saves there; switching
+	// that pipeline to Flink CDC without a new spec is refused for the stored format.
+	e.admin.put("/api/v1/projects/"+e.pid+"/policies", map[string]any{}).expect(200)
+	body["spec"] = map[string]any{"sink": map[string]any{"format": avro}}
+	p := e.admin.post(base, body).expect(201)
+	if p.Str("engine") != "debezium" {
+		t.Fatal(string(p.Raw))
+	}
+	r := e.admin.patch(base+"/"+p.Str("id"), map[string]any{"engine": "flink-cdc"}, ifMatch(p.At("version"))...).expect(422)
+	if r.Code() != "engine_settings" {
+		t.Fatal(string(r.Raw))
+	}
+	// A Flink CDC table destination ignores the stored format: Iceberg saves whatever it holds.
+	lake := icebergSink(t, e)
+	e.admin.post(base, map[string]any{"name": "lake", "source_id": e.ids.Source, "sink_id": lake, "engine": "flink-cdc",
+		"spec": map[string]any{"sink": map[string]any{"format": avro}}}).expect(201)
+}

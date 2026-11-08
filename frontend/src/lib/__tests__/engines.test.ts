@@ -1,4 +1,4 @@
-import { engineChoices, engineGate, flinkChoices, pickEngine, runs, type Engine, flinkSpecBlock } from '../engines';
+import { enginePitch, engineAllowed, engineChoices, engineGate, flinkChoices, pickEngine, runs, sinkFit, sourceFit, writesEvents, type Engine, flinkSpecBlock } from '../engines';
 import type { Schemas } from '../api';
 
 const base = { kind: 'sink', type: 'x', title: 'X', description: '', presets: [], config_schema: {}, secret_schema: {}, supports_masking: false } as const;
@@ -88,5 +88,70 @@ describe('flinkSpecBlock', () => {
     // An automatic shape has no task_managers.
     const auto = { parallelism: 2, slot: { cpu: '1', memory: '1Gi' }, job_manager: { cpu: '1', memory: '1Gi' }, shape: 'auto' as const };
     expect(JSON.stringify(flinkSpecBlock(flinkChoices({ ...stored, cluster: { ...auto, task_managers: null } })).cluster)).toBe(JSON.stringify(auto));
+  });
+});
+
+// ADR 0011: the Destination step offers what an allowed, available engine runs from the source.
+describe('sinkFit and the engine policy', () => {
+  const pg = (available = true) => ({ ...flink(available), sources: ['mysql', 'postgresql', 'sqlserver', 'oracle'], sinks: ['iceberg', 'starrocks', 'doris', 'fluss', 'kafka'], event_sinks: ['kafka'] }) as Engine;
+  const all = [debezium, pg()];
+  it('hides a destination no engine runs from the source', () => {
+    expect(sinkFit(all, 'mongodb', 'starrocks')).toEqual({ state: 'hidden', why: 'no engine runs this source to them' });
+    expect(sinkFit(all, 'mongodb', 'kafka').state).toBe('ok');
+  });
+  it('keeps a destination either engine writes when one of them is off or disallowed', () => {
+    // Kafka and Iceberg: Debezium and Flink CDC both write them.
+    expect(sinkFit([debezium, pg(false)], 'postgresql', 'kafka')).toMatchObject({ state: 'ok', engines: [{ id: 'debezium' }] });
+    expect(sinkFit(all, 'postgresql', 'iceberg', { allowed_engines: ['flink-cdc'] })).toMatchObject({ state: 'ok', engines: [{ id: 'flink-cdc' }] });
+    expect(sinkFit(all, 'postgresql', 'iceberg', { allowed_engines: ['debezium'] })).toMatchObject({ state: 'ok', engines: [{ id: 'debezium' }] });
+    expect(sinkFit(all, 'postgresql', 'kafka')).toMatchObject({ state: 'ok', engines: [{ id: 'debezium' }, { id: 'flink-cdc' }] });
+  });
+  it('hides what only a disallowed engine writes, and says so', () => {
+    const f = sinkFit(all, 'postgresql', 'starrocks', { allowed_engines: ['debezium'] });
+    expect(f).toEqual({ state: 'hidden', why: 'this project doesn’t allow Flink CDC, which writes them' });
+    // Debezium only, Kafka from MongoDB: fine; Flink CDC only, Kafka from MongoDB: Flink CDC can't read it.
+    expect(sinkFit(all, 'mongodb', 'kafka', { allowed_engines: ['flink-cdc'] }).state).toBe('hidden');
+  });
+  it('disables (not hides) what only an engine that is off writes', () => {
+    expect(sinkFit([debezium, pg(false)], 'postgresql', 'starrocks')).toEqual({ state: 'unavailable', why: 'off' });
+    // Flink CDC only and off: Kafka is written by Debezium too, but the policy leaves Flink CDC, which is off.
+    expect(sinkFit([debezium, pg(false)], 'postgresql', 'kafka', { allowed_engines: ['flink-cdc'] })).toEqual({ state: 'unavailable', why: 'off' });
+  });
+  it('ignores unreadable or missing policies (the server refuses saving itself)', () => {
+    expect(sinkFit(all, 'postgresql', 'starrocks', { allowed_engines: [], unreadable: true }).state).toBe('ok');
+    expect(engineAllowed(undefined, 'flink-cdc')).toBe(true);
+    expect(engineAllowed({ allowed_engines: null }, 'flink-cdc')).toBe(true);
+    expect(engineAllowed({ allowed_engines: [] }, 'debezium')).toBe(false);
+  });
+  it('judges nothing before /engines answers', () => {
+    expect(sinkFit(undefined, 'mongodb', 'starrocks').state).toBe('ok');
+  });
+  it('picks an allowed engine first, like ChooseEngine', () => {
+    const both = engineChoices(all, 'postgresql', 'kafka');
+    expect(pickEngine(both, 'debezium', { allowed_engines: ['flink-cdc'] })).toBe('flink-cdc');
+    expect(pickEngine(both, 'flink-cdc', { allowed_engines: ['debezium'] })).toBe('debezium');
+    expect(pickEngine(both, 'debezium', { allowed_engines: ['debezium'] })).toBe('debezium');
+    // No allowed engine on: the old order (the policy refuses it with its own message).
+    expect(pickEngine(engineChoices([debezium, pg(false)], 'postgresql', 'kafka'), 'debezium', { allowed_engines: ['flink-cdc'] })).toBe('debezium');
+  });
+  it('says when no allowed engine reads the source', () => {
+    expect(sourceFit(all, 'mongodb')).toBeNull();
+    expect(sourceFit(all, 'mongodb', { allowed_engines: ['flink-cdc'] })).toBe('This project allows only Flink CDC, which can’t read this source.');
+    expect(sourceFit(all, 'postgresql', { allowed_engines: ['flink-cdc'] })).toBeNull();
+  });
+});
+
+describe('writesEvents', () => {
+  const fl = { ...flink(true), event_sinks: ['kafka'] } as Engine;
+  it('is the engine and destination pair, not the destination alone', () => {
+    expect(writesEvents([debezium, fl], 'debezium', 'kafka')).toBe(true);
+    expect(writesEvents([debezium, fl], 'debezium', 'iceberg')).toBe(true);
+    expect(writesEvents([debezium, fl], 'flink-cdc', 'kafka')).toBe(true);
+    expect(writesEvents([debezium, fl], 'flink-cdc', 'iceberg')).toBe(false);
+    expect(writesEvents(undefined, 'flink-cdc', 'kafka')).toBe(true);
+  });
+  it('describes Flink CDC by what it writes there', () => {
+    expect(enginePitch('flink-cdc', true)).not.toMatch(/upsert|tables in sync/);
+    expect(enginePitch('flink-cdc', false)).toMatch(/tables in sync/);
   });
 });

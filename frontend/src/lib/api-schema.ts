@@ -3278,6 +3278,11 @@ export interface components {
             /** Default Image */
             default_image: string | null;
             /**
+             * Event Sinks
+             * @description Flink CDC: destination types it writes as change events rather than as tables.
+             */
+            event_sinks?: string[];
+            /**
              * Except Sinks
              * @description Destination types it never writes.
              */

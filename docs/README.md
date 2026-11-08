@@ -105,6 +105,15 @@ Each pipeline runs on one of two engines, picked in the wizard's Destination ste
   engine](#flink-cdc-engine)); until then the wizard shows its destinations as unavailable, with
   the reason. **Policies → Allowed engines** can limit the engines a project's pipelines use.
 
+The Destination step lists only the destinations an engine the project allows can write from the
+pipeline's source, and names the others under the list with the reason (no engine runs this source to
+them, or the project doesn't allow the engine that does); a destination whose engine isn't set up yet
+is shown disabled, with what an Admin does about it. **Add a destination** offers the same types.
+When a destination takes both engines and the project allows only one, that one is chosen, in the
+wizard and through the API, CLI and MCP. The Source step disables a source no allowed engine reads
+(MongoDB in a project that allows only Flink CDC) and a template whose destination the source can't
+go to.
+
 | To… | Destinations | Engine |
 |---|---|---|
 | Stream changes to services as events | Kafka | Debezium (default) or Flink CDC |
@@ -372,9 +381,12 @@ pattern gives, created at deploy with the connection's partitions and replicatio
 by the primary key (`{"TableId": …, "id": …}`) and spread by it, and the value is Flink CDC's
 Debezium-style JSON: `before`, `after` and `op`, with a short `source` and no schema or `ts_ms`. Consumers
 written for Debezium's records need to accept that shape; switching a pipeline's engine changes it.
-Only JSON without the schema is available on Flink CDC, and the Transform step's event shape (Row after
-change, delete handling, added fields) doesn't apply there: it is hidden on Flink CDC, and records are
-always the change envelope above.
+Only JSON without the schema is available on Flink CDC (choosing Flink CDC sets it; saving another format
+is refused), and the Transform step's event shape (Row after change, delete handling, added fields)
+doesn't apply there: it is hidden on Flink CDC, and records are always the change envelope above. The
+Transform step speaks events on this pair: *Keep events*, *Fields*, the *Message key* (the key columns
+the record key carries, which also spread events over partitions), and an **Events** panel with the topic, the key and the value. *Keep deleted rows* sends a
+delete as an insert event whose `after` carries `__op = -D`, with no delete event.
 
 ### Google Pub/Sub
 

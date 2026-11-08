@@ -23,6 +23,7 @@ export function FlinkRunSettings({
   expert,
   catalogue,
   deployed,
+  events = false,
 }: {
   value: FlinkChoices;
   onChange: (v: FlinkChoices) => void;
@@ -30,6 +31,8 @@ export function FlinkRunSettings({
   expert: boolean;
   catalogue: Setting[];
   deployed: boolean;
+  /** Flink CDC writes this destination as change events (Kafka, ADR 0011). */
+  events?: boolean;
 }) {
   const set = <K extends keyof FlinkChoices>(k: K, v: FlinkChoices[K]) => onChange({ ...value, [k]: v });
   const iceberg = sinkType === 'iceberg';
@@ -45,8 +48,8 @@ export function FlinkRunSettings({
             value={value.schema_changes}
             onChange={(v) => set('schema_changes', v)}
             options={[
-              { value: 'apply', label: 'Apply', description: 'New and renamed columns reach the destination; nothing is dropped there.' },
-              { value: 'ignore', label: 'Ignore', description: 'The destination keeps its columns; changed columns stop updating.' },
+              { value: 'apply', label: 'Apply', description: events ? 'New and renamed columns appear in the events; none are dropped from them.' : 'New and renamed columns reach the destination; nothing is dropped there.' },
+              { value: 'ignore', label: 'Ignore', description: events ? 'Events keep their fields; changed columns stop updating.' : 'The destination keeps its columns; changed columns stop updating.' },
               { value: 'stop', label: 'Stop', description: 'The pipeline stops so someone can decide.' },
             ]}
           />
@@ -76,7 +79,7 @@ export function FlinkRunSettings({
       <div className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4">
         <Field
           label={iceberg ? 'Commit every' : 'Save the position every'}
-          hint={iceberg ? 'New data becomes visible in Iceberg at each commit.' : 'How much a restart may replay (writes are idempotent by key).'}
+          hint={iceberg ? 'New data becomes visible in Iceberg at each commit.' : events ? 'How much a restart may send again: consumers can see an event twice.' : 'How much a restart may replay (writes are idempotent by key).'}
         >
           {(id) => (
             <Select

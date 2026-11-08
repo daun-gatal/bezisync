@@ -5,14 +5,16 @@ import { Select } from '@/components/ui/select';
 import type { SinkCaps } from '@/lib/connections';
 import { sinkDestinationFor, type FullSpec, type TransformStep } from '../spec';
 import { useExpressionCheck } from '@/lib/transforms';
-import { flinkColumns, KIND_NAMES, summarize, type FlinkColumn, type TableInfo } from './model';
+import { flinkColumns, KIND_NAMES, summarize, type FlinkColumn, type FlinkWords, type TableInfo } from './model';
 
 /**
  * What a Flink CDC pipeline writes: for each captured table, the destination table and its
  * columns (renamed, added, computed, the key) with their types, and the filters that decide which
- * rows reach it. Flink CDC writes rows into tables, so there is no event to preview. A source
+ * rows reach it. There is no sample event to preview (the server renders Debezium's only). A source
  * column shows the source's type (the destination maps it to its own); a computed column the kind
- * it writes, asked of the server for an expression.
+ * it writes, asked of the server for an expression. On a destination Flink CDC writes as change
+ * events (Kafka, ADR 0011) the same columns are the fields of each event's before and after, and the
+ * panel says what the topic, the key and the value hold.
  */
 export function FlinkPreviewPanel({
   spec,
@@ -24,7 +26,9 @@ export function FlinkPreviewPanel({
   sourceType,
   projectId,
   pipelineId,
+  words,
 }: {
+  words: FlinkWords;
   spec: FullSpec;
   steps: TransformStep[];
   tables: TableInfo[];
@@ -39,7 +43,7 @@ export function FlinkPreviewPanel({
   const table = tables.find((t) => t.name === tableName) ?? tables[0];
   if (!table) {
     return (
-      <Card title="Destination table">
+      <Card title={words.previewTitle}>
         <p className="m-0 text-sm text-muted">Choose tables first.</p>
       </Card>
     );
@@ -48,10 +52,14 @@ export function FlinkPreviewPanel({
   const destination = sinkDestinationFor(spec.sink.naming, table.name, pipelineName, sinkCaps).toLowerCase();
   const filters = steps.filter((t) => t.type === 'filter' && (!t.tables || t.tables.includes(table.name)));
   // Iceberg keeps deleted rows by default, marked with their change type (connectors/iceberg_flink.go).
-  const keepsDeletes = sinkType === 'iceberg' && (spec.sink.options?.write_mode ?? 'upsert_keep_deletes') === 'upsert_keep_deletes';
+  // Keep deleted rows adds the change type too, on every destination (compiler: SOFT_DELETE).
+  const softDelete = steps.some((t) => t.type === 'soft_delete');
+  const keepsDeletes = softDelete || (sinkType === 'iceberg' && (spec.sink.options?.write_mode ?? 'upsert_keep_deletes') === 'upsert_keep_deletes');
   const noKey = !columns.some((c) => c.key);
+  const keyNames = columns.filter((c) => c.key).map((c) => c.name);
+  const events = words.events;
   return (
-    <Card title="Destination table">
+    <Card title={words.previewTitle}>
       <div className="flex min-w-0 flex-col gap-3">
         {tables.length > 1 ? (
           <Select
@@ -64,10 +72,23 @@ export function FlinkPreviewPanel({
         <p className="m-0 text-sm">
           <span className="text-muted">{table.name} →</span> <code className="font-mono wrap-anywhere">{destination}</code>
         </p>
+        {events ? (
+          <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm" aria-label="Each event">
+            <dt className="text-muted">Key</dt>
+            <dd className="m-0 wrap-anywhere">
+              JSON: the table's id (<code className="font-mono">TableId</code>) and {keyNames.length ? <code className="font-mono">{keyNames.join(', ')}</code> : 'no key column'}; events are spread over partitions by it
+            </dd>
+            <dt className="text-muted">Value</dt>
+            <dd className="m-0 wrap-anywhere">
+              Debezium-style JSON: <code className="font-mono">before</code> and <code className="font-mono">after</code> with the fields below,{' '}
+              <code className="font-mono">op</code> (c, u, d) and a short <code className="font-mono">source</code>; no schema
+            </dd>
+          </dl>
+        ) : null}
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted">
-              <th className="py-1 font-medium">Column</th>
+              <th className="py-1 font-medium">{events ? 'Field' : 'Column'}</th>
               <th className="py-1 pr-3 font-medium">Type</th>
               <th className="py-1 font-medium">From</th>
             </tr>
@@ -88,14 +109,14 @@ export function FlinkPreviewPanel({
               <tr className="border-t border-line align-top">
                 <td className="py-1.5 pr-3 font-mono">__op</td>
                 <td className="py-1.5 pr-3">text</td>
-                <td className="py-1.5 text-muted">change type: deleted rows stay, marked -D</td>
+                <td className="py-1.5 text-muted">{events ? 'change type: a delete is sent as an insert marked -D' : 'change type: deleted rows stay, marked -D'}</td>
               </tr>
             ) : null}
           </tbody>
         </table>
-        {noKey ? <p className="m-0 text-xs text-bad">This table has no key: choose key columns, Flink CDC writes each row by its key.</p> : null}
+        {noKey ? <p className="m-0 text-xs text-bad">{words.noKey}</p> : null}
         <p className="m-0 text-xs text-muted">
-          {filters.length ? `Rows kept: ${filters.map((f) => summarize(f)).join('; ')}.` : 'Every row is kept.'} New columns in the source wait for the next
+          {filters.length ? `${events ? 'Events' : 'Rows'} kept: ${filters.map((f) => summarize(f)).join('; ')}.` : events ? 'Every change is sent.' : 'Every row is kept.'} New columns in the source wait for the next
           deploy unless the review step sends them as they appear.
         </p>
       </div>

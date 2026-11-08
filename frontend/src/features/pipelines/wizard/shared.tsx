@@ -101,12 +101,15 @@ export function ConnectionCards({
   onSelect,
   label,
   disabled,
+  why,
 }: {
   items: Connection[];
   selected?: string;
   onSelect: (c: Connection) => void;
   label: string;
   disabled?: boolean;
+  /** Why a card can't be chosen (null: it can). */
+  why?: (c: Connection) => string | null;
 }) {
   return (
     <RadioCards
@@ -122,6 +125,7 @@ export function ConnectionCards({
         label: c.name,
         badge: reportBadge(c.last_check),
         description: [TYPE_LABEL[c.type] ?? c.type, c.managed ? 'managed' : '', c.description].filter(Boolean).join(' · '),
+        ...(why?.(c) ? { disabled: true, why: why(c) } : {}),
       }))}
     />
   );

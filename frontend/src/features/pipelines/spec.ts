@@ -43,8 +43,11 @@ export interface FullSpec {
   flink_cdc_image?: string | null;
 }
 
-/** The spec with only the settings of its engine: Flink CDC and Debezium refuse each other's. */
-export function specForEngine(spec: FullSpec, engine: EngineId): FullSpec {
+/** The spec with only the settings of its engine: Flink CDC and Debezium refuse each other's.
+ *  `events`: Flink CDC writes this destination as change events (Kafka), whose only format is
+ *  JSON without the schema (connectors.FlinkFormatProblem): the format is set to it here, keeping
+ *  the stored key order, so every save path sends what the server accepts. */
+export function specForEngine(spec: FullSpec, engine: EngineId, { events = false }: { events?: boolean } = {}): FullSpec {
   const tuning = tuningFor(spec.tuning, engine);
   if (engine === 'flink-cdc') {
     const { values: _values, tuning: _t, ...rest } = spec;
@@ -52,7 +55,7 @@ export function specForEngine(spec: FullSpec, engine: EngineId): FullSpec {
     void _t;
     return {
       ...rest,
-      sink: { ...spec.sink, options: withoutSourceTimestamp(spec.sink.options) },
+      sink: { ...spec.sink, options: withoutSourceTimestamp(spec.sink.options), ...(events ? { format: flinkEventFormat(spec.sink.format) } : {}) },
       debezium_image: null,
       advanced: {},
       snapshot: { ...spec.snapshot, delay_seconds: 0, window: null },
@@ -383,4 +386,11 @@ export function keepPartitionBy(options: Record<string, unknown>, stored: unknow
   const { partition_by: _pb, ...rest } = options;
   void _pb;
   return iceberg && stored && typeof stored === 'object' && Object.keys(stored).length ? jsonbSorted({ ...rest, partition_by: stored }) : rest;
+}
+
+/** Flink CDC's one event format (debezium-json): JSON without the schema or a registry. The same
+ *  object when it already is, so an unchanged spec compares equal. */
+export function flinkEventFormat(f: FullSpec['sink']['format']): FullSpec['sink']['format'] {
+  if (f.type === 'json' && !f.include_schema && !f.registry_url) return f;
+  return { ...f, type: 'json', include_schema: false, registry_url: null };
 }

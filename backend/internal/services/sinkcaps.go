@@ -33,10 +33,13 @@ func ValidateSinkSpec(ctx context.Context, q db.Querier, projectID uuid.UUID, si
 	if _, err := d.Sink.Options(spec.Sink.Options); err != nil {
 		return err
 	}
-	if eng == engine.Debezium { // Flink CDC writes tables: there is no event format
+	if eng == engine.Debezium {
 		if _, err := d.Sink.EventFormat(d.Title, spec.Sink.Format.Type); err != nil {
 			return err
 		}
+	} else if err := connectors.FlinkFormatProblem(conn.Type, spec.Sink.Format); err != nil {
+		// Flink CDC: tables take no format; Kafka takes only its JSON.
+		return err
 	}
 	return d.Sink.CheckNaming(d.Title, spec.Sink.Naming)
 }

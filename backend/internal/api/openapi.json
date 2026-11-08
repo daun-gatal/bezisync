@@ -2607,6 +2607,14 @@
             ],
             "title": "Default Image"
           },
+          "event_sinks": {
+            "description": "Flink CDC: destination types it writes as change events rather than as tables.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Event Sinks",
+            "type": "array"
+          },
           "except_sinks": {
             "anyOf": [
               {

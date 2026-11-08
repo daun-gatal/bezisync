@@ -367,7 +367,7 @@ func CreatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, n 
 	if err != nil {
 		return nil, err
 	}
-	eng, err := ChooseEngine(ctx, q, n.Engine, "", source.Type, sinkType)
+	eng, err := ChooseEngine(ctx, q, a.Project.ID, n.Engine, "", source.Type, sinkType)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +514,7 @@ func nextEngine(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *mod
 		if err != nil {
 			return "", err
 		}
-		if id, err = ChooseEngine(ctx, q, requested, p.Engine, sourceType, sinkType); err != nil {
+		if id, err = ChooseEngine(ctx, q, a.Project.ID, requested, p.Engine, sourceType, sinkType); err != nil {
 			return "", err
 		}
 	}
@@ -531,7 +531,11 @@ func nextEngine(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *mod
 		if spec, err := SpecOf(ctx, q, p.CurrentVersionID); err != nil {
 			return "", err
 		} else if spec != nil {
-			return id, ValidateEngineSpec(id, *spec)
+			if err := ValidateEngineSpec(id, *spec); err != nil {
+				return "", err
+			}
+			// The stored format must suit the new engine too (Flink CDC writes Kafka only as JSON).
+			return id, ValidateSinkSpec(ctx, q, a.Project.ID, sinkID, *spec, id)
 		}
 	}
 	if spec != nil {
