@@ -91,3 +91,17 @@ func TestFlinkColumnTypes(t *testing.T) {
 		t.Fatal("StarRocks writes by name")
 	}
 }
+
+// ADR 0012 E8/L17: StarRocks reserves __op (its own upsert/delete marker), so keeping deleted rows
+// writes the change type into __bz_op there; every other destination keeps __op.
+func TestStarRocksSoftDeleteColumn(t *testing.T) {
+	conn := Resolved{Type: "starrocks", Config: map[string]any{"host": "sr.internal", "query_port": 9030, "http_port": 8030, "database": "cdc", "user": "bz", "replicas": 1},
+		Secrets: map[string]any{"password": "pw"}}
+	b, err := (&starrocksSink{}).FlinkSink(conn, CompileContext{ShortID: "0123456789ab"})
+	if err != nil || b.SoftDeleteField != "__bz_op" {
+		t.Fatal(b, err)
+	}
+	if domain.FlinkSoftDeleteField("iceberg") != "__op" || domain.FlinkSoftDeleteField("starrocks") != "__bz_op" {
+		t.Fatal("soft-delete columns")
+	}
+}

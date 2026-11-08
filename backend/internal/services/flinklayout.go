@@ -405,4 +405,3 @@ func restoreBeforeLayout(p *models.Pipeline, id int64) error {
 	}
 	return nil
 }
-

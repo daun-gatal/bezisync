@@ -63,6 +63,12 @@ export function isTextType(type: string): boolean {
 /** The field a soft delete marks rows with, per engine (domain.SoftDeleteField). */
 export const SOFT_DELETE_FIELD = { debezium: '__deleted', 'flink-cdc': '__op' } as const;
 
+/** The soft-delete column on a Flink CDC destination: StarRocks reserves __op (its own
+ * upsert/delete marker), so it is __bz_op there (backend domain.FlinkSoftDeleteField). */
+export function flinkSoftDeleteField(sinkType: string | undefined): string {
+  return sinkType === 'starrocks' ? '__bz_op' : SOFT_DELETE_FIELD['flink-cdc'];
+}
+
 export const DEBEZIUM_CLASS: Partial<Record<TransformType, string>> = {
   filter: 'io.debezium.transforms.Filter',
   rename: 'ReplaceField$Value',

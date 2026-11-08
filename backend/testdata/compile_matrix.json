@@ -328,7 +328,7 @@
  "flink-cdc/mysql/paimon/transforms": "82b17ddb83bb030e",
  "flink-cdc/mysql/starrocks/basic": "dca29f0cf2c3ec58",
  "flink-cdc/mysql/starrocks/large": "5c3e9c3a65d7a01f",
- "flink-cdc/mysql/starrocks/transforms": "877715239a37be80",
+ "flink-cdc/mysql/starrocks/transforms": "d7da8a1d02effe97",
  "flink-cdc/oracle/doris/basic": "de6357c6da212171",
  "flink-cdc/oracle/doris/large": "b5478395a815d8ce",
  "flink-cdc/oracle/doris/transforms": "9dea6d2d265020be",
@@ -354,7 +354,7 @@
  "flink-cdc/oracle/paimon/transforms": "6c366ec13376b7ba",
  "flink-cdc/oracle/starrocks/basic": "6b82bf27ba55f339",
  "flink-cdc/oracle/starrocks/large": "3af16f569bf11dcd",
- "flink-cdc/oracle/starrocks/transforms": "9c4f7f39ec0939c0",
+ "flink-cdc/oracle/starrocks/transforms": "d3b387b3f1fedbe3",
  "flink-cdc/postgresql/doris/basic": "349922650704ff14",
  "flink-cdc/postgresql/doris/large": "dc709ed7f018dca3",
  "flink-cdc/postgresql/doris/transforms": "4aeaa0cce2bbc1bf",
@@ -380,7 +380,7 @@
  "flink-cdc/postgresql/paimon/transforms": "7da5bf0e47dd2efc",
  "flink-cdc/postgresql/starrocks/basic": "165d5a3c0bea4d7b",
  "flink-cdc/postgresql/starrocks/large": "ff55108a2add6ee1",
- "flink-cdc/postgresql/starrocks/transforms": "6463cd11b2dbb8ed",
+ "flink-cdc/postgresql/starrocks/transforms": "41ba407404c14f5b",
  "flink-cdc/sqlserver/doris/basic": "69b93608486c03d0",
  "flink-cdc/sqlserver/doris/large": "e01d22e7b979aac2",
  "flink-cdc/sqlserver/doris/transforms": "7022e16d602b2580",
@@ -406,5 +406,5 @@
  "flink-cdc/sqlserver/paimon/transforms": "d3f95d08f80fb150",
  "flink-cdc/sqlserver/starrocks/basic": "1e09251c7cf40d7c",
  "flink-cdc/sqlserver/starrocks/large": "49ffbad0aa48db6a",
- "flink-cdc/sqlserver/starrocks/transforms": "1b2688254a2590f4"
+ "flink-cdc/sqlserver/starrocks/transforms": "33a84c0de133f269"
 }

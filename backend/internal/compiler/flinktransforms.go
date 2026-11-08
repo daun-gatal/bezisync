@@ -49,6 +49,9 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		case t.Type == "soft_delete":
 			// A delete becomes a row marked with its change type (T4).
 			field := domain.SoftDeleteField["flink-cdc"]
+			if sink.SoftDeleteField != "" {
+				field = sink.SoftDeleteField
+			}
 			for _, table := range spec.Source.Tables.Include {
 				if slices.Contains(columns[table], field) {
 					return nil, problem.New(422, "transform_field_conflict", fmt.Sprintf("Step %d: %s already has a column %s, which the soft delete would overwrite (field name duplication).", i+1, table, field))
