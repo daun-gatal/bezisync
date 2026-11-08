@@ -191,7 +191,7 @@ func TestKeyColumnVectors(t *testing.T) {
 }
 func ptr[T any](v T) *T { return &v }
 
-// A source key column that can be empty is a warning (the probe: Flink CDC writes it as '' on
+// A source key column that can be empty is a warning (the probe: Flink CDC writes it as ” on
 // Iceberg, so those rows share a key); the primary key's own columns never are.
 func TestFlinkKeyWarnings(t *testing.T) {
 	info := domain.TableColumns{PrimaryKey: []string{"id"}, Columns: []domain.PreviewColumn{{Name: "id", Type: "bigint", Nullable: true}, {Name: "note", Type: "text", Nullable: true}}}
