@@ -1,0 +1,9 @@
+type: minor
+
+### Fixed
+- **Flink CDC never writes a value into another column** - Iceberg and Paimon write rows into a table by position, and Flink CDC doesn't change a table that already exists: a Start over after a step added a column (or after the source added, renamed or dropped one) filled existing columns with other columns' values while the pipeline stayed Healthy. Before every start without a saved position BeziSync now reads each destination table, writes its columns in the table's order (a column the pipeline no longer writes stays, empty), and adds the columns a table lacks (Iceberg, StarRocks, Doris, OceanBase; Paimon gets the statements to run); a start it can't make safe doesn't happen (ADR 0012).
+- **A column change is no longer dropped silently** - a version that changes the columns a Flink CDC pipeline writes is refused while the pipeline would resume a saved position (Flink CDC keeps writing the columns it started with); the fix is Start over, then deploy (`flink_columns_changed`, even when forced).
+- **No hidden fresh starts** - with nothing to restore, a Flink CDC pipeline starts without a saved position only when BeziSync planned that start; otherwise it stops with `no_position` instead of writing into tables nobody read. Restoring a position saved before the last Start over is refused (`position_before_layout`).
+- **Keep deleted rows on StarRocks** - StarRocks reserves `__op`, so the table was never created; the change type is written to `__bz_op` there. Flink CDC pipelines to StarRocks that keep deleted rows restart on upgrade (they never ran).
+- **MCP `update_pipeline` changes only the fields sent** - it replaced the whole spec, resetting the tables, steps and snapshot mode when one field was sent.
+- **Fix texts** no longer point to a Start over that drops destinations (there is none).

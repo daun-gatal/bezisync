@@ -154,12 +154,12 @@ func EnsureFlinkStartPlanned(ctx context.Context, q db.Querier, p *models.Pipeli
 	// never starts fresh unplanned).
 	conn, err := stateConn(ctx)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // plan on a later pass; the job can't start without the state database
 	}
 	latest, err := latestSavedID(ctx, conn, p.ShortID())
 	_ = conn.Close(ctx)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // as above
 	}
 	artifacts := cloneArtifacts(p)
 	if latest > restoreFloor(p) {
@@ -285,11 +285,11 @@ func flinkLayoutChecks(ctx context.Context, q db.Querier, p *models.Pipeline, sp
 		}
 		was, _, err := compiler.FlinkProduced(compileContext(p, *deployed), source, sink, cols, defaults)
 		if err != nil {
-			return nil, nil // the deployed version doesn't compile here any more: nothing to compare
+			return nil, nil //nolint:nilerr // the deployed version doesn't compile here any more: nothing to compare
 		}
 		now, _, err := compiler.FlinkProduced(compileContext(p, spec), source, sink, cols, defaults)
 		if err != nil {
-			return nil, nil // this version's own compile reports it
+			return nil, nil //nolint:nilerr // this version's own compile reports it
 		}
 		if changes := producedChanges(was, now); len(changes) > 0 {
 			c := checks.Check{Code: "flink_columns_changed", Title: "Columns written", Category: checks.CatDestination, Status: checks.Fail, Blocking: true,
