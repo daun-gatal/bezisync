@@ -84,8 +84,9 @@ heading "How should events look?", sections "Keep events", "Fields · order matt
 as on Debezium ("Keep only some events", "Rename fields", "Add a field", "Computed field"); the filter's notes
 ("Events a filter drops never reach the topic"; an update that makes a row match is sent as an insert, one that
 stops matching as a delete); the Route editor says "topic"; a keyless table's notice says its events share one
-key and so one partition; Keep deleted rows says a delete arrives as an insert event whose `after` carries
-`__op = -D`. The preview panel becomes **Events**: `table → topic`, what the key and the value hold (in words,
+key and so one partition; Keep deleted rows says (in its editor and its one-line summary, `flinkSummary`) a delete arrives as an
+insert event whose `after` carries `__op = -D`; Review's run settings say a restart can send an event
+again (not "writes are idempotent by key"). The preview panel becomes **Events**: `table → topic`, what the key and the value hold (in words,
 not a sample whose details could drift with Flink CDC), then the fields table. Review's "To" line, its steps
 summary and the Overview's transform view say events and message key. The Destination step describes Flink CDC
 on Kafka without "upserts by key" and says records are Debezium-style JSON without a schema. Event shape, value
