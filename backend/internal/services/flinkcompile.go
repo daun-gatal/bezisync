@@ -144,7 +144,8 @@ func flinkInput(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 	if startup, ok := p.Artifacts[ArtifactStartup].(map[string]any); ok {
 		in.Startup = startup
 	}
-	if NeedsFlinkColumns(spec) {
+	in.Layout, in.FreshStart = storedLayout(p), freshStartPlanned(p)
+	if NeedsFlinkColumns(spec) || len(in.Layout) > 0 {
 		in.Columns, in.Defaults = storedColumns(p), storedColumns(p, ArtifactDefaults)
 		var missing []string
 		for _, t := range spec.Source.Tables.Include {

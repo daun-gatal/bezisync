@@ -270,7 +270,7 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	slices.Sort(drivers)
 	settings, err := json.MarshalIndent(flinkhelper.Settings{PipelineID: c.PipelineID, ShortID: c.ShortID,
 		Connectors: append(flinkConnectors(srcBlock.Connector, snkBlock.Connector), snkBlock.Extra...), Drivers: slices.Compact(drivers), TaskManagers: size.TaskManagers,
-		Restore: "latest", RestoreAfter: in.RestoreAfter, StateDir: runtime.FlinkStateDir, KeepCheckpoints: 5, HealthPort: HTTPPort,
+		Restore: "latest", RestoreAfter: in.RestoreAfter, FreshStart: in.FreshStart, StateDir: runtime.FlinkStateDir, KeepCheckpoints: 5, HealthPort: HTTPPort,
 		StopTimeoutSeconds: FlinkStopTimeout}, "", "  ")
 	if err != nil {
 		return nil, err

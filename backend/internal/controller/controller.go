@@ -385,6 +385,12 @@ func (c *Controller) Reconcile(ctx context.Context, id uuid.UUID) error {
 				applyError = domain.Truncate(err.Error(), 500)
 				return
 			}
+			// ADR 0012: a start without a saved position is planned (destination read, columns
+			// added) before the compile, or the pipeline doesn't start.
+			if err := services.EnsureFlinkStartPlanned(ctx, tx, p, spec); err != nil {
+				applyError = domain.Truncate(errText(err), 500)
+				return
+			}
 			w, err := services.WorkloadFor(ctx, tx, p)
 			if err != nil {
 				applyError = domain.Truncate(errText(err), 500)
