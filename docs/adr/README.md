@@ -49,4 +49,5 @@ The other options, and why they lost.
 | [0009](0009-flink-cdc-destinations.md) | More Flink CDC destinations: Kafka, Elasticsearch, Apache Paimon and OceanBase | Accepted |
 | [0010](0010-flink-cdc-keys-from-steps.md) | Column types in the Destination table, and Flink CDC keys from any written column | Accepted |
 | [0011](0011-wizard-follows-source-and-engine.md) | The wizard follows the source and the engine | Accepted |
-| [0012](0012-flink-cdc-column-layout.md) | Flink CDC writes the destination's columns in the destination's order, or doesn't start | Accepted |
+| [0012](0012-flink-cdc-column-layout.md) | Flink CDC writes the destination's columns in the destination's order, or doesn't start | Accepted (D2 replaced by 0013) |
+| [0013](0013-flink-cdc-column-switch.md) | Flink CDC switches columns at the saved position | Accepted |

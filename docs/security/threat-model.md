@@ -117,7 +117,16 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   that a table lacks (Iceberg through its catalog; StarRocks, Doris and OceanBase with `ALTER TABLE
   … ADD COLUMN … NULL`), with the connection's own credentials and through the SSRF guard. It
   never drops, renames or retypes a column, names every column back-quoted, takes types from a
-  fixed list, and records each statement in the audit log (`pipeline.layout_planned`).
+  fixed list, and records each statement in the audit log (`pipeline.layout_planned`). A column switch
+  at a saved position (ADR 0013) does the same while the old job still runs, and is audited as
+  `pipeline.columns_switched`.
+- **The Flink CDC helper edits restored state (ADR 0013).** To resume a position saved before a
+  column switch, the helper removes one operator's coordinator state from the `_metadata` file of the
+  copy it extracted (after the copy's SHA-256 and AES-GCM checks), never from the stored position. It
+  changes only a format it checks byte by byte (Flink metadata 5 or 6, the schema operator's ID found
+  once, an inline handle) and refuses anything else, so a crafted or unknown file can't make it write
+  outside the entry. The column generation it compares sits in the state table, which only BeziSync's
+  roles write.
 - **Network exposure.** Terminate TLS in front of the web service, keep the API private to
   it, and restrict who can reach `/metrics` (it requires `BEZISYNC_METRICS_TOKEN`).
 - **Supply chain.** The backend, controller and agent are one static Go binary on a distroless

@@ -1040,10 +1040,13 @@ put values into the wrong columns. BeziSync keeps that from happening:
   column with the old one kept empty, a dropped one kept empty.
 - **A version that changes the columns the pipeline writes** (a step that adds, computes or removes a
   column, keeping deleted rows, leaving a column out, rolling back to a version with other columns)
-  can't be deployed while the pipeline would resume a saved position: Flink CDC keeps writing the
-  columns it started with and would drop the change without a word. Preflight blocks it
-  (`flink_columns_changed`, even when forced): pause the pipeline, use Positions → Start over, then
-  deploy.
+  switches columns at the saved position: once the running job has stopped with a savepoint, BeziSync
+  adds the new columns to the destination tables (planned as below) and the job resumes from exactly
+  there writing the new columns. Nothing is copied again and no change the source made is lost; rows
+  written before keep the columns they had (a new column is empty there). Preflight says so
+  (`flink_columns_changed`). To fill the new columns for the old rows too, Start over and copy the
+  tables again. A source column added after the last saved position (while the pipeline was stopped)
+  isn't written at a switch on a table whose order BeziSync fixed: it waits for the next deploy.
 - **A start without a saved position** (the first one, one after Start over) is planned: BeziSync reads
   every destination table that exists, writes its columns in the table's order (a column the pipeline
   no longer writes stays, empty for new rows), and adds the columns a table lacks at its end before the
@@ -1056,7 +1059,7 @@ put values into the wrong columns. BeziSync keeps that from happening:
   before the first saved position, state too large to save), the pipeline stops with `no_position`
   instead: Restore a saved position or Start over.
 - A saved position from before the last Start over can't be restored (`position_before_layout`): its job
-  wrote other columns.
+  wrote other columns. One from before a column switch can: it resumes with the new columns too.
 - **StarRocks** reserves `__op`, so *Keep deleted rows* writes the change type into `__bz_op` there.
 
 **Operating it.** The Overview shows the cluster: the job, its JobManager and TaskManagers, the
