@@ -24,6 +24,11 @@ type FlinkColumn struct {
 	Cast bool `json:"cast,omitempty"`
 	// Key: part of the destination table's primary key.
 	Key bool `json:"key,omitempty"`
+	// AddType is the type the column gets when it must be added to an existing table and Type is
+	// "" (a computed column: Flink CDC types it from its expression), written as CAST(… AS AddType)
+	// when AddCast; "" when BeziSync can't name it.
+	AddType string `json:"-"`
+	AddCast bool   `json:"-"`
 }
 
 // DestColumn is a column a destination table has, as BeziSync read it.
@@ -129,6 +134,9 @@ func PlanFlinkLayout(produced []FlinkColumn, dest []DestColumn, exists bool, tar
 		}
 		if p.Key {
 			problems = append(problems, fmt.Sprintf("%s is in the key, and the table doesn't have it: a table's key can't change.", p.Name))
+		}
+		if p.Type == "" && p.AddType != "" {
+			p.Type, p.Cast = p.AddType, p.AddCast
 		}
 		if p.Type == "" {
 			problems = append(problems, fmt.Sprintf("the table has no column %s, and BeziSync doesn't know the type it would get.", p.Name))

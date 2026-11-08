@@ -182,3 +182,19 @@ func TestDestinationTypeMaps(t *testing.T) {
 		t.Fatal(typ)
 	}
 }
+
+// L21: a computed column the table lacks is added with the type BeziSync casts it to, and written
+// with the cast; one BeziSync can't type is refused.
+func TestPlanFlinkLayoutCastsANewComputedColumn(t *testing.T) {
+	produced := []FlinkColumn{{Name: "id"}, {Name: "doubled", AddType: "BIGINT", AddCast: true}, {Name: "price", AddType: ""}}
+	plan, problems := PlanFlinkLayout(produced[:2], []DestColumn{col("id")}, true, LayoutTarget{Positional: true})
+	if len(problems) > 0 || len(plan.Add) != 1 || plan.Add[0].Type != "BIGINT" || !plan.Add[0].Cast {
+		t.Fatal(plan, problems)
+	}
+	if last := plan.Columns[len(plan.Columns)-1]; last.Name != "doubled" || last.Type != "BIGINT" || !last.Cast {
+		t.Fatal(last)
+	}
+	if _, problems := PlanFlinkLayout(produced, []DestColumn{col("id")}, true, LayoutTarget{Positional: true}); len(problems) != 1 || !strings.Contains(problems[0], "price") {
+		t.Fatal(problems)
+	}
+}

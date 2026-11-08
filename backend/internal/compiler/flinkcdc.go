@@ -38,6 +38,11 @@ type FlinkInput struct {
 	// Startup is artifacts.flink_startup (Start over), RestoreAfter artifacts.flink_restore_after.
 	Startup      map[string]any
 	RestoreAfter int64
+	// Layout is artifacts.flink_layout (ADR 0012): per destination, the columns a start without a
+	// saved position writes, in order. nil compiles every table as the spec says.
+	Layout map[string][]domain.LayoutColumn
+	// FreshStart: the compile planned a start without a saved position (settings fresh_start).
+	FreshStart bool
 	// StateKey, Keystore and KeystorePassword are the pipeline's own secrets.
 	StateKey, Keystore, KeystorePassword string
 }
@@ -223,27 +228,11 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 		return nil, problem.New(422, "managed_property", "Some advanced properties cannot be set.").WithErrors(refused)
 	}
 
-	// Routes: each table to its destination, first match only.
-	destinations := map[string]string{}
-	owner := map[string]string{}
-	routed := domain.RouteTargets(spec)
-	var routes []yamlMap
-	for _, t := range tables {
-		schema, table, _ := strings.Cut(t, ".")
-		name := c.Destination(schema, table)
-		to, merged := routed[t]
-		if merged {
-			name = to
-		}
-		dest := fsnk.FlinkDestination(sink, c, name)
-		// Two tables meet in one destination only when a route sends them there.
-		if other, taken := owner[dest]; taken && !(merged && routed[other] == to) {
-			return nil, problem.New(422, "destination_collision", fmt.Sprintf("%s and %s would both be written to %s. Change the naming pattern.", other, t, dest))
-		}
-		owner[dest], destinations[t] = t, dest
-		routes = append(routes, yamlMap{{"source-table", fsrc.FlinkTableID(source, t)}, {"sink-table", dest}})
+	destinations, routes, err := flinkRoutes(c, fsrc, fsnk, source, sink)
+	if err != nil {
+		return nil, err
 	}
-	transforms, err := flinkTransforms(c, fsrc, source, in.Columns, in.Defaults, fc.NewColumns, snkBlock)
+	transforms, err := flinkTransforms(c, fsrc, source, in.Columns, in.Defaults, fc.NewColumns, snkBlock, destinations, in.Layout, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -302,6 +291,63 @@ func CompileFlink(c connectors.CompileContext, source, sink connectors.Resolved,
 	}
 	return &FlinkCompiled{Pipeline: renderYAML(doc), FlinkConf: conf, Settings: string(settings) + "\n", Env: env, Files: files, Image: image,
 		Size: size, Destinations: destinations, Tunnel: tunnel}, nil
+}
+
+// flinkRoutes sends each spec table to its destination, first match only.
+func flinkRoutes(c connectors.CompileContext, fsrc connectors.FlinkSource, fsnk connectors.FlinkSink, source, sink connectors.Resolved) (map[string]string, []yamlMap, error) {
+	spec := c.Spec
+	destinations := map[string]string{}
+	owner := map[string]string{}
+	routed := domain.RouteTargets(spec)
+	var routes []yamlMap
+	for _, t := range spec.Source.Tables.Include {
+		schema, table, _ := strings.Cut(t, ".")
+		name := c.Destination(schema, table)
+		to, merged := routed[t]
+		if merged {
+			name = to
+		}
+		dest := fsnk.FlinkDestination(sink, c, name)
+		// Two tables meet in one destination only when a route sends them there.
+		if other, taken := owner[dest]; taken && !(merged && routed[other] == to) {
+			return nil, nil, problem.New(422, "destination_collision", fmt.Sprintf("%s and %s would both be written to %s. Change the naming pattern.", other, t, dest))
+		}
+		owner[dest], destinations[t] = t, dest
+		routes = append(routes, yamlMap{{"source-table", fsrc.FlinkTableID(source, t)}, {"sink-table", dest}})
+	}
+	return destinations, routes, nil
+}
+
+// FlinkProduced is, for each spec table, the columns it writes in the order the spec writes them
+// and its destination table (ADR 0012: what the layout planner compares with the destination).
+// columns and defaults are the tables' source columns (as for the compile).
+func FlinkProduced(c connectors.CompileContext, source, sink connectors.Resolved, columns, defaults map[string][]string) (map[string][]domain.FlinkColumn, map[string]string, error) {
+	src, err := connectors.GetSource(source.Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	snk, err := connectors.GetSink(sink.Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	fsrc, ok := src.(connectors.FlinkSource)
+	fsnk, ok2 := snk.(connectors.FlinkSink)
+	if !ok || !ok2 {
+		return nil, nil, problem.New(422, "engine_unsupported", fmt.Sprintf("Flink CDC can't run %s to %s.", source.Type, sink.Type))
+	}
+	destinations, _, err := flinkRoutes(c, fsrc, fsnk, source, sink)
+	if err != nil {
+		return nil, nil, err
+	}
+	snkBlock, err := fsnk.FlinkSink(sink, c)
+	if err != nil {
+		return nil, nil, err
+	}
+	produced := map[string][]domain.FlinkColumn{}
+	if _, err := flinkTransforms(c, fsrc, source, columns, defaults, c.Spec.FlinkCDC.Effective().NewColumns, snkBlock, destinations, nil, produced); err != nil {
+		return nil, nil, err
+	}
+	return produced, destinations, nil
 }
 
 // flinkConnectors are the connector JARs: the source's, the destination's, and what they need.
