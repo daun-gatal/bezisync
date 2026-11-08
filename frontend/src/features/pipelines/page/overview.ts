@@ -3,7 +3,7 @@ import { plural } from '@/components/ui/text';
 import { formatBytes } from '@/lib/format';
 import type { FlinkStatus, SourceImpact } from '@/lib/status';
 import type { FullSpec, TransformType } from '../spec';
-import { effectiveDeletes, shapeFields, METADATA, metadataField, summarize, summarizeValues, TYPE_TITLE, type ShapeCtx } from '../transforms/model';
+import { effectiveDeletes, flinkSummary, flinkWords, shapeFields, METADATA, metadataField, summarize, summarizeValues, TYPE_TITLE, type ShapeCtx } from '../transforms/model';
 
 /** One fact in Source protection. `note` is a short second line. */
 export interface Fact {
@@ -196,9 +196,9 @@ export interface Row {
 }
 
 /** The deployed spec as what consumers receive (output) and the steps that change events on the way. */
-export function transformView(spec: FullSpec, flink?: { sinkType?: string }, ctx: ShapeCtx = {}): { output: Row[]; steps: Row[] } {
+export function transformView(spec: FullSpec, flink?: { sinkType?: string; events?: boolean }, ctx: ShapeCtx = {}): { output: Row[]; steps: Row[] } {
   const output: Row[] = [];
-  if (flink) return flinkTransformView(spec, flink.sinkType);
+  if (flink) return flink.events ? flinkEventsView(spec) : flinkTransformView(spec, flink.sinkType);
   // As the compiler runs it: Keep deleted rows (or the destination) adds the row shape and decides deletes.
   const effective = effectiveDeletes(spec.transforms, spec.sink.options, { ...ctx, flink: false });
   if (spec.transforms.some((t) => t.type === 'outbox')) {
@@ -349,4 +349,28 @@ export function shapeView(artifacts: Record<string, unknown> | null | undefined,
       ? `The streaming shape failed ${a.shrink_failures ?? 0} times before it saved a position, so BeziSync keeps the copy shape. Give each reader more while streaming, then deploy.`
       : null,
   };
+}
+
+/** A Flink CDC pipeline that writes change events (Kafka, ADR 0011): Debezium-style JSON per change,
+ *  keyed by the key columns, one topic per table. */
+function flinkEventsView(spec: FullSpec): { output: Row[]; steps: Row[] } {
+  const words = flinkWords(true);
+  const output: Row[] = [{ icon: 'shape', title: 'Debezium-style JSON events', detail: 'before, after and op, keyed by the key columns; no schema' }];
+  output.push(
+    spec.transforms.some((t) => t.type === 'soft_delete')
+      ? { icon: 'delete', title: 'Deletes are sent as marked inserts', detail: 'Their change type is in the row', code: ['__op = -D'] }
+      : { icon: 'delete', title: 'Deletes are events', detail: 'op d, with the row in before' },
+  );
+  const removed = Object.values(spec.source.columns).reduce((n, r) => n + (r.exclude?.length ?? 0), 0);
+  if (removed) output.push({ icon: 'fields', title: removed === 1 ? 'One field left out' : `${removed} fields left out`, detail: 'Never sent' });
+  const keys = Object.entries(spec.keys ?? {});
+  if (keys.length) {
+    output.push({
+      icon: 'key',
+      title: keys.length === 1 ? 'Chosen message key' : `Chosen message keys on ${plural(keys.length, 'table')}`,
+      detail: keys.map(([table, cols]) => `${table} by ${cols.join(', ')}`).join(' · '),
+    });
+  }
+  const steps = spec.transforms.filter((t) => t.type !== 'unwrap').map((t): Row => ({ icon: t.type, title: words.titles[t.type] ?? TYPE_TITLE[t.type], detail: flinkSummary(t, words) }));
+  return { output, steps };
 }

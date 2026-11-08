@@ -37,6 +37,7 @@ import {
   toggleFlinkOperation,
   TRUNCATE_SOURCES,
   flinkKeyProblem,
+  type FlinkWords,
   keyChoices,
   KIND_NAMES,
   type Caps,
@@ -59,6 +60,8 @@ export interface EditorContext {
   expert: boolean;
   /** The pipeline runs on Flink CDC (rows written into tables, Flink CDC's operations). */
   flink: boolean;
+  /** On Flink CDC, what its screens call things: rows of tables, or events in topics (ADR 0011). */
+  words: FlinkWords;
   /** What the destination says about the event shape, for what deletes really become. */
   shape?: ShapeCtx;
   /** The pipeline, for checking expressions (ADR 0008). */
@@ -455,11 +458,11 @@ export function FilterEditor({ step, ctx, onChange }: { step: TransformStep; ctx
       <div className="flex flex-col gap-3">
         <TablesScope step={step} ctx={ctx} onChange={onChange} />
         {modeSwitch}
-        <Row label="Keep rows where" htmlFor={`flt-expr-${ctx.index}`}>
-          <ExpressionInput id={`flt-expr-${ctx.index}`} label="Keep rows where" value={step.expression ?? ''} use="filter" projectId={ctx.projectId} pipelineId={ctx.pipelineId}
+        <Row label={ctx.words.filterWhere} htmlFor={`flt-expr-${ctx.index}`}>
+          <ExpressionInput id={`flt-expr-${ctx.index}`} label={ctx.words.filterWhere} value={step.expression ?? ''} use="filter" projectId={ctx.projectId} pipelineId={ctx.pipelineId}
             table={table?.name ?? ''} columns={readable} onChange={(v) => onChange({ ...step, expression: v })} />
         </Row>
-        <Meta>The table keeps exactly the rows that match: a row an update makes match is added, one it stops matching is deleted.</Meta>
+        <Meta>{ctx.words.filterNote}</Meta>
       </div>
     );
   }
@@ -540,7 +543,7 @@ export function FilterEditor({ step, ctx, onChange }: { step: TransformStep; ctx
       )}
       <Notice tone="info">
         {ctx.flink
-          ? 'Deletes are judged on the row before the delete. Rows a filter drops never reach the table: changing the filter later does not bring them back (Start over for that).'
+          ? ctx.words.filterDropped
           : 'Deletes are judged on the row before the delete. Dropped events are gone for this pipeline: changing the filter later does not bring them back (re-snapshot the table for that).'}
       </Notice>
       {ctx.expert ? (
@@ -801,7 +804,7 @@ export function KeysEditor({
         {tables.map((t) => {
           const cols = keys[t.name];
           const open = editing.has(t.name);
-          const choices = keyChoices(t, ctx.spec, steps, ctx.flink, ctx.sourceType).map((c) => {
+          const choices = keyChoices(t, ctx.spec, steps, ctx.flink, ctx.sourceType, ctx.words.leftOut).map((c) => {
             if (c.expression === undefined) return c;
             if (!c.expression.trim()) return { ...c, why: 'Its expression is empty.' };
             c = { ...c, type: expressionKind[t.name]?.[c.value] ?? c.type };
@@ -890,13 +893,12 @@ export function KeysEditor({
                     ) : null}
                     {nullable.length ? (
                       <Meta>
-                        {nullable.join(', ')} can be empty in the source: rows where {nullable.length === 1 ? 'it is' : 'they are'} empty would share one key and replace each other.
+                        {ctx.words.nullableKey(nullable.join(', '), nullable.length === 1)}
                       </Meta>
                     ) : null}
                     {computed.length ? (
                       <Meta>
-                        {computed.join(', ')} {computed.length === 1 ? 'is' : 'are'} computed: a row whose key changes is written as a new row, and the old one
-                        stays.
+                        {ctx.words.computedKey(computed.join(', '), computed.length === 1)}
                       </Meta>
                     ) : null}
                   </div>
@@ -972,7 +974,7 @@ export function RouteEditor({ step, ctx, onChange }: { step: TransformStep; ctx:
   const captured = ctx.spec.source.tables.include;
   const steps = ctx.steps.map((t, j) => (j === ctx.index ? step : t));
   const targets = routeTargets(steps, captured);
-  const what = ctx.flink ? 'table' : 'topic';
+  const what = ctx.flink ? ctx.words.target : 'topic';
   return (
     <div className="flex flex-col gap-3">
       {routes.map((r, i) => {
@@ -1154,7 +1156,7 @@ export function SoftDeleteEditor({ ctx }: { ctx: EditorContext }) {
   return (
     <p className="m-0 text-sm text-ink-2">
       {ctx.flink
-        ? 'Deletes arrive as rows with __op = -D; other rows carry their change type (+I, +U). The destination keeps every row: this step keeps rows, it doesn’t filter them.'
+        ? ctx.words.softDelete
         : 'Deletes arrive as rows with __deleted = true, and no tombstone follows them. Consumers that remove rows on a delete now keep them.'}
     </p>
   );

@@ -4,7 +4,7 @@ import { sinkCapsOf, useConnectorTypes } from '@/lib/connections';
 import { useVersions, type Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { fullSpec, optionsSchemaFor, type FullSpec } from '../spec';
-import { outputImpact, summarize, summarizeShape, summarizeValues, TYPE_TITLE, type ShapeCtx } from './model';
+import { flinkSummary, flinkWords, outputImpact, summarize, summarizeShape, summarizeValues, TYPE_TITLE, type ShapeCtx } from './model';
 
 /** What a pipeline's destination says about the event shape, for describing deletes as they run. */
 export function useShapeCtx(pipeline: Pick<Pipeline, 'engine' | 'sink'>): ShapeCtx {
@@ -59,15 +59,17 @@ export function OutputImpact({ pipeline, version, spec }: { pipeline: Pipeline; 
 }
 
 /** The steps in plain language (Review and Overview). */
-export function StepsSummary({ spec, flink = false, ctx = {} }: { spec: FullSpec; flink?: boolean; ctx?: ShapeCtx }) {
+export function StepsSummary({ spec, flink = false, events = false, ctx = {} }: { spec: FullSpec; flink?: boolean; events?: boolean; ctx?: ShapeCtx }) {
   const values = summarizeValues(spec.values);
   const keys = Object.entries(spec.keys ?? {});
   if (flink) {
-    // Flink CDC writes tables: no event shape, keys are the destination's primary key.
+    // Flink CDC writes tables (no event shape, keys are the destination's primary key), or Kafka
+    // as change events keyed by the key columns (ADR 0011).
+    const words = flinkWords(events);
     const items = [
-      'Tables are kept in sync, row by row, by primary key.',
-      ...spec.transforms.filter((t) => t.type !== 'unwrap').map((t) => `${TYPE_TITLE[t.type]}: ${summarize(t)}.`),
-      ...keys.map(([t, c]) => `Primary key of ${t}: ${c.join(', ')}.`),
+      words.summary,
+      ...spec.transforms.filter((t) => t.type !== 'unwrap').map((t) => `${words.titles[t.type] ?? TYPE_TITLE[t.type]}: ${flinkSummary(t, words)}.`),
+      ...keys.map(([t, c]) => `${words.key} of ${t}: ${c.join(', ')}.`),
     ];
     return (
       <ol className="m-0 flex flex-col gap-1 pl-5 text-sm">

@@ -24,7 +24,7 @@ import { slugify } from '@/lib/format';
 import { useDeploy, usePipelines, usePreflight, useSavedPositions, type Pipeline, type Preflight } from '@/lib/pipelines';
 import { clusterFromPreset, manualError, manualErrors, streamingError, streamingErrors, usePackCluster } from '@/lib/cluster';
 import { useProject } from '@/lib/session';
-import { flinkChoices, flinkSpecBlock, useEngines, type FlinkChoices } from '@/lib/engines';
+import { flinkChoices, flinkSpecBlock, useEngines, writesEvents, type FlinkChoices } from '@/lib/engines';
 import { OutputImpact, StepsSummary, useShapeCtx } from '../transforms/Impact';
 import { routeTargets } from '../transforms/model';
 import { partitionByFor, partitionError, writtenByTable, type PartitionBy } from '../transforms/PartitionBy';
@@ -75,7 +75,10 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
   const spec = useMemo(() => fullSpec(pipeline.spec), [pipeline.spec]);
   const deployed = Boolean(pipeline.deployed_version);
   const flink = pipeline.engine === 'flink-cdc';
-  const flinkEngine = useEngines().data?.find((e) => e.id === 'flink-cdc');
+  const engines = useEngines().data;
+  const flinkEngine = engines?.find((e) => e.id === 'flink-cdc');
+  // Flink CDC writes Kafka as change events, the other destinations as tables (ADR 0011).
+  const events = flink && writesEvents(engines, pipeline.engine, pipeline.sink?.type);
   const shapeCtx = useShapeCtx(pipeline);
   const [fc, setFc] = useState<FlinkChoices>(flinkChoices(spec.flink_cdc));
   const [name, setName] = useState(pipeline.name);
@@ -540,6 +543,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
                 value={fc}
                 onChange={setFc}
                 sinkType={pipeline.sink?.type}
+                events={events}
                 expert={expert}
                 catalogue={(flinkEngine?.settings ?? []).filter((s) => s.scope === 'engine')}
                 deployed={deployed}
@@ -625,7 +629,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
       )}
 
       <Card
-        title={flink ? "What reaches the destination" : "Events"}
+        title={flink && !events ? "What reaches the destination" : "Events"}
         actions={
           <ButtonLink
             size="sm"
@@ -638,7 +642,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
           </ButtonLink>
         }
       >
-        <StepsSummary spec={spec} flink={flink} ctx={shapeCtx} />
+        <StepsSummary spec={spec} flink={flink} events={events} ctx={shapeCtx} />
         {deployed ? <OutputImpact pipeline={pipeline} spec={spec} /> : null}
       </Card>
 
@@ -652,7 +656,7 @@ export function ReviewStep({ pipeline, handle, onBack }: { pipeline: Pipeline; h
         <KeyValue
           items={[
             ['From', `${pipeline.source.name} · ${plural(spec.source.tables.include.length, 'table')}`],
-            ['To', `${pipeline.sink?.name ?? '—'} · ${flink ? 'tables' : spec.sink.format.type.toUpperCase()}`],
+            ['To', `${pipeline.sink?.name ?? '—'} · ${events ? 'JSON events (Flink CDC)' : flink ? 'tables' : spec.sink.format.type.toUpperCase()}`],
             ['Personal data', personalLine(personalSummary(spec.source.columns, spec.source.tables.include))],
           ]}
         />

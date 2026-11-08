@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/layout';
 import { Menu, Modal } from '@/components/ui/overlays';
 import { sinkCapsOf, TYPE_LABEL, useConnectorTypes, useDiscovery } from '@/lib/connections';
 import { usePolicies } from '@/lib/policies';
+import { useEngines, writesEvents } from '@/lib/engines';
 import type { Pipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
 import { deriveSinkOptions, fullSpec, inServerOrder, optionsSchemaFor, stageOf, withShape, type FullSpec, type TransformStep as Step, type TransformType, type ValueFormats } from '../spec';
@@ -25,7 +26,8 @@ import {
   DEBEZIUM_ONLY_STEPS,
   FLINK_ONLY_STEPS,
   defaultStep,
-  FLINK_TITLE,
+  flinkWords,
+  flinkSummary,
   flinkKey,
   flinkKeyProblem,
   expressionKeyBody,
@@ -95,6 +97,9 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   // Flink CDC writes each column with its own type: value formats (and the decimals warning) are
   // Debezium's, and so are the outbox router, flattening and custom steps.
   const flink = pipeline.engine === 'flink-cdc';
+  // Flink CDC writes Kafka as change events and the other destinations as tables (ADR 0011).
+  const events = writesEvents(useEngines().data, pipeline.engine, pipeline.sink?.type);
+  const words = flinkWords(flink && events);
   // A destination that cannot read Debezium's default (epoch) timestamps gets ISO text, or Kafka
   // Connect's types where the source has no ISO mode: the epoch choice is not offered.
   const caps: Caps = useMemo(() => stepCaps(sourceCaps, Boolean(sinkCaps.time_precision), flink), [flink, sinkCaps.time_precision, sourceCaps]);
@@ -160,7 +165,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   const shapeCtx: ShapeCtx = { flink, unwrap: sinkCaps.unwrap ?? null, optionDefaults: sinkSchema ? defaultsOf(sinkSchema) : {} };
   const order = drawOrder(steps, flink);
   const keyOf = (t: Step, i: number) => t.id ?? `step-${i}`;
-  const ctxFor = (index: number): EditorContext => ({ sourceType, sink: sinkCaps, tables, caps, spec: draft, steps, index, expert, flink, shape: shapeCtx, projectId: project.id, pipelineId: pipeline.id });
+  const ctxFor = (index: number): EditorContext => ({ sourceType, sink: sinkCaps, tables, caps, spec: draft, steps, index, expert, flink, words, shape: shapeCtx, projectId: project.id, pipelineId: pipeline.id });
   const update = (i: number, next: Step) => setSteps(steps.map((t, j) => (j === i ? next : t)));
   const remove = (i: number) => {
     setSteps(steps.filter((_, j) => j !== i));
@@ -184,7 +189,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   }, [unkeyed.length, open]);
 
   // On Flink CDC the steps work on the rows and columns written into each table.
-  const titleOf = (type: TransformType) => (flink ? (FLINK_TITLE[type] ?? TYPE_TITLE[type]) : TYPE_TITLE[type]);
+  const titleOf = (type: TransformType) => (flink ? (words.titles[type] ?? TYPE_TITLE[type]) : TYPE_TITLE[type]);
 
   function locked(type: TransformType): string | null {
     if (flink && DEBEZIUM_ONLY_STEPS.includes(type)) return 'Runs only on Debezium: this pipeline runs on Flink CDC.';
@@ -196,7 +201,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
     }
     if (policies?.allowed_transforms && !policies.allowed_transforms.includes(type)) return 'Not allowed in this project.';
     // One is enough: a second compiles to nothing.
-    if (type === 'soft_delete' && softAt >= 0) return flink ? 'Already added: see Keep rows.' : 'Already added: see Event shape.';
+    if (type === 'soft_delete' && softAt >= 0) return flink ? words.softAdded : 'Already added: see Event shape.';
     // On Flink CDC rows are always written whole: the shape step is added for these steps (add).
     if (!flink && stageOf({ type }) === 2 && shapeAt < 0) return 'Needs the “Row after change” event shape.';
     return null;
@@ -243,7 +248,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
         key={k}
         n={order.indexOf(i) + 1}
         title={t.type === 'unwrap' ? 'Row after change' : titleOf(t.type)}
-        summary={t.type === 'unwrap' ? (summarizeShape(steps, draft.sink.options, shapeCtx) ?? summarize(t)).split(' · ').slice(1).join(' · ') : summarize(t)}
+        summary={t.type === 'unwrap' ? (summarizeShape(steps, draft.sink.options, shapeCtx) ?? summarize(t)).split(' · ').slice(1).join(' · ') : flink ? flinkSummary(t, words) : summarize(t)}
         technical={expert && !flink ? (t.type === 'custom' ? t.class : DEBEZIUM_CLASS[t.type]) : undefined}
         open={isOpen}
         error={err}
@@ -289,10 +294,10 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="m-0 text-lg font-semibold">{flink ? 'Which rows and columns reach each table?' : 'How should events look?'}</h2>
+        <h2 className="m-0 text-lg font-semibold">{flink ? words.heading : 'How should events look?'}</h2>
         <p className="m-0 mt-1 text-sm text-muted">
           {flink
-            ? 'Optional. Flink CDC keeps each table in sync as rows: filter rows, rename columns or add columns. You can change all of this later.'
+            ? words.intro
             : 'Optional. Most pipelines only need the event shape. You can change all of this later.'}
         </p>
       </div>
@@ -343,7 +348,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               </StepRow>
             </>
           ) : null}
-          {stage(flink ? 'Keep rows' : 'Keep events', 'keep')}
+          {stage(flink ? words.keep : 'Keep events', 'keep')}
           {flink ? null : <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">Event shape</div>}
           {flink ? null : shapeAt >= 0 ? (
             inSection('shape')
@@ -383,17 +388,16 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
             : inSection('shape')
                 .filter((i) => steps[i]!.type === 'soft_delete')
                 .map((i) => row(steps[i]!, i))}
-          {stage(flink ? 'Columns · order matters' : 'Field changes · order matters', 'fields')}
+          {stage(flink ? words.fields : 'Field changes · order matters', 'fields')}
           {stage('Other steps', 'other')}
           {caps.key_columns ? (
             <>
-              <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">{flink ? 'Primary key' : 'Message key'}</div>
+              <div className="mt-1 text-xs font-semibold tracking-wide text-muted uppercase">{flink ? words.key : 'Message key'}</div>
               {unkeyed.length ? (
                 <Notice tone="warn" className="wrap-anywhere">
                   {flink ? (
                     <>
-                      {unkeyed.map((t) => t.name).join(', ')} {unkeyed.length === 1 ? 'has' : 'have'} no primary key. Flink CDC writes each row by its key:
-                      choose key columns below.
+                      {unkeyed.map((t) => t.name).join(', ')} {unkeyed.length === 1 ? 'has' : 'have'} no primary key. {words.unkeyed}
                     </>
                   ) : (
                     <>
@@ -405,7 +409,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
               ) : null}
               <StepRow
                 n={null}
-                title={flink ? 'Primary key' : 'Message key'}
+                title={flink ? words.key : 'Message key'}
                 summary={
                   Object.keys(keys).length
                     ? Object.entries(keys)
@@ -457,6 +461,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
         </Card>
         {flink ? (
           <FlinkPreviewPanel
+            words={words}
             spec={draft}
             steps={steps}
             tables={tables}
@@ -524,7 +529,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
                         {titleOf(c.type)}
                         {why ? <Lock className="size-3.5 text-muted" aria-hidden /> : null}
                       </span>
-                      <span className="text-xs text-muted">{why ?? c.help}</span>
+                      <span className="text-xs text-muted">{why ?? (c.type === 'computed' ? words.computedHelp : c.help)}</span>
                     </button>
                   );
                 })}

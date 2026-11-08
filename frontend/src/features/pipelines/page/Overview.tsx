@@ -1,3 +1,4 @@
+import { useEngines, writesEvents } from '@/lib/engines';
 import { useState, type ComponentType } from 'react';
 import { ArrowRightLeft, Hash, Inbox, KeyRound, Layers, PenLine, Plus, Puzzle, Rows3, SquarePlus, Trash, Funnel, Split as SplitIcon, Sigma } from 'lucide-react';
 import { Button, ButtonLink } from '@/components/ui/button';
@@ -242,6 +243,8 @@ function Rows({ rows, label }: { rows: Row[]; label: string }) {
 /** The deployed transforms as what consumers receive and the steps on the way, plus what a schema change broke. */
 function TransformsCard({ pipeline: p }: { pipeline: Pipeline }) {
   const shapeCtx = useShapeCtx(p);
+  // Flink CDC writes Kafka as change events, the other destinations as tables (ADR 0011).
+  const events = writesEvents(useEngines().data, p.engine, p.sink?.type);
   const { project, can } = useProject();
   const versions = useVersions(project.id, p.id);
   const drift = ((p.status as Record<string, unknown>).transform_drift ?? []) as { code: string; fail: boolean; message: string }[];
@@ -273,7 +276,7 @@ function TransformsCard({ pipeline: p }: { pipeline: Pipeline }) {
         {(list) => {
           const deployed = list.find((v) => v.number === p.deployed_version);
           if (!deployed) return <Meta as="p">The deployed version is not available.</Meta>;
-          const { output, steps } = transformView(fullSpec(deployed.spec), p.engine === 'flink-cdc' ? { sinkType: p.sink?.type } : undefined, shapeCtx);
+          const { output, steps } = transformView(fullSpec(deployed.spec), p.engine === 'flink-cdc' ? { sinkType: p.sink?.type, events } : undefined, shapeCtx);
           return (
             <>
               {drift.length ? (

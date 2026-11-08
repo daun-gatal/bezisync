@@ -930,7 +930,7 @@ export function computedKeyProblem(t: TransformStep, table: TableInfo): string |
  * steps add. On Debezium the message key is built in the source connector before any step runs: the
  * source's columns only, and the fields steps add are shown disabled with that reason.
  */
-export function keyChoices(table: TableInfo, spec: Pick<FullSpec, 'source'>, steps: TransformStep[], flink: boolean, sourceType: string): KeyChoice[] {
+export function keyChoices(table: TableInfo, spec: Pick<FullSpec, 'source'>, steps: TransformStep[], flink: boolean, sourceType: string, leftOut = 'Left out of the table.'): KeyChoice[] {
   const excluded = spec.source.columns?.[table.name]?.exclude ?? [];
   const renames = flink ? flinkRenames(table.name, steps) : new Map<string, string>();
   const out: KeyChoice[] = table.columns.map((c) => {
@@ -941,7 +941,7 @@ export function keyChoices(table: TableInfo, spec: Pick<FullSpec, 'source'>, ste
       type: c.type,
       from: 'column',
       ...(to ? { renamedFrom: c.name } : {}),
-      ...(flink && excluded.includes(c.name) ? { why: 'Left out of the table.' } : {}),
+      ...(flink && excluded.includes(c.name) ? { why: leftOut } : {}),
     };
   });
   for (const [name, t] of stepColumns(table.name, steps)) {
@@ -1006,4 +1006,97 @@ export function flinkKeyProblem(table: TableInfo, spec: Pick<FullSpec, 'source' 
     if (missing.length) return `${table.name}: a key with a column a step adds must keep the whole primary key (${missing.join(', ')}), or rows would share a key and replace each other.`;
   }
   return null;
+}
+
+/**
+ * What a Flink CDC pipeline's screens call things (ADR 0011): rows of tables, or change events in
+ * topics when Flink CDC writes the destination as events (Kafka: debezium-json, keyed by the key
+ * columns). Every Flink CDC screen reads its wording here, so none keeps "table" by accident.
+ */
+export interface FlinkWords {
+  events: boolean;
+  heading: string;
+  intro: string;
+  keep: string;
+  fields: string;
+  key: string;
+  /** What each captured table is written to. */
+  target: 'table' | 'topic';
+  titles: Partial<Record<TransformType, string>>;
+  unkeyed: string;
+  filterWhere: string;
+  filterNote: string;
+  filterDropped: string;
+  softDelete: string;
+  softAdded: string;
+  /** Keep deleted rows in one line (null: `summarize`'s). */
+  softSummary: string | null;
+  computedHelp: string;
+  leftOut: string;
+  nullableKey: (cols: string, one: boolean) => string;
+  computedKey: (cols: string, one: boolean) => string;
+  previewTitle: string;
+  noKey: string;
+  summary: string;
+}
+
+const ROWS: FlinkWords = {
+  events: false,
+  heading: 'Which rows and columns reach each table?',
+  intro: 'Optional. Flink CDC keeps each table in sync as rows: filter rows, rename columns or add columns. You can change all of this later.',
+  keep: 'Keep rows',
+  fields: 'Columns · order matters',
+  key: 'Primary key',
+  target: 'table',
+  titles: FLINK_TITLE,
+  unkeyed: 'Flink CDC writes each row by its key: choose key columns below.',
+  filterWhere: 'Keep rows where',
+  filterNote: 'The table keeps exactly the rows that match: a row an update makes match is added, one it stops matching is deleted.',
+  filterDropped: 'Deletes are judged on the row before the delete. Rows a filter drops never reach the table: changing the filter later does not bring them back (Start over for that).',
+  softDelete: 'Deletes arrive as rows with __op = -D; other rows carry their change type (+I, +U). The destination keeps every row: this step keeps rows, it doesn’t filter them.',
+  softAdded: 'Already added: see Keep rows.',
+  softSummary: null,
+  computedHelp: 'A new column from a function of other columns (Flink CDC).',
+  leftOut: 'Left out of the table.',
+  nullableKey: (cols, one) => `${cols} can be empty in the source: rows where ${one ? 'it is' : 'they are'} empty would share one key and replace each other.`,
+  computedKey: (cols, one) => `${cols} ${one ? 'is' : 'are'} computed: a row whose key changes is written as a new row, and the old one stays.`,
+  previewTitle: 'Destination table',
+  noKey: 'This table has no key: choose key columns, Flink CDC writes each row by its key.',
+  summary: 'Tables are kept in sync, row by row, by primary key.',
+};
+
+const EVENTS: FlinkWords = {
+  events: true,
+  heading: 'How should events look?',
+  intro:
+    'Optional. Flink CDC sends each change to its topic as a Debezium-style JSON event (before, after, op), keyed by the key columns: keep only some events, rename fields or add fields. You can change all of this later.',
+  keep: 'Keep events',
+  fields: 'Fields · order matters',
+  key: 'Message key',
+  target: 'topic',
+  titles: { ...TYPE_TITLE, computed: 'Computed field' },
+  unkeyed: 'Flink CDC keys each event by it, so all of a table’s events would share one key and one partition: choose key columns below.',
+  filterWhere: 'Keep events where',
+  filterNote: 'An event is sent when its row matches: an update that makes a row match is sent as an insert, one that makes it stop matching as a delete.',
+  filterDropped:
+    'Deletes are judged on the row before the delete. Events a filter drops never reach the topic: changing the filter later does not bring them back (Start over for that).',
+  softDelete: 'A delete arrives as an insert event whose after carries __op = -D; other events carry their change type in __op (+I, +U). No delete event is sent.',
+  softAdded: 'Already added: see Keep events.',
+  softSummary: 'A delete is sent as an insert event marked __op = -D, not as a delete event',
+  computedHelp: 'A new field from a function of other columns (Flink CDC).',
+  leftOut: 'Left out of the events.',
+  nullableKey: (cols, one) => `${cols} can be empty in the source: events where ${one ? 'it is' : 'they are'} empty would share one key, and a compacted topic keeps only one of them.`,
+  computedKey: (cols, one) => `${cols} ${one ? 'is' : 'are'} computed: an event whose key changes is sent under the new key, and nothing removes the old one.`,
+  previewTitle: 'Events',
+  noKey: 'This table has no key: choose key columns, or all its events share one key and one partition.',
+  summary: 'Each change is sent as a Debezium-style JSON event (before, after, op), keyed by the key columns.',
+};
+
+export function flinkWords(events: boolean): FlinkWords {
+  return events ? EVENTS : ROWS;
+}
+
+/** A step in one line on Flink CDC, in the destination's terms (`summarize` otherwise). */
+export function flinkSummary(t: TransformStep, words: FlinkWords): string {
+  return t.type === 'soft_delete' && words.softSummary ? words.softSummary : summarize(t);
 }
