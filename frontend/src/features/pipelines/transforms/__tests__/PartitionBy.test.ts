@@ -87,6 +87,15 @@ describe('written columns and keys', () => {
     // Debezium chains them.
     expect(writtenColumns(orders, renamed, 'debezium', 'postgresql', 'upsert').map((c) => c.name)).toContain('c');
   });
+  it('Flink CDC: a computed or added key column is a key the table may be partitioned by (ADR 0010)', () => {
+    const day = { type: 'computed' as const, id: 'cc01', table: 'shop.orders', name: 'made_on', function: 'date_format' as const, args: [{ column: 'created_at' }, { text: 'yyyy-MM-dd' }] };
+    const tenant = { type: 'add_field' as const, id: 'af01', name: 'tenant', value: { kind: 'static' as const, text: 'acme' } };
+    const keyed = spec({ transforms: [day, tenant], keys: { 'shop.orders': ['id', 'made_on', 'tenant', 'gone'] } });
+    expect(equalityFields(orders, keyed, 'flink-cdc', 'upsert')).toEqual(['id', 'made_on', 'tenant', 'gone']);
+    const w = writtenByTable(['shop.orders'], [orders], keyed, 'flink-cdc', 'postgresql', 'upsert');
+    expect(w['shop.orders']!.columns.find((c) => c.name === 'made_on')?.key).toBe(true);
+    expect(partitionError({ 'shop.orders': [{ n: 0, column: 'made_on', transform: 'identity' }] }, w)).toBeNull();
+  });
   it('refuses non-key columns on an upserted table, with the reason', () => {
     const w = writtenByTable(['shop.orders'], [orders], spec(), 'flink-cdc', 'postgresql', 'upsert');
     const created = w['shop.orders']!.columns.find((c) => c.name === 'created_at')!;

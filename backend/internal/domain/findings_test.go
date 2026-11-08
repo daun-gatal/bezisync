@@ -10,7 +10,7 @@ import (
 func findings(t *testing.T, spec string, tables map[string]domain.TableColumns) []string {
 	t.Helper()
 	var out []string
-	for _, f := range domain.TransformFindings("postgresql", "orders-cdc", mustSpec(t, spec), tables) {
+	for _, f := range domain.TransformFindings("debezium", "postgresql", "orders-cdc", mustSpec(t, spec), tables) {
 		out = append(out, f.Code+": "+f.Message)
 	}
 	return out

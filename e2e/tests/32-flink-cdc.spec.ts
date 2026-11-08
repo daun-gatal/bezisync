@@ -650,3 +650,119 @@ test('Flink CDC: computed columns and filters, typed and as expressions, on NULL
   await waitFor('Flink CDC pipeline deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
   await ownerSql(`DROP TABLE IF EXISTS ${table}`);
 });
+
+// ADR 0010: the Destination table shows each column's type, and the primary key takes any column
+// the table writes. A computed column and an added field key an Iceberg table on the real engine
+// (BeziSync writes them NOT NULL, as Iceberg requires of key columns); one that can be empty is
+// offered disabled with the reason, and the API path past the editor is blocked by preflight.
+test('Flink CDC: the destination table shows types, and computed and added columns key the table', async ({ page }) => {
+  test.setTimeout(1_200_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('flinkk');
+  const table = `shop.fk_${tag.replace(/-/g, '_')}`;
+  await ownerSql(`CREATE TABLE ${table} (id bigint PRIMARY KEY, region text NOT NULL, note text, made date NOT NULL); ALTER TABLE ${table} REPLICA IDENTITY FULL;
+    INSERT INTO ${table} VALUES (1, 'eu', 'first', '2026-01-15'), (2, 'us', NULL, '2026-02-20')`);
+  const { password, ...pg } = SOURCE_PG;
+  const { secret_access_key, ...iceberg } = ICEBERG_REST;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `ice-${tag}`, config: iceberg, secrets: { secret_access_key } }, 201);
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, {
+    name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc',
+    spec: {
+      source: { tables: { include: [table] } }, sink: { naming: `fk_${tag.replace(/-/g, '_')}_{table}` }, snapshot: { mode: 'initial' },
+      transforms: [
+        { type: 'unwrap', id: 'uw01' },
+        { type: 'add_field', id: 'af01', name: 'tenant', value: { kind: 'static', text: 'acme' } },
+        { type: 'computed', id: 'cc01', table, name: 'month', function: 'date_format', args: [{ column: 'made' }, { text: 'yyyy-MM' }] },
+        { type: 'computed', id: 'cc02', table, name: 'note_up', function: 'upper', args: [{ column: 'note' }] },
+      ],
+    },
+  }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  type Saved = { version: number; spec: Record<string, unknown> & { keys?: Record<string, string[]> } };
+  await signIn(page);
+  await page.goto(`/p/${project.slug}/pipelines/new?draft=${p.id}&step=transform`);
+
+  // The destination table: each column with its type and where it comes from.
+  const dest = page.getByRole('region', { name: 'Destination table' });
+  const row = (name: string) => dest.getByRole('row').filter({ has: page.getByText(name, { exact: true }) });
+  await expect(row('id')).toContainText('bigint');
+  await expect(row('id')).toContainText('key');
+  await expect(row('made')).toContainText('date');
+  await expect(row('month')).toContainText('text');
+  await expect(row('month')).toContainText('computed: Date as text(made, "yyyy-MM")');
+  await expect(row('tenant')).toContainText('added: "acme"');
+
+  // The key: every written column with its type; a computed column that can be empty is disabled.
+  const keyRow = page.getByRole('region', { name: 'Primary key' });
+  await keyRow.getByRole('button', { name: 'Edit' }).click();
+  await keyRow.getByRole('button', { name: 'Change' }).click();
+  await expect(keyRow.getByRole('checkbox', { name: /^month/ })).toBeEnabled();
+  await expect(keyRow.getByRole('checkbox', { name: /^tenant/ })).toBeEnabled();
+  await expect(keyRow.getByRole('checkbox', { name: /^note_up/ })).toBeDisabled();
+  await expect(keyRow.getByText('Can be empty: it reads a column the source allows to be empty.')).toBeVisible();
+  for (const name of ['id', 'month', 'tenant']) await keyRow.getByRole('checkbox', { name: new RegExp(`^${name}`) }).check();
+  await expect(keyRow.getByText('month is computed: a row whose key changes is written as a new row, and the old one stays.')).toBeVisible();
+  await expect(row('month')).toContainText('key');
+  await expect(row('tenant')).toContainText('key');
+  // The editor and the typed table at 390, 768 and 1280 px, in light and dark: no overflow, accessible.
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    for (const width of [390, 768, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      // Colours transition on a theme change: measure the settled page.
+      await page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+      expect(await layoutProblems(page), `${scheme} ${width}px`).toEqual([]);
+      const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+      expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ')}`), `${scheme} ${width}px`).toEqual([]);
+    }
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole('button', { name: 'Continue to review →' }).click();
+  await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
+  const saved = await api.get<Saved>(url);
+  expect(saved.spec.keys).toEqual({ [table]: ['id', 'month', 'tenant'] });
+
+  // The job keys the table by them, written NOT NULL.
+  const config = JSON.stringify(await api.get<unknown>(`${url}/config`));
+  expect(config).toContain('primary-keys: \\"id,month,tenant\\"');
+  expect(config).toContain("IFNULL('acme', '') AS `tenant`");
+  const pre = await api.send<{ sections: { report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
+  const keyChecks = pre.sections.flatMap((s) => s.report.checks).filter((c) => c.code.startsWith('transform_key') || c.code === 'flink_primary_key');
+  expect(keyChecks.filter((c) => c.status === 'fail'), JSON.stringify(keyChecks)).toEqual([]);
+  await walkWizard(page, api, { projectId: project.id, slug: project.slug, pipelineId: p.id });
+
+  await api.send('POST', `${url}/deploy`, {});
+  await waitFor('Flink CDC pipeline keyed by computed columns streaming', async () => {
+    const cur = await api.get<{ lifecycle: string; status: unknown }>(url);
+    if (cur.lifecycle === 'failed') throw new Error(JSON.stringify(cur.status));
+    return cur.lifecycle === 'streaming';
+  }, 900_000);
+  // An update upserts by the whole key: still one row per id.
+  await ownerSql(`INSERT INTO ${table} VALUES (3, 'eu', 'new', '2026-03-01'); UPDATE ${table} SET note = 'changed' WHERE id = 1`);
+  const rows = await waitFor('rows keyed by id, month and tenant in Iceberg', async () => {
+    const e = await api.get<{ records: Rec[] }>(`${url}/events?table=${table}&limit=100`);
+    const vals = e.records.map((r) => r.value);
+    return vals.some((v) => v.note === 'changed') && vals.some((v) => Number(v.id) === 3) ? vals : null;
+  }, 600_000);
+  expect(rows.filter((v) => Number(v.id) === 1)).toHaveLength(1);
+  expect(rows.find((v) => Number(v.id) === 1)).toMatchObject({ month: '2026-01', tenant: 'acme', note: 'changed' });
+
+  // Past the editor (the API): a key column that can be empty, or one the table doesn't write.
+  for (const [keys, code] of [[['note_up'], 'transform_key_column_unfit'], [['gone'], 'transform_key_column_unknown']] as const) {
+    const cur = await api.get<Saved>(url);
+    await api.patch(url, { spec: { ...cur.spec, keys: { [table]: keys } } }, cur.version);
+    const bad = await api.send<{ sections: { report: { checks: { code: string; status: string; message: string }[] } }[] }>('POST', `${url}/preflight`, {});
+    const check = bad.sections.flatMap((s) => s.report.checks).find((c) => c.code === code);
+    expect(check?.status, JSON.stringify(check)).toBe('fail');
+  }
+
+  await api.send('DELETE', `${url}?drop_destinations=true`);
+  await waitFor('Flink CDC pipeline deleted', async () => (await api.get<{ lifecycle: string }>(url)).lifecycle === 'deleted', 300_000);
+  await ownerSql(`DROP TABLE IF EXISTS ${table}`);
+});

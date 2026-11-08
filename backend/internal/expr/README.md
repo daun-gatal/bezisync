@@ -8,6 +8,7 @@ The expression language BeziSync accepts for Flink CDC transforms (ADR 0008): a 
 - `[render.go:Canonical]` — what is stored and shown; `[render.go:Ident]` (metadata columns bare), `[render.go:Quote]`.
 - `[flink.go:Flink]` / `[flink.go:FlinkChecked]` — what compiles into a Flink CDC transform (`[flink.go:MaxFlinkLength]`).
 - `[check.go:JaninoName]` / `[check.go:JaninoNames]` — column names Flink CDC compiles as its time functions.
+- `[never.go:NeverNull]` — whether a tree always has a value given which columns are NOT NULL (ADR 0010; conservative: a division, a `TRY_CAST`, `TO_DATE`, `NULLIF` or a `CASE` without `ELSE` can be empty); `[check.go:KindWords]`.
 - `[check.go:Check]` — a tree's `[funcs.go:Kind]`, whether it is deterministic and the columns it reads (`[check.go:Result]`), for a `[check.go:Use]` (`UseColumn`, `UseFilter`) against an `[check.go:Env]`.
 - `[funcs.go:Functions]` (`[funcs.go:Fn]`), `[funcs.go:Fits]`, `[funcs.go:SlotWords]`, `[funcs.go:Deterministic]`, `[funcs.go:DatePatterns]`, `[funcs.go:TimeUnits]`, `[parse.go:MetadataColumns]`, `[parse.go:CastTypes]`; limits `[lex.go:MaxLength]`, `[lex.go:MaxLiteral]`, `[lex.go:MaxDepth]`, `[lex.go:MaxNodes]`.
 

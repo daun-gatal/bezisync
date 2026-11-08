@@ -111,6 +111,15 @@ test('an editor shapes events in the wizard and Debezium delivers what the previ
 
   await expect(preview).toContainText('"cust_ref": 88');
   await expect(preview).toContainText('"source_system": "orders-eu"');
+  // ADR 0010: Debezium builds the message key at the source, before any step runs: the added field
+  // is listed with its type, disabled, with the reason.
+  const keyRow = page.getByRole('region', { name: 'Message key' });
+  await keyRow.getByRole('button', { name: 'Edit' }).click();
+  const added = keyRow.getByRole('checkbox', { name: /source_system/ });
+  await expect(added).toBeDisabled();
+  await expect(keyRow.getByText('Added by a step: Debezium builds the message key at the source, before any step runs.').first()).toBeVisible();
+  await expect(keyRow.getByRole('checkbox', { name: /order_id/ })).toBeChecked();
+  await keyRow.getByRole('button', { name: 'Done' }).click();
   await expect(page.getByText('Delivered', { exact: true })).toBeVisible();
   // An update to a skipped status is not delivered.
   await page.getByRole('radio', { name: 'Update' }).click();

@@ -2598,6 +2598,45 @@ Fix:
 Under Transform, choose key columns the table has.
 ```
 
+<a id="transform-key-column-nullable"></a>
+### `transform_key_column_nullable`
+
+**Transforms: primary keys**
+
+- Why: Flink CDC writes a row whose key column is empty with an empty text in its place (seen on Iceberg), so all such rows share one key and replace each other.
+
+Fix:
+
+```
+Pick key columns that are never empty under Transform (Primary key), or add NOT NULL to the column in the source.
+```
+
+<a id="transform-key-column-unfit"></a>
+### `transform_key_column_unfit`
+
+**Transforms: primary keys**
+
+- Why: Flink CDC writes each row by its key, so a key column needs a value on every row that doesn't change on its own: a computed key column is text or a whole number, reads only columns that are never empty, and is the same each time a row is written; a key column isn't cut short; and a key with a column a step adds keeps the whole primary key, or rows would share a key.
+
+Fix:
+
+```
+Pick other key columns under Transform (Primary key), or change the computed column.
+```
+
+<a id="transform-key-column-unknown"></a>
+### `transform_key_column_unknown`
+
+**Transforms: primary keys**
+
+- Why: Flink CDC writes each row by its key: a key column the table doesn't write (left out, or a step's column that was removed or renamed) stops the job.
+
+Fix:
+
+```
+Pick the key columns again under Transform (Primary key).
+```
+
 <a id="transform-route-idle"></a>
 ### `transform_route_idle`
 

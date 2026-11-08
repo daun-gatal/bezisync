@@ -394,6 +394,13 @@ func TestIcebergPartitionKey(t *testing.T) {
 		"a renamed key on Flink CDC": {flink: true, info: orders, opts: by(field("order_id", "bucket", 8)), mutate: func(s *domain.PipelineSpec) {
 			s.Transforms = []domain.Transform{{Type: "rename", Renames: []domain.Rename{{From: "id", To: "order_id"}}}}
 		}, cat: missing, want: ""},
+		"ADR 0010 a computed key column on Flink CDC": {flink: true, info: orders, opts: by(field("made_on", "identity", 0), field("id", "bucket", 4)), mutate: func(s *domain.PipelineSpec) {
+			s.Transforms = []domain.Transform{{Type: "computed", Table: "shop.orders", Name: "made_on", Function: "date_format", Args: []domain.ComputedArg{{Column: "created_at"}, {Text: ptr("yyyy-MM-dd")}}}}
+			s.Keys = map[string][]string{"shop.orders": {"id", "made_on"}}
+		}, cat: missing, want: ""},
+		"ADR 0010 a computed column outside the key": {flink: true, info: orders, opts: by(field("made_on", "identity", 0)), mutate: func(s *domain.PipelineSpec) {
+			s.Transforms = []domain.Transform{{Type: "computed", Table: "shop.orders", Name: "made_on", Function: "date_format", Args: []domain.ComputedArg{{Column: "created_at"}, {Text: ptr("yyyy-MM-dd")}}}}
+		}, cat: missing, want: "shop.orders by made_on (its key: id)"},
 		"E17 a routed table's automatic default applies": {info: orders, opts: recorded(""), mutate: func(s *domain.PipelineSpec) {
 			s.Transforms = []domain.Transform{{Type: "route", Routes: []domain.Route{{Match: "shop.orders", To: "all"}}}}
 		}, cat: missing, want: "day(__source_ts_ms) (its key: id)"},

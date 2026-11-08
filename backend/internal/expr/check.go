@@ -429,3 +429,6 @@ func kindName(k Kind) string {
 	}
 	return words(k)
 }
+
+// KindWords is a kind in words, as messages use it ("text", "a whole number").
+func KindWords(k Kind) string { return words(k) }

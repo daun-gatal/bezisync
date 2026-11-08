@@ -543,31 +543,119 @@ export function toggleFlinkOperation(ops: FilterOperation[], value: 'new' | 'upd
   return OPERATIONS.map((o) => o.value).filter((o) => next.includes(o));
 }
 
-/** A destination column of a Flink CDC table, and where it comes from. */
+/** A destination column of a Flink CDC table, where it comes from, and its type: the source's
+ *  type for a source column, the kind a step writes for the others (`KIND_NAMES`). */
 export interface FlinkColumn {
   name: string;
-  from: { kind: 'column'; column: string; renamed: boolean } | { kind: 'added'; value: string } | { kind: 'computed'; formula: string };
+  from: { kind: 'column'; column: string; renamed: boolean; cut?: number } | { kind: 'added'; value: string } | { kind: 'computed'; formula: string; expression?: string };
+  type: string;
   key: boolean;
+}
+
+/** A kind (columnKind, a computed function's result, the expression check) as a type name. */
+export const KIND_NAMES: Record<string, string> = {
+  text: 'text',
+  int: 'whole number',
+  decimal: 'decimal number',
+  float: 'floating-point number',
+  bool: 'true or false',
+  date: 'date',
+  time: 'time of day',
+  timestamp: 'timestamp',
+  timestamptz: 'timestamp with time zone',
+  binary: 'binary',
+  json: 'JSON',
+  unknown: 'decided when it runs',
+};
+
+/** The kind a typed computed column writes (domain.ComputedFunctions `out`; '' is the kind of its
+ *  first column), or 'unknown' (an expression: the server's check knows it). */
+export function computedKind(t: TransformStep, table: TableInfo, sourceType: string): string {
+  if (t.expression !== undefined || !t.function) return 'unknown';
+  const out = COMPUTED_FUNCTIONS[t.function]?.out;
+  if (out) return out;
+  const first = t.args?.find((a) => a.column)?.column;
+  const col = table.columns.find((c) => c.name === first);
+  return col ? columnKind(sourceType, col.type) : 'unknown';
+}
+
+/** The table's renames as Flink CDC's projection reads them (domain.FlinkRenames): one map of
+ *  every rename step that applies; a later rename of the same column wins. */
+export function flinkRenames(table: string, steps: TransformStep[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const t of steps) if (t.type === 'rename' && (!t.tables || t.tables.includes(table))) for (const r of t.renames ?? []) out.set(r.from, r.to);
+  return out;
+}
+
+/** The columns steps add to a table on Flink CDC (domain.StepColumns), name → step: added fields
+ *  that apply to it and its computed columns. */
+export function stepColumns(table: string, steps: TransformStep[]): Map<string, TransformStep> {
+  const out = new Map<string, TransformStep>();
+  for (const t of steps) {
+    if (t.type === 'add_field' && t.name && (!t.tables || t.tables.includes(table))) out.set(t.name, t);
+    if (t.type === 'computed' && t.table === table && t.name) out.set(t.name, t);
+  }
+  return out;
+}
+
+/** One chosen key column as the table writes it, or why it can't be (domain.FlinkKey). */
+export type FlinkKeyColumn = { name: string; written: string; from: 'column' | 'added' | 'computed'; source?: string };
+
+/**
+ * The table's chosen key columns on Flink CDC, in their order (domain.FlinkKey, ADR 0010): a name is
+ * a source column the table writes first (written under its renamed name), else a column a step
+ * adds. An error names the first column the table doesn't write. Without the table's columns
+ * (not read yet) every name is taken as it is, through the renames, as the server does.
+ */
+export function flinkKey(table: TableInfo, spec: Pick<FullSpec, 'source' | 'keys'>, steps: TransformStep[]): { columns: FlinkKeyColumn[]; error: string | null } {
+  const chosen = spec.keys?.[table.name] ?? [];
+  const renames = flinkRenames(table.name, steps);
+  const added = stepColumns(table.name, steps);
+  const excluded = spec.source.columns?.[table.name]?.exclude ?? [];
+  const columns: FlinkKeyColumn[] = [];
+  const known = table.columns.length > 0;
+  for (const k of chosen) {
+    const left = excluded.includes(k);
+    const step = added.get(k);
+    const source = !known || table.columns.some((c) => c.name === k);
+    // The new name a rename gives a source column the table writes (compiled as it is before ADR 0010).
+    const renamedFrom = known && !renames.has(k) ? [...renames].find(([from, to]) => to === k && table.columns.some((c) => c.name === from) && !excluded.includes(from))?.[0] : undefined;
+    if (source && !left && !(!known && step && !renames.has(k))) columns.push({ name: k, written: renames.get(k) ?? k, from: 'column', source: k });
+    else if (renamedFrom) columns.push({ name: k, written: k, from: 'column', source: renamedFrom });
+    else if (step) columns.push({ name: k, written: k, from: step.type === 'computed' ? 'computed' : 'added' });
+    else
+      return {
+        columns,
+        error: left ? `${table.name}: the key column ${k} is left out of the table. Keep it, or pick another key column.` : `${table.name} writes no column ${k} to key its rows by: pick the key columns again.`,
+      };
+  }
+  return { columns, error: null };
 }
 
 /**
  * The columns Flink CDC writes for a captured table (as the compiler builds its projection): the
- * source's columns minus those left out, renamed where a rename step applies, then added fields.
- * Key: the key columns chosen for the table, else its primary key.
+ * source's columns minus those left out, renamed where a rename step applies, then the columns
+ * steps add, each with its type. Key: the key columns chosen for the table (flinkKey), else its
+ * primary key.
  */
-export function flinkColumns(table: TableInfo, spec: FullSpec, steps: TransformStep[], pipelineName: string): FlinkColumn[] {
+export function flinkColumns(table: TableInfo, spec: FullSpec, steps: TransformStep[], pipelineName: string, sourceType = ''): FlinkColumn[] {
   const applies = (t: TransformStep) => !t.tables || t.tables.includes(table.name);
-  const renames = new Map<string, string>();
-  for (const t of steps) if (t.type === 'rename' && applies(t)) for (const r of t.renames ?? []) renames.set(r.from, r.to);
+  const renames = flinkRenames(table.name, steps);
+  const cut = new Map<string, number>();
+  for (const t of steps) if (t.type === 'truncate' && applies(t)) for (const c of t.columns ?? []) if (c.table === table.name) cut.set(c.column, c.length);
   const excluded = spec.source.columns?.[table.name]?.exclude ?? [];
-  const keys = spec.keys?.[table.name]?.length ? spec.keys[table.name]! : table.primaryKey;
+  const chosen = spec.keys?.[table.name]?.length ? flinkKey(table, spec, steps).columns.map((k) => k.written) : table.primaryKey.map((k) => renames.get(k) ?? k);
   const out: FlinkColumn[] = table.columns
     .filter((c) => !excluded.includes(c.name))
-    .map((c) => ({ name: renames.get(c.name) ?? c.name, from: { kind: 'column', column: c.name, renamed: renames.has(c.name) }, key: keys.includes(c.name) }));
+    .map((c) => {
+      const name = renames.get(c.name) ?? c.name;
+      return { name, from: { kind: 'column', column: c.name, renamed: renames.has(c.name), ...(cut.has(c.name) ? { cut: cut.get(c.name) } : {}) }, type: c.type, key: chosen.includes(name) };
+    });
   for (const t of steps) {
-    if (t.type === 'computed' && t.table === table.name && t.name) out.push({ name: t.name, from: { kind: 'computed', formula: formulaText(t) }, key: false });
+    if (t.type === 'computed' && t.table === table.name && t.name)
+      out.push({ name: t.name, from: { kind: 'computed', formula: formulaText(t), ...(t.expression !== undefined ? { expression: t.expression } : {}) }, type: computedKind(t, table, sourceType), key: chosen.includes(t.name) });
     if (t.type !== 'add_field' || !applies(t) || !t.name) continue;
-    out.push({ name: t.name, from: { kind: 'added', value: t.value?.kind === 'pipeline' ? pipelineName : (t.value?.text ?? '') }, key: false });
+    out.push({ name: t.name, from: { kind: 'added', value: t.value?.kind === 'pipeline' ? pipelineName : (t.value?.text ?? '') }, type: 'text', key: chosen.includes(t.name) });
   }
   return out;
 }
@@ -796,4 +884,125 @@ export function summarizeShape(steps: TransformStep[], options: Record<string, u
   const why = d.by === 'keep_deleted' ? ' (Keep deleted rows)' : d.by === 'destination' ? ' (the destination’s Deletes setting)' : '';
   const meta = fields.map(metadataField);
   return `Row after change · ${text}${why}${meta.length ? ` · adds ${meta.join(', ')}` : ''}`;
+}
+
+/** A column the key editor offers: `value` is what spec.keys stores (a source column's own name, a
+ *  step's column by its name), `label` the column the table writes; `why` when it can't be picked. */
+export type KeyChoice = { value: string; label: string; type: string; from: 'column' | 'added' | 'computed'; renamedFrom?: string; why?: string; expression?: string; checking?: boolean };
+
+/** The kinds a computed key column can have (domain.KeyKinds): BeziSync makes it NOT NULL with
+ *  IFNULL and a fallback of that kind (ADR 0010). */
+export const KEY_KINDS = ['text', 'int'];
+/** Functions that can give no value for a value (domain: NeverNull of their tree). */
+const EMPTY_ON_VALUES: ComputedFn[] = ['to_integer', 'to_float', 'to_decimal', 'parse_date', 'divide'];
+
+/** Whether a typed computed column always has a value, given which of its columns are NOT NULL
+ *  (expr.NeverNull of domain.ComputedTree; backend/testdata/key_columns.json holds the two equal). */
+export function computedNeverEmpty(t: TransformStep, notNull: (column: string) => boolean): boolean {
+  const fn = t.function;
+  if (!fn || EMPTY_ON_VALUES.includes(fn)) return false;
+  if (fn === 'join_with') return true; // CONCAT_WS skips empty values; its separator is a text
+  const cols = (t.args ?? []).flatMap((a) => (a.column ? [a.column] : []));
+  if (fn === 'first_set') return cols.some(notNull);
+  return cols.every(notNull);
+}
+
+/** Why a typed computed column can't be in a Flink CDC key (domain.FlinkKeyProblems), or null. An
+ *  expression is asked of the server (expressions:check: key_problem). */
+export function computedKeyProblem(t: TransformStep, table: TableInfo): string | null {
+  const out = t.function ? COMPUTED_FUNCTIONS[t.function]?.out : undefined;
+  if (!out || !KEY_KINDS.includes(out)) return 'A computed key column is text or a whole number.';
+  const notNull = (c: string) => table.primaryKey.includes(c) || table.columns.some((x) => x.name === c && x.nullable === false);
+  // Every column it reads must be NOT NULL: a value standing in for an empty one would give those
+  // rows one key (domain.ComputedKeyProblem).
+  const reads = (t.args ?? []).flatMap((a) => (a.column ? [a.column] : []));
+  if (!reads.every(notNull) || !computedNeverEmpty(t, notNull)) {
+    const empty = t.function && EMPTY_ON_VALUES.includes(t.function);
+    return empty ? 'Can be empty: it gives no value for some rows.' : 'Can be empty: it reads a column the source allows to be empty.';
+  }
+  return null;
+}
+
+/**
+ * What a table's key can be made of (ADR 0010). On Flink CDC every column the table writes: its
+ * source columns under their written names (those left out are offered disabled), then the columns
+ * steps add. On Debezium the message key is built in the source connector before any step runs: the
+ * source's columns only, and the fields steps add are shown disabled with that reason.
+ */
+export function keyChoices(table: TableInfo, spec: Pick<FullSpec, 'source'>, steps: TransformStep[], flink: boolean, sourceType: string): KeyChoice[] {
+  const excluded = spec.source.columns?.[table.name]?.exclude ?? [];
+  const renames = flink ? flinkRenames(table.name, steps) : new Map<string, string>();
+  const out: KeyChoice[] = table.columns.map((c) => {
+    const to = renames.get(c.name);
+    return {
+      value: c.name,
+      label: to ?? c.name,
+      type: c.type,
+      from: 'column',
+      ...(to ? { renamedFrom: c.name } : {}),
+      ...(flink && excluded.includes(c.name) ? { why: 'Left out of the table.' } : {}),
+    };
+  });
+  for (const [name, t] of stepColumns(table.name, steps)) {
+    if (flink && t.type === 'computed') {
+      const why = t.expression !== undefined ? null : computedKeyProblem(t, table);
+      out.push({ value: name, label: name, type: computedKind(t, table, sourceType), from: 'computed', ...(why ? { why } : {}), ...(t.expression !== undefined ? { expression: t.expression } : {}) });
+    }
+    else if (t.type === 'add_field')
+      out.push({
+        value: name,
+        label: name,
+        type: 'text',
+        from: 'added',
+        ...(flink ? {} : { why: 'Added by a step: Debezium builds the message key at the source, before any step runs.' }),
+      });
+  }
+  // One choice per name, the one a key of that name resolves to (flinkKey): a source column the
+  // table writes, else the step's column.
+  const picked = (c: KeyChoice) => (c.from !== 'column' ? 1 : c.why ? 2 : 0);
+  return out.filter((c) => !out.some((d) => d !== c && d.value === c.value && picked(d) < picked(c)));
+}
+
+/** What the server is asked about an expression column that could key its table: its columns
+ *  with whether each can be empty (in the primary key or NOT NULL in the source: not). */
+export function expressionKeyBody(t: TransformStep, table: TableInfo): { use: 'column'; table: string; expression: string; columns: { name: string; type: string; nullable: boolean }[] | null } {
+  const columns = table.columns.map((c) => ({ name: c.name, type: c.type, nullable: !table.primaryKey.includes(c.name) && c.nullable !== false }));
+  return { use: 'column', table: table.name, expression: t.expression ?? '', columns: columns.length ? columns : null };
+}
+
+/** Why an expression column can't be in a Flink CDC key, from the server's check (the rule
+ *  preflight applies, domain.ComputedKeyProblem). While it is checked, or when the check failed, the
+ *  answer blocks too: Continue waits for it. */
+export function expressionKeyProblem(check: { error?: unknown; key_problem?: string | null } | undefined, failed = false): string | null {
+  if (failed) return 'BeziSync couldn’t check its expression; try again.';
+  if (!check) return 'Checking its expression…';
+  if (check.error) return 'Its expression has an error: fix it in its step.';
+  return check.key_problem ?? null;
+}
+
+/** The first reason a table's chosen Flink CDC key can't key its rows, or null (domain.FlinkKey,
+ *  then domain.FlinkKeyProblems): a column it doesn't write, a cut source column, a computed column
+ *  that can be empty or isn't text or a whole number. `expressionWhy` holds the server's answer for
+ *  expression columns (by name). Checked only once the table's columns are known. */
+export function flinkKeyProblem(table: TableInfo, spec: Pick<FullSpec, 'source' | 'keys'>, steps: TransformStep[], expressionWhy: Record<string, string | null | undefined> = {}): string | null {
+  if (!spec.keys?.[table.name]?.length || !table.columns.length) return null;
+  const key = flinkKey(table, spec, steps);
+  if (key.error) return key.error;
+  const added = stepColumns(table.name, steps);
+  for (const k of key.columns) {
+    if (k.from === 'column') {
+      const cut = steps.flatMap((t) => (t.type === 'truncate' ? (t.columns ?? []) : [])).find((c) => c.table === table.name && c.column === (k.source ?? k.name));
+      if (cut) return `${table.name}: the key column ${k.written} is cut to ${cut.length} characters, so rows that start alike would replace each other. Don't cut a key column.`;
+    }
+    if (k.from !== 'computed') continue;
+    const t = added.get(k.name)!;
+    const why = t.expression !== undefined ? (t.expression.trim() ? (k.name in expressionWhy ? expressionWhy[k.name]! : 'Checking its expression…') : 'Its expression is empty.') : computedKeyProblem(t, table);
+    if (why) return `${table.name}: the key column ${k.written}: ${why}`;
+  }
+  // A key with a column a step adds keeps the whole primary key, or rows would share a key.
+  if (table.primaryKey.length && key.columns.some((k) => k.from !== 'column')) {
+    const missing = table.primaryKey.filter((c) => !key.columns.some((k) => k.from === 'column' && k.source === c));
+    if (missing.length) return `${table.name}: a key with a column a step adds must keep the whole primary key (${missing.join(', ')}), or rows would share a key and replace each other.`;
+  }
+  return null;
 }

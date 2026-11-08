@@ -6,7 +6,7 @@ import { Meta } from '@/components/ui/text';
 import { jsonbSorted } from '@/lib/settings';
 import type { EngineId } from '@/lib/engines';
 import type { FullSpec, ValueFormats } from '../spec';
-import { COMPUTED_FUNCTIONS, columnKind, routeTargets } from './model';
+import { COMPUTED_FUNCTIONS, columnKind, flinkKey, routeTargets } from './model';
 
 /** One partition field, in the order the server's JSONB keeps its keys. */
 export interface PartitionField {
@@ -111,8 +111,13 @@ export function equalityFields(found: Discovered, spec: SpecParts, engine: Engin
   const cols = found.columns ?? [];
   const pk = found.primary_key ?? [];
   if (engine === 'flink-cdc') {
-    const keys = spec.keys?.[id]?.length ? spec.keys[id]! : pk;
-    return keys.map((k) => renamedTo(spec, id, k, engine));
+    // Any column the table writes (flinkKey, ADR 0010); a key column it doesn't write is left out
+    // here and blocks the step on its own.
+    const chosen = spec.keys?.[id] ?? [];
+    if (!chosen.length) return pk.map((k) => renamedTo(spec, id, k, engine));
+    const table = { name: id, columns: cols, primaryKey: pk };
+    // A key column that doesn't resolve counts as named (it fails its own check): the table stays keyed.
+    return chosen.map((k) => flinkKey(table, { source: spec.source, keys: { [id]: [k] } }, spec.transforms).columns[0]?.written ?? renamedTo(spec, id, k, engine));
   }
   if (writeMode === 'append') return [];
   const chosen = (spec.keys?.[id] ?? []).filter((k) => cols.some((c) => c.name === k));

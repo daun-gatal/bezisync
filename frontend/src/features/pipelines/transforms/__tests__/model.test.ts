@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fullSpec, type TransformStep } from '../../spec';
-import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, drawOrder, effectiveDeletes, sectionOf, shapeFields, summarizeShape, TYPE_TITLE, isTextType, fieldsBefore, flinkColumns, globMatch, routeTargets, computedError, defaultArgs, formulaText, kindFits, FLINK_ONLY_STEPS, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
+import { addStep, canMove, columnKind, DEBEZIUM_ONLY_STEPS, defaultStep, drawOrder, effectiveDeletes, sectionOf, shapeFields, summarizeShape, TYPE_TITLE, isTextType, fieldsBefore, flinkColumns, flinkKey, keyChoices, computedKind, KIND_NAMES, globMatch, routeTargets, computedError, defaultArgs, formulaText, kindFits, FLINK_ONLY_STEPS, moveStep, nameError, operatorsFor, outputImpact, parseRuleValue, stepCaps, stepErrors, summarize, textError, toggleFlinkOperation, type Caps, type TableInfo } from '../model';
 
 const orders: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'bigint' }, { name: 'cust_id', type: 'bigint' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
 const filter: TransformStep = { type: 'filter', id: 'keep', operations: ['insert'], match: 'all', rules: [] };
@@ -157,14 +157,74 @@ describe('Flink CDC steps', () => {
       { type: 'add_field', id: 'add2', name: 'pipe', value: { kind: 'pipeline' } },
     ];
     expect(flinkColumns(orders, spec, steps, 'orders-lake')).toEqual([
-      { name: 'id', from: { kind: 'column', column: 'id', renamed: false }, key: true },
-      { name: 'customer_id', from: { kind: 'column', column: 'cust_id', renamed: true }, key: false },
-      { name: 'source_system', from: { kind: 'added', value: 'orders-eu' }, key: false },
-      { name: 'pipe', from: { kind: 'added', value: 'orders-lake' }, key: false },
+      { name: 'id', from: { kind: 'column', column: 'id', renamed: false }, type: 'bigint', key: true },
+      { name: 'customer_id', from: { kind: 'column', column: 'cust_id', renamed: true }, type: 'bigint', key: false },
+      { name: 'source_system', from: { kind: 'added', value: 'orders-eu' }, type: 'text', key: false },
+      { name: 'pipe', from: { kind: 'added', value: 'orders-lake' }, type: 'text', key: false },
     ]);
     // Key columns chosen for a table replace its primary key.
     const keyed = fullSpec({ source: { tables: { include: ['public.orders'] } }, keys: { 'public.orders': ['cust_id'] } } as never);
     expect(flinkColumns(orders, keyed, [], 'p').filter((c) => c.key).map((c) => c.name)).toEqual(['cust_id']);
+    // Renamed, the key follows the written name.
+    expect(flinkColumns(orders, keyed, [rename], 'p').filter((c) => c.key).map((c) => c.name)).toEqual(['customer_id']);
+  });
+  // ADR 0010: types in the destination table, and keys from any column the table writes.
+  const upper: TransformStep = { type: 'computed', id: 'cc01', table: 'public.orders', name: 'status_up', function: 'upper', args: [{ column: 'status' }] };
+  const absId: TransformStep = { type: 'computed', id: 'cc02', table: 'public.orders', name: 'id_abs', function: 'abs', args: [{ column: 'id' }] };
+  const exprCol: TransformStep = { type: 'computed', id: 'cc03', table: 'public.orders', name: 'label', expression: "`status` || '-'" };
+  it('types each destination column: the source type, a function result, an expression later', () => {
+    const spec = fullSpec({ source: { tables: { include: ['public.orders'] } } } as never);
+    const cut: TransformStep = { type: 'truncate', id: 'tr01', columns: [{ table: 'public.orders', column: 'status', length: 20 }] };
+    const cols = flinkColumns(orders, spec, [cut, upper, absId, exprCol, add], 'p', 'postgresql');
+    expect(cols.map((c) => [c.name, c.type])).toEqual([['id', 'bigint'], ['cust_id', 'bigint'], ['status', 'text'], ['status_up', 'text'], ['id_abs', 'int'], ['label', 'unknown'], ['source_system', 'text']]);
+    expect(cols.find((c) => c.name === 'status')!.from).toEqual({ kind: 'column', column: 'status', renamed: false, cut: 20 });
+    expect(computedKind(absId, orders, 'postgresql')).toBe('int');
+    expect(KIND_NAMES.int).toBe('whole number');
+  });
+  it('resolves a Flink CDC key like the server: a source column first, then a step column', () => {
+    const spec = (keys: string[], exclude: string[] = []) => ({ source: fullSpec({ source: { tables: { include: ['public.orders'] }, columns: { 'public.orders': { mask: [], exclude } } } } as never).source, keys: { 'public.orders': keys } });
+    const steps = [rename, add, upper];
+    expect(flinkKey(orders, spec(['id', 'cust_id', 'source_system', 'status_up']), steps)).toEqual({
+      columns: [
+        { name: 'id', written: 'id', from: 'column', source: 'id' },
+        { name: 'cust_id', written: 'customer_id', from: 'column', source: 'cust_id' },
+        { name: 'source_system', written: 'source_system', from: 'added' },
+        { name: 'status_up', written: 'status_up', from: 'computed' },
+      ],
+      error: null,
+    });
+    expect(flinkKey(orders, spec(['status'], ['status']), steps).error).toBe('public.orders: the key column status is left out of the table. Keep it, or pick another key column.');
+    // A rename's new name is that column (the server compiled it as it is).
+    expect(flinkKey(orders, spec(['customer_id']), steps)).toEqual({ columns: [{ name: 'customer_id', written: 'customer_id', from: 'column', source: 'cust_id' }], error: null });
+    expect(flinkKey(orders, spec(['gone']), steps).error).toBe('public.orders writes no column gone to key its rows by: pick the key columns again.');
+    // A computed column of a left-out column's name is the key.
+    const same: TransformStep = { ...upper, name: 'status' };
+    expect(flinkKey(orders, spec(['status'], ['status']), [same]).columns).toEqual([{ name: 'status', written: 'status', from: 'computed' }]);
+    // Columns not read yet: names as they are, through the renames.
+    expect(flinkKey({ ...orders, columns: [] }, spec(['cust_id', 'gone', 'source_system']), steps).columns.map((c) => `${c.written}:${c.from}`)).toEqual(['customer_id:column', 'gone:column', 'source_system:added']);
+  });
+  it('offers every written column as a key on Flink CDC, source columns only on Debezium', () => {
+    const spec = fullSpec({ source: { tables: { include: ['public.orders'] }, columns: { 'public.orders': { mask: [], exclude: ['status'] } } } } as never);
+    const other: TransformStep = { type: 'add_field', id: 'add9', tables: ['public.items'], name: 'items_only', value: { kind: 'static', text: 'x' } };
+    const flink = keyChoices(orders, spec, [rename, add, upper, other], true, 'postgresql');
+    expect(flink.map((c) => [c.value, c.label, c.from, c.type, c.why ?? ''])).toEqual([
+      ['id', 'id', 'column', 'bigint', ''],
+      ['cust_id', 'customer_id', 'column', 'bigint', ''],
+      ['status', 'status', 'column', 'text', 'Left out of the table.'],
+      ['source_system', 'source_system', 'added', 'text', ''],
+      // Discovery didn't say status is NOT NULL: the computed column can be empty (keys.test.ts).
+      ['status_up', 'status_up', 'computed', 'text', 'Can be empty: it reads a column the source allows to be empty.'],
+    ]);
+    const debezium = keyChoices(orders, spec, [rename, add], false, 'postgresql');
+    expect(debezium.map((c) => [c.value, c.label, c.why ? 'disabled' : ''])).toEqual([
+      ['id', 'id', ''],
+      ['cust_id', 'cust_id', ''],
+      ['status', 'status', ''],
+      ['source_system', 'source_system', 'disabled'],
+    ]);
+    // One choice per name: a computed column replaces the left-out source column of its name.
+    const same: TransformStep = { ...upper, name: 'status' };
+    expect(keyChoices(orders, spec, [same], true, 'postgresql').filter((c) => c.value === 'status').map((c) => c.from)).toEqual(['computed']);
   });
 });
 
@@ -273,7 +333,7 @@ describe('computed', () => {
     const table: TableInfo = { name: 'public.orders', columns: [{ name: 'id', type: 'integer' }, { name: 'status', type: 'text' }], primaryKey: ['id'] };
     const spec = fullSpec({ source: { tables: { include: ['public.orders'] } } });
     expect(fieldsBefore([s, defaultStep('rename', [])], 1, table, spec)).toContain('label');
-    expect(flinkColumns(table, spec, [s], 'p').at(-1)).toEqual({ name: 'label', from: { kind: 'computed', formula: 'Join(status, "-", id)' }, key: false });
+    expect(flinkColumns(table, spec, [s], 'p').at(-1)).toEqual({ name: 'label', from: { kind: 'computed', formula: 'Join(status, "-", id)' }, type: 'text', key: false });
     const after = { ...spec, transforms: [...spec.transforms, s] };
     expect(outputImpact(spec, after)).toEqual([{ kind: 'additive', text: 'New column label (public.orders).' }]);
   });

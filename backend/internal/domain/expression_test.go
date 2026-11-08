@@ -104,7 +104,7 @@ func TestExpressionFindings(t *testing.T) {
 	if errs != "" {
 		t.Fatal(errs)
 	}
-	got := domain.TransformFindings("postgresql", "p", s, info)
+	got := domain.TransformFindings("debezium", "postgresql", "p", s, info)
 	msgs := map[int]string{}
 	for _, f := range got {
 		if f.Code == "transform_expression" {

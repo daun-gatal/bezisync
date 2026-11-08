@@ -1,0 +1,200 @@
+{
+  "functions": {
+    "abs": {
+      "kind": "unknown",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "add": {
+      "kind": "unknown",
+      "all": true,
+      "none": false,
+      "first": false
+    },
+    "ceil": {
+      "kind": "unknown",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "concat": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": false
+    },
+    "date_format": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "day": {
+      "kind": "int",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "days_between": {
+      "kind": "int",
+      "all": true,
+      "none": false,
+      "first": false
+    },
+    "divide": {
+      "kind": "unknown",
+      "all": false,
+      "none": false,
+      "first": false
+    },
+    "first_set": {
+      "kind": "unknown",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "floor": {
+      "kind": "unknown",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "hour": {
+      "kind": "int",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "join_with": {
+      "kind": "text",
+      "all": true,
+      "none": true,
+      "first": true
+    },
+    "left": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "length": {
+      "kind": "int",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "lower": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "month": {
+      "kind": "int",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "multiply": {
+      "kind": "unknown",
+      "all": true,
+      "none": false,
+      "first": false
+    },
+    "pad_left": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "pad_right": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "parse_date": {
+      "kind": "date",
+      "all": false,
+      "none": false,
+      "first": false
+    },
+    "replace": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "right": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "round": {
+      "kind": "unknown",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "substr": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "subtract": {
+      "kind": "unknown",
+      "all": true,
+      "none": false,
+      "first": false
+    },
+    "to_decimal": {
+      "kind": "decimal",
+      "all": false,
+      "none": false,
+      "first": false
+    },
+    "to_float": {
+      "kind": "float",
+      "all": false,
+      "none": false,
+      "first": false
+    },
+    "to_integer": {
+      "kind": "int",
+      "all": false,
+      "none": false,
+      "first": false
+    },
+    "to_text": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "trim": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "upper": {
+      "kind": "text",
+      "all": true,
+      "none": false,
+      "first": true
+    },
+    "year": {
+      "kind": "int",
+      "all": true,
+      "none": false,
+      "first": true
+    }
+  },
+  "key_kinds": [
+    "text",
+    "int"
+  ]
+}

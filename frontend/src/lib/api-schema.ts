@@ -3390,6 +3390,11 @@ export interface components {
             /** Deterministic */
             deterministic?: boolean;
             error: components["schemas"]["ExpressionCheckError"] | null;
+            /**
+             * Key Problem
+             * @description For a column: why it can't be in a Flink CDC primary key, given the columns sent (ADR 0010); null when it can.
+             */
+            key_problem?: string | null;
             /** Kind */
             kind?: string;
         };
@@ -3423,6 +3428,11 @@ export interface components {
         ExpressionColumn: {
             /** Name */
             name: string;
+            /**
+             * Nullable
+             * @description The column can be NULL (in the source, and not in its primary key); absent means it can.
+             */
+            nullable?: boolean;
             /** Type */
             type: string;
         };

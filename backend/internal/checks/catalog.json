@@ -2358,6 +2358,45 @@
    ]
   },
   {
+   "code": "transform_key_column_nullable",
+   "fixes": [
+    "Pick key columns that are never empty under Transform (Primary key), or add NOT NULL to the column in the source."
+   ],
+   "section": "Deploy",
+   "titles": [
+    "Transforms: primary keys"
+   ],
+   "whys": [
+    "Flink CDC writes a row whose key column is empty with an empty text in its place (seen on Iceberg), so all such rows share one key and replace each other."
+   ]
+  },
+  {
+   "code": "transform_key_column_unfit",
+   "fixes": [
+    "Pick other key columns under Transform (Primary key), or change the computed column."
+   ],
+   "section": "Deploy",
+   "titles": [
+    "Transforms: primary keys"
+   ],
+   "whys": [
+    "Flink CDC writes each row by its key, so a key column needs a value on every row that doesn't change on its own: a computed key column is text or a whole number, reads only columns that are never empty, and is the same each time a row is written; a key column isn't cut short; and a key with a column a step adds keeps the whole primary key, or rows would share a key."
+   ]
+  },
+  {
+   "code": "transform_key_column_unknown",
+   "fixes": [
+    "Pick the key columns again under Transform (Primary key)."
+   ],
+   "section": "Deploy",
+   "titles": [
+    "Transforms: primary keys"
+   ],
+   "whys": [
+    "Flink CDC writes each row by its key: a key column the table doesn't write (left out, or a step's column that was removed or renamed) stops the job."
+   ]
+  },
+  {
    "code": "transform_custom_class_unknown",
    "fixes": [
     "Use a Debezium image that ships the class (Settings → Debezium versions), or remove the step."
