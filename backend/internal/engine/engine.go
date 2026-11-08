@@ -47,6 +47,11 @@ var flinkSources = []string{"mysql", "postgresql", "sqlserver", "oracle"}
 // flinkSinks are the destination types Flink CDC writes in BeziSync.
 var flinkSinks = []string{"iceberg", "starrocks", "doris", "fluss", "kafka", "elasticsearch", "paimon", "oceanbase"}
 
+// flinkEventSinks are the destinations Flink CDC writes as change events (Debezium-style JSON
+// records in topics, ADR 0009 D1) rather than as rows of tables: the wizard describes them in event
+// terms (ADR 0011).
+var flinkEventSinks = []string{"kafka"}
+
 // flinkOnlySinks have no Debezium Server sink.
 var flinkOnlySinks = []string{"starrocks", "doris", "fluss", "elasticsearch", "paimon", "oceanbase"}
 
@@ -57,6 +62,15 @@ func Runs(id ID) (sources, sinks, exceptSinks []string) {
 		return slices.Clone(flinkSources), slices.Clone(flinkSinks), nil
 	}
 	return nil, nil, slices.Clone(flinkOnlySinks)
+}
+
+// EventSinks lists the destinations an engine writes as change events rather than as tables: nil
+// for Debezium, which writes events to every destination.
+func EventSinks(id ID) []string {
+	if id == FlinkCDC {
+		return slices.Clone(flinkEventSinks)
+	}
+	return nil
 }
 
 // FlinkOnlySink reports a destination only Flink CDC can write.

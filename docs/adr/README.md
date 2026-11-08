@@ -48,3 +48,4 @@ The other options, and why they lost.
 | [0008](0008-flink-cdc-expressions.md) | Flink CDC expressions: more column functions, and custom expressions BeziSync parses | Accepted |
 | [0009](0009-flink-cdc-destinations.md) | More Flink CDC destinations: Kafka, Elasticsearch, Apache Paimon and OceanBase | Accepted |
 | [0010](0010-flink-cdc-keys-from-steps.md) | Column types in the Destination table, and Flink CDC keys from any written column | Accepted |
+| [0011](0011-wizard-follows-source-and-engine.md) | The wizard follows the source and the engine | Accepted |

@@ -16,8 +16,11 @@ import (
 
 // ChooseEngine is the engine of a pipeline from sourceType to sinkType (sinkType "" while no
 // destination is chosen): the requested one when given, else the current one while it still runs
-// the pair, else the pair's default. Only available engines (EngineAvailable) are chosen.
-func ChooseEngine(ctx context.Context, q db.Querier, requested, current, sourceType, sinkType string) (engine.ID, error) {
+// the pair, else the pair's default. Only available engines (EngineAvailable) are chosen, and an
+// engine the project's policies allow comes before one they don't (ADR 0011): a project that
+// allows only Flink CDC gets Flink CDC for Kafka. With no allowed engine left the old order
+// applies, and the policy refuses it with its own message (enforceEnginePolicy, preflight).
+func ChooseEngine(ctx context.Context, q db.Querier, projectID uuid.UUID, requested, current, sourceType, sinkType string) (engine.ID, error) {
 	available := func(id engine.ID) (Availability, error) { return EngineAvailable(ctx, q, id) }
 	if requested != "" {
 		id := engine.ID(requested)
@@ -34,23 +37,36 @@ func ChooseEngine(ctx context.Context, q db.Querier, requested, current, sourceT
 		}
 		return id, nil
 	}
+	pol, err := PoliciesOf(ctx, q, projectID)
+	if err != nil {
+		return "", err
+	}
+	// Unreadable policies decide nothing here: saving is refused by them anyway.
+	allowed := func(id engine.ID) bool { return pol.Unreadable || domain.EngineViolation(pol, string(id)) == nil }
+	candidates := engine.Choices(sourceType, sinkType)
 	if current != "" && engine.Supports(engine.Of(current), sourceType, sinkType) {
-		if a, err := available(engine.Of(current)); err != nil {
-			return "", err
-		} else if a.Available {
-			return engine.Of(current), nil
-		}
+		candidates = append([]engine.ID{engine.Of(current)}, candidates...)
 	}
 	var reason string
-	for _, id := range engine.Choices(sourceType, sinkType) {
+	var fallback engine.ID
+	for _, id := range candidates {
 		a, err := available(id)
 		if err != nil {
 			return "", err
 		}
-		if a.Available {
+		if !a.Available {
+			reason = a.Reason
+			continue
+		}
+		if allowed(id) {
 			return id, nil
 		}
-		reason = a.Reason
+		if fallback == "" {
+			fallback = id
+		}
+	}
+	if fallback != "" {
+		return fallback, nil
 	}
 	if reason != "" {
 		return "", problem.New(422, "engine_unavailable",

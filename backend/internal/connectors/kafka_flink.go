@@ -3,6 +3,7 @@ package connectors
 import (
 	"sort"
 
+	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 )
 
@@ -13,8 +14,8 @@ import (
 // credentials travel as producer properties filled in by the helper.
 
 func (s *kafkaSink) FlinkSink(conn Resolved, c CompileContext) (*FlinkBlock, error) {
-	if f := c.Spec.Sink.Format; f.Type != "json" || f.IncludeSchema {
-		return nil, problem.New(422, "engine_settings", "On Flink CDC, Kafka records are Debezium-style JSON without a schema: choose JSON without the schema, or run this pipeline on Debezium.")
+	if err := FlinkFormatProblem("kafka", c.Spec.Sink.Format); err != nil {
+		return nil, err
 	}
 	props, env, err := KafkaClientProps(conn, "properties", "BZ_SINK")
 	if err != nil {
@@ -35,4 +36,14 @@ func (s *kafkaSink) FlinkSink(conn Resolved, c CompileContext) (*FlinkBlock, err
 // FlinkDestination: the topic is the routed name, as on Debezium.
 func (s *kafkaSink) FlinkDestination(_ Resolved, _ CompileContext, routed string) string {
 	return routed
+}
+
+// FlinkFormatProblem refuses an event format Flink CDC can't write to the destination: on Kafka
+// only JSON without the schema (its debezium-json). Destinations Flink CDC writes as tables take no
+// format, so any stored one is ignored. Saving and compiling share it (ADR 0011).
+func FlinkFormatProblem(sinkType string, f domain.FormatSpec) error {
+	if sinkType == "kafka" && (f.Type != "json" || f.IncludeSchema) {
+		return problem.New(422, "engine_settings", "On Flink CDC, Kafka records are Debezium-style JSON without a schema: choose JSON without the schema, or run this pipeline on Debezium.")
+	}
+	return nil
 }

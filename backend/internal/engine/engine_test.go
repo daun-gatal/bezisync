@@ -134,3 +134,15 @@ func TestCapsFlinkOracle(t *testing.T) {
 		t.Errorf("debezium oracle caps: %+v", d)
 	}
 }
+
+func TestEventSinks(t *testing.T) {
+	if EventSinks(Debezium) != nil || !slices.Equal(EventSinks(FlinkCDC), []string{"kafka"}) {
+		t.Fatal(EventSinks(Debezium), EventSinks(FlinkCDC))
+	}
+	// Every event sink is a destination Flink CDC writes.
+	for _, s := range EventSinks(FlinkCDC) {
+		if !slices.Contains(flinkSinks, s) {
+			t.Errorf("%s is an event sink Flink CDC doesn't write", s)
+		}
+	}
+}

@@ -12,7 +12,7 @@ from here so they offer the same actions.
 ## Interface
 - `[engine.go:ID]` — stored engine name (`Debezium` = `"debezium"`, `FlinkCDC` = `"flink-cdc"`); `Valid`, `Title`; `[engine.go:All]` is offer order.
 - `[engine.go:Supports]` / `[engine.go:Choices]` / `[engine.go:Default]` — which engines run a source → sink pair, in offer order; the default is the first choice.
-- `[engine.go:Runs]` — sources/sinks an engine handles (Debezium: everything except `exceptSinks`); `[engine.go:FlinkOnlySink]`.
+- `[engine.go:Runs]` — sources/sinks an engine handles (Debezium: everything except `exceptSinks`); `[engine.go:FlinkOnlySink]`; `[engine.go:EventSinks]` — the destinations Flink CDC writes as change events rather than tables (Kafka), which the wizard describes in event terms (ADR 0011).
 - `[engine.go:Of]` — reads a stored engine, mapping `""` (rows from before engines existed) to Debezium.
 - `[caps.go:Caps]` / `[caps.go:CapsFor]` — per-engine capabilities (edit position, re-copy one table, add tables, start from time, saved positions, event formats, schema changes, parallel copy, hash masks, resize) with `Why` for every unavailable action.
 - **Settings registry** (`settings.go`):
