@@ -709,6 +709,20 @@ test('Flink CDC: the destination table shows types, and computed and added colum
   await expect(keyRow.getByText('month is computed: a row whose key changes is written as a new row, and the old one stays.')).toBeVisible();
   await expect(row('month')).toContainText('key');
   await expect(row('tenant')).toContainText('key');
+  // The editor and the typed table at 390, 768 and 1280 px, in light and dark: no overflow, accessible.
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    for (const width of [390, 768, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      // Colours transition on a theme change: measure the settled page.
+      await page.evaluate(() => document.getAnimations().forEach((a) => a.finish()));
+      expect(await layoutProblems(page), `${scheme} ${width}px`).toEqual([]);
+      const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+      expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ')}`), `${scheme} ${width}px`).toEqual([]);
+    }
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: 'Continue to review →' }).click();
   await expect(page.getByText('All changes saved')).toBeVisible({ timeout: 20_000 });
   const saved = await api.get<Saved>(url);

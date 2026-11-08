@@ -793,14 +793,8 @@ export function KeysEditor({
   const tables = [...ctx.tables].sort((a, b) => Number(a.primaryKey.length > 0) - Number(b.primaryKey.length > 0) || a.name.localeCompare(b.name));
   const steps = ctx.steps;
   return (
-    <table className="w-full border-collapse text-sm">
-      <thead>
-        <tr className="text-left text-xs text-muted">
-          <th className="py-1 pr-3 font-medium">Table</th>
-          <th className="py-1 font-medium">Key</th>
-        </tr>
-      </thead>
-      <tbody>
+    // One block per table, its name above its key: the choices carry types and need the width.
+    <div className="flex min-w-0 flex-col text-sm">
         {tables.map((t) => {
           const cols = keys[t.name];
           const open = editing.has(t.name);
@@ -834,14 +828,12 @@ export function KeysEditor({
             </span>
           );
           return (
-            <tr key={t.name} className="border-t border-line align-top">
-              <td className="py-2 pr-3">
-                <span className="flex flex-col items-start gap-1">
-                  <span className="font-mono text-sm wrap-anywhere">{t.name}</span>
-                  {!t.primaryKey.length ? <Pill tone="warn">no primary key</Pill> : null}
-                </span>
-              </td>
-              <td className="py-2">
+            <div key={t.name} role="group" aria-label={`Key of ${t.name}`} className="flex min-w-0 flex-col gap-1.5 border-t border-line py-2 first:border-t-0">
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="font-mono text-sm wrap-anywhere">{t.name}</span>
+                {!t.primaryKey.length ? <Pill tone="warn">no primary key</Pill> : null}
+              </span>
+              <div className="min-w-0">
                 {open ? (
                   <div className="flex flex-col gap-2">
                     <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -910,12 +902,11 @@ export function KeysEditor({
                     </Button>
                   </span>
                 )}
-              </td>
-            </tr>
+              </div>
+            </div>
           );
         })}
-      </tbody>
-    </table>
+    </div>
   );
 }
 

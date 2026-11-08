@@ -193,6 +193,7 @@ One PR, commits in order:
 | K-27 | Expression check pending or failed | Continue waits; the choice says so | `keys.test.ts` |
 | K-28 | Empty expression column | Unfit, never "checking" forever | `keys.test.ts` |
 | K-30 | Nullable source column in a Flink CDC key | Warning `transform_key_column_nullable`; a note in the picker | `TestFlinkKeyWarnings` |
+| K-31 | The key editor and the typed table at 390/768/1280 px, light and dark | No overflow (the editor stacks each table's name above its key), no serious axe finding | e2e 32 |
 | K-29 | Every key column unresolved, Iceberg Partition by | Still keyed (names as they are); the key check blocks | connectors, `PartitionBy.test.ts` |
 
 ## Consequences
