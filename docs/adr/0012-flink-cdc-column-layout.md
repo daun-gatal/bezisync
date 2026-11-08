@@ -1,6 +1,6 @@
 # 0012 — Flink CDC writes the destination's columns in the destination's order, or doesn't start
 
-- **Status:** Accepted
+- **Status:** Accepted (D2 replaced by 0013)
 - **Date:** 2026-11-08
 - **Amends:** 0010 (destination types are now modelled, for Iceberg and Paimon only), 0006 (the restore floor gains a layout reason)
 - **Scope:** `backend/internal/domain` (`flinklayout.go`: the layout planner and the Flink type names),
@@ -86,12 +86,12 @@ never a pass): Fluss maps columns by name and silently drops a column an existin
 
 ### D2 — A column change on a pipeline with a saved position is refused
 
-`flink_columns_changed` (blocking, configuration, can't be forced) fires when a deploy would change the columns a
+*Replaced by [0013](0013-flink-cdc-column-switch.md): such a deploy switches columns at the saved position.*
+
+`flink_columns_changed` (blocking, configuration, can't be forced) fired when a deploy would change the columns a
 running or paused pipeline writes (the produced names per destination, the soft-delete column included) and its
-next start resumes a saved position: resuming would drop the change silently (E5). The fix is Start over (copy
-again, changes from now, or from a time where the source allows it), then deploy: that start is planned (D1).
-Rolling back to a version with other columns is the same change. A lossless switch (resume the old position with
-the new columns) is future work: it needs an exact source position or a rewritten savepoint, and is out of scope.
+next start resumes a saved position: resuming would drop the change silently (E5). The fix was Start over, then
+deploy: that start is planned (D1).
 
 ### D3 — Adding a column to an existing table
 
@@ -122,7 +122,8 @@ tables it can't see. The field is omitted when false, so existing pipelines keep
 ### D6 — Restore across a layout is refused
 
 A saved position taken before the current layout was planned (its id is at or below `flink_layout.floor`) can't be
-restored (`position_before_layout`): its job wrote other columns.
+restored (`position_before_layout`): its job wrote other columns. A switch (0013) keeps the floor: positions from
+before a switch restore with the new columns.
 
 ### D7 — StarRocks keeps deleted rows under `__bz_op`
 

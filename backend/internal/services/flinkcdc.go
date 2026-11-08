@@ -268,9 +268,14 @@ func RestoreSavedPosition(ctx context.Context, q db.Querier, a *auth.ProjectAcce
 	}
 	defer func() { _ = conn.Close(ctx) }()
 	table := stateTable(p.ShortID())
+	// The copy keeps the column generation its job ran with (ADR 0013); a table from a helper that
+	// predates it gets the column the way the helper adds it.
+	if _, err := conn.Exec(ctx, `ALTER TABLE `+table+` ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 0`); err != nil && !tableMissing(err) {
+		return nil, err
+	}
 	var s SavedPosition
-	err = conn.QueryRow(ctx, `INSERT INTO `+table+` (kind, reason, flink_id, path, size, sha256, payload, taken_at)
-		SELECT kind, 'restored from #' || id, flink_id, path, size, sha256, payload, taken_at FROM `+table+` WHERE id = $1
+	err = conn.QueryRow(ctx, `INSERT INTO `+table+` (kind, reason, flink_id, path, size, sha256, payload, taken_at, generation)
+		SELECT kind, 'restored from #' || id, flink_id, path, size, sha256, payload, taken_at, generation FROM `+table+` WHERE id = $1
 		RETURNING id, kind, reason, flink_id, taken_at, size`, id).Scan(&s.ID, &s.Kind, &s.Reason, &s.FlinkID, &s.TakenAt, &s.Size)
 	if errors.Is(err, pgx.ErrNoRows) || tableMissing(err) {
 		return nil, problem.NotFound("Saved position")

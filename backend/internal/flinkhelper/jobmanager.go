@@ -349,6 +349,17 @@ func (m *JobManager) extract(ctx context.Context, id int64) (string, error) {
 			}
 		}
 	}
+	if from.Generation < m.Settings.Generation {
+		// ADR 0013: the position's job wrote other columns. Its schema coordinator state would keep
+		// them (Flink CDC skips the new CreateTableEvents as already applied), so it is left out:
+		// the coordinator learns the new columns from the source, which sends every table's
+		// schema again after a restore.
+		changed, err := ForgetCoordinatorState(dir, SchemaOperatorUID(m.Settings.ShortID))
+		if err != nil {
+			return "", fmt.Errorf("saved position #%d was saved before the columns changed, and BeziSync can't make it write the new ones: %w", id, err)
+		}
+		logf("saved position #%d is from column generation %d (now %d): schema coordinator state left out: %v", id, from.Generation, m.Settings.Generation, changed)
+	}
 	m.update(func(s *Status) { s.RestoredFrom = from })
 	return dir, nil
 }

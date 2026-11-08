@@ -1555,6 +1555,11 @@ func Deploy(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.
 			artifacts[k] = val
 		}
 	}
+	// ADR 0013: the version whose columns the saved positions' job writes, recorded once; every
+	// planned start records the deployed one after.
+	if _, ok := artifacts[ArtifactWritten]; !ok && previous != nil && EngineOf(p) == engine.FlinkCDC {
+		artifacts[ArtifactWritten] = previous.String()
+	}
 	p.Artifacts = artifacts
 	applyPlacement(p, domain.MustSpec(map[string]any(v.Spec)), rt)
 	if EngineOf(p) == engine.FlinkCDC {

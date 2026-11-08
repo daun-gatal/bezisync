@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -136,9 +138,15 @@ func TestSavedPositionsListRestoreAndStartOver(t *testing.T) {
 	delete(e.driver.Workloads, short)
 	e.driver.mu.Unlock()
 	e.admin.post(url+"/positions/999999/restore", map[string]any{"confirm": "lake-flink"}).expect(404)
+	// The copy keeps the column generation its job ran with (ADR 0013).
+	exec(t, `UPDATE debezium_state.flink_state_`+short+` SET generation = 3 WHERE id = `+strconv.FormatInt(ids[0], 10))
 	got := e.admin.post(restore, map[string]any{"confirm": "lake-flink"}).expect(200)
 	if got.At("position", "id").(float64) <= float64(ids[2]) || !strings.Contains(got.Str("position", "reason"), "restored from #") {
 		t.Fatal(string(got.Raw))
+	}
+	var generation int
+	if err := testdb.Pool(t).QueryRow(context.Background(), `SELECT generation FROM debezium_state.flink_state_`+short+` WHERE id = $1`, int64(got.At("position", "id").(float64))).Scan(&generation); err != nil || generation != 3 {
+		t.Fatal(generation, err)
 	}
 	read := e.admin.get(url).expect(200)
 	if read.At("artifacts", "flink_restore_after") != got.At("position", "id").(float64)-1 {
@@ -379,5 +387,103 @@ func TestFlinkRefusesSnapshots(t *testing.T) {
 	e.runJobs()
 	if j := jobRow(t, id); j.State != "done" || j.Result["skipped"] == nil {
 		t.Fatalf("%s %v %v", j.State, j.Result, j.Error)
+	}
+}
+
+// ADR 0013: a deploy that changes the columns a Flink CDC pipeline with a saved position writes
+// switches columns at that position: preflight says so (no Start over), the controller raises the
+// column generation the helper gets, records what the job now writes, and audits it; a deploy that
+// keeps the columns resumes as before.
+func TestFlinkColumnSwitchAtTheSavedPosition(t *testing.T) {
+	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
+	exec(t, `ALTER TABLE shop.orders REPLICA IDENTITY FULL`)
+	tables := map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}
+	send := map[string]any{"new_columns": "send"} // new source columns flow live
+	body := map[string]any{"name": "events-flink", "source_id": e.ids.Source, "sink_id": e.ids.Sink, "runtime_id": e.ids.Runtime, "engine": "flink-cdc",
+		"spec": map[string]any{"source": tables, "flink_cdc": send}}
+	pipe := e.admin.post("/api/v1/projects/"+e.pid+"/pipelines", body).expect(201)
+	url := "/api/v1/projects/" + e.pid + "/pipelines/" + pipe.Str("id")
+	short := shortOf(pipe.Str("id"))
+	e.admin.post(url+"/deploy", map[string]any{}).expect(200)
+	ctx := context.Background()
+	q := testdb.Pool(t)
+	load := func() *models.Pipeline {
+		p, err := db.Find[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE id = $1`, pipe.Str("id"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	settings := func() flinkhelper.Settings {
+		var s flinkhelper.Settings
+		w, ok := e.driver.Workloads[short]
+		if !ok {
+			t.Fatal("no workload", e.driver.Workloads)
+		}
+		if err := json.Unmarshal([]byte(w.Flink.Config["settings.json"]), &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	// The first start: nothing saved, planned fresh.
+	e.tick()
+	if s := settings(); !s.FreshStart || s.Generation != 0 {
+		t.Fatalf("%+v", s)
+	}
+	savePositions(t, short, 2)
+	deploy := func(steps []any) *resp {
+		cur := e.admin.get(url).expect(200)
+		e.admin.patch(url, map[string]any{"spec": map[string]any{"source": tables, "flink_cdc": send, "transforms": steps}}, ifMatch(cur.At("version"))...).expect(200)
+		return e.admin.post(url+"/preflight", nil).expect(200)
+	}
+	added := []any{map[string]any{"type": "unwrap", "id": "shape"}, map[string]any{"type": "add_field", "id": "add1", "name": "region", "value": map[string]any{"kind": "static", "text": "eu"}}}
+	pre := deploy(added)
+	c := checkOf(t, pre, "flink_columns_changed")
+	if c == nil || at(t, c, "status") != "pass" || at(t, c, "blocking") == true ||
+		!strings.Contains(at(t, c, "message").(string), "shop.orders adds region") || !strings.Contains(at(t, c, "message").(string), "switches columns at its saved position") {
+		t.Fatal(c)
+	}
+	// A source column added after the saved position: the restored job hasn't read it, so the switch
+	// doesn't write it (Flink CDC would fail on a column it can't find).
+	exec(t, `ALTER TABLE shop.orders ADD COLUMN note text`)
+	t.Cleanup(func() { exec(t, `ALTER TABLE shop.orders DROP COLUMN IF EXISTS note`) })
+	first := load().DeployedVersionID.String()
+	e.admin.post(url+"/deploy", map[string]any{}).expect(200)
+	if w := load().Artifacts[services.ArtifactWritten]; w != first {
+		t.Fatalf("flink_written = %v, want the version the job ran (%s)", w, first)
+	}
+	e.tick()
+	p := load()
+	layout, _ := p.Artifacts[services.ArtifactLayout].(map[string]any)
+	if fmt.Sprint(layout["generation"]) != "1" || p.Artifacts[services.ArtifactWritten] != p.DeployedVersionID.String() || p.Artifacts[services.ArtifactFreshStart] != nil {
+		t.Fatalf("artifacts %v", p.Artifacts)
+	}
+	if s := settings(); s.FreshStart || s.Generation != 1 || s.Restore != "latest" {
+		t.Fatalf("%+v", s)
+	}
+	if cols := fmt.Sprint(p.Artifacts[services.ArtifactColumns]); strings.Contains(cols, "note") || !strings.Contains(cols, "total") {
+		t.Fatal(cols)
+	}
+	var n int
+	if err := q.QueryRow(ctx, `SELECT count(*) FROM events WHERE kind = 'pipeline.columns_switched' AND resource_id = $1`, p.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	// A version that keeps the columns resumes in the same generation.
+	same := []any{added[0], map[string]any{"type": "add_field", "id": "add1", "name": "region", "value": map[string]any{"kind": "static", "text": "us"}}}
+	if c := checkOf(t, deploy(same), "flink_columns_changed"); c != nil {
+		t.Fatal("unchanged columns say nothing", c)
+	}
+	e.admin.post(url+"/deploy", map[string]any{}).expect(200)
+	e.tick()
+	if s := settings(); s.Generation != 1 {
+		t.Fatalf("%+v", s)
+	}
+	// Taking the field away again is another switch.
+	deploy(added[:1])
+	e.admin.post(url+"/deploy", map[string]any{}).expect(200)
+	e.tick()
+	if s := settings(); s.Generation != 2 {
+		t.Fatalf("%+v", s)
 	}
 }

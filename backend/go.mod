@@ -41,6 +41,7 @@ require (
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kadm v1.19.0
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20261022190701-123ec885bc97
+	github.com/twmb/murmur3 v1.1.8
 	go.mongodb.org/mongo-driver/v2 v2.9.2
 	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 	golang.org/x/net v0.62.0
@@ -168,7 +169,6 @@ require (
 	github.com/substrait-io/substrait-protobuf/go v0.85.0 // indirect
 	github.com/twmb/avro v1.8.0 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.15.0 // indirect
-	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect

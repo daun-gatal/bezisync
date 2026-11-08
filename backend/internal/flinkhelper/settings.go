@@ -55,6 +55,11 @@ type Settings struct {
 	// tables were read and the job writes their columns). Without it the helper never starts a
 	// job fresh: with nothing to restore it stops with no_position.
 	FreshStart bool `json:"fresh_start,omitempty"`
+	// Generation is the pipeline's column generation (ADR 0013): it goes up each time a deploy
+	// changes the columns a job with a saved position writes. A saved position from an older
+	// generation is restored without Flink CDC's schema coordinator state, so the job writes the new
+	// columns from exactly where it stopped.
+	Generation int `json:"generation,omitempty"`
 	// AllowNonRestored drops saved state of operators the new pipeline no longer has (a removed
 	// table).
 	AllowNonRestored bool `json:"allow_non_restored"`
