@@ -228,3 +228,12 @@ One PR, commits in order:
   share one key and overwrite each other, silently.
 - **Show the destination's own column types.** Rejected for now: BeziSync doesn't model each sink's type
   mapping, and a guessed type would be wrong in places.
+
+## Amendments
+
+- **2026-11-08 (after merge).** `transform_key_column_nullable` warns only when the key doesn't also hold the
+  whole primary key (`domain.FlinkKeyWarnings`, `keepsPrimaryKey`): with the primary key in the key, rows can't
+  share a key whatever a nullable column holds. A computed date or timestamp key column is still refused (no
+  date function is never empty on 3.7.0: `CAST … AS DATE` doesn't compile, `TO_DATE` can give NULL); the
+  refusal now says how to partition by a date instead: the timestamp column itself in the key, partitioned by
+  its day (ADR 0005). The key editor shows an expression column's kind from the server's check.

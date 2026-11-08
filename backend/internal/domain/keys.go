@@ -218,6 +218,9 @@ func ComputedKeyProblem(sourceType string, spec PipelineSpec, table string, t Tr
 		if compiled.Kind == expr.Unknown {
 			return "its kind follows the columns it reads, which BeziSync can't write NOT NULL: a computed key column is text or a whole number (CAST it AS STRING)."
 		}
+		if compiled.Kind == expr.Date || compiled.Kind == expr.Timestamp || compiled.Kind == expr.TimestampTZ {
+			return "it is " + expr.KindWords(compiled.Kind) + "; a computed key column is text or a whole number. To partition by a date, put the timestamp column itself in the key and partition it by its day under Partition by."
+		}
 		return "it is " + expr.KindWords(compiled.Kind) + "; a computed key column is text or a whole number."
 	case !slices.ContainsFunc(res.Columns, func(c string) bool { return !notNull(c) }) && expr.NeverNull(n, notNull):
 		return ""
@@ -256,9 +259,10 @@ func KeyColumnSQL(t Transform, sql string) (string, error) {
 }
 
 // FlinkKeyWarnings are a table's chosen source key columns that can be empty (NULL in the source
-// and not in its primary key). On Flink CDC 3.7.0 into Iceberg such a row is written with an empty
-// text for the key, so those rows share a key and replace each other (ADR 0010, the probe). Kept a
-// warning: keys of source columns were always the user's choice.
+// and not in its primary key), when the key doesn't also hold the whole primary key. On Flink CDC
+// 3.7.0 into Iceberg such a row is written with an empty text for the key, so those rows would share
+// a key and replace each other (ADR 0010, the probe); with the primary key in the key they can't.
+// Kept a warning: keys of source columns were always the user's choice.
 func FlinkKeyWarnings(spec PipelineSpec, table string, info TableColumns) []string {
 	names := make([]string, len(info.Columns))
 	for i, c := range info.Columns {
@@ -266,6 +270,9 @@ func FlinkKeyWarnings(spec PipelineSpec, table string, info TableColumns) []stri
 	}
 	key, err := FlinkKey(spec, table, names)
 	if err != nil {
+		return nil
+	}
+	if keepsPrimaryKey(key, info.PrimaryKey) {
 		return nil
 	}
 	notNull := keyNotNull(info)
@@ -276,4 +283,18 @@ func FlinkKeyWarnings(spec PipelineSpec, table string, info TableColumns) []stri
 		}
 	}
 	return out
+}
+
+// keepsPrimaryKey reports a resolved key that holds every primary-key column (a table without one
+// never does): its rows can't share a key whatever its other columns hold.
+func keepsPrimaryKey(key []FlinkKeyColumn, primaryKey []string) bool {
+	if len(primaryKey) == 0 {
+		return false
+	}
+	for _, c := range primaryKey {
+		if !slices.ContainsFunc(key, func(k FlinkKeyColumn) bool { return k.From == KeyFromColumn && k.Source == c }) {
+			return false
+		}
+	}
+	return true
 }

@@ -191,17 +191,36 @@ func TestKeyColumnVectors(t *testing.T) {
 }
 func ptr[T any](v T) *T { return &v }
 
-// A source key column that can be empty is a warning (the probe: Flink CDC writes it as ” on
-// Iceberg, so those rows share a key); the primary key's own columns never are.
+// A source key column that can be empty is a warning when the key could merge rows (the probe:
+// Flink CDC writes it as ” on Iceberg, so those rows share a key); with the whole primary key in the
+// key, or a column of the primary key itself, it isn't.
 func TestFlinkKeyWarnings(t *testing.T) {
 	info := domain.TableColumns{PrimaryKey: []string{"id"}, Columns: []domain.PreviewColumn{{Name: "id", Type: "bigint", Nullable: true}, {Name: "note", Type: "text", Nullable: true}}}
+	for keys, want := range map[string]string{`["id", "note"]`: "", `["id"]`: "", `["note"]`: "the key column note can be empty"} {
+		spec := mustSpec(t, `{"source": {"tables": {"include": ["public.t"]}}, "keys": {"public.t": `+keys+`}}`)
+		got := strings.Join(domain.FlinkKeyWarnings(spec, "public.t", info), " | ")
+		if (want == "") != (got == "") || !strings.Contains(got, want) {
+			t.Errorf("%s: got %q, want %q", keys, got, want)
+		}
+		f := domain.TransformFindings("flink-cdc", "postgresql", "p", spec, map[string]domain.TableColumns{"public.t": info})
+		if want != "" && (len(f) != 1 || f[0].Code != "transform_key_column_nullable" || f[0].Fail) {
+			t.Fatalf("%s: %+v", keys, f)
+		}
+	}
+	// Without a primary key nothing keeps rows apart.
+	keyless := domain.TableColumns{Columns: info.Columns}
 	spec := mustSpec(t, `{"source": {"tables": {"include": ["public.t"]}}, "keys": {"public.t": ["id", "note"]}}`)
-	got := domain.FlinkKeyWarnings(spec, "public.t", info)
-	if len(got) != 1 || !strings.Contains(got[0], "the key column note can be empty") {
+	if got := domain.FlinkKeyWarnings(spec, "public.t", keyless); len(got) != 2 {
 		t.Fatal(got)
 	}
-	f := domain.TransformFindings("flink-cdc", "postgresql", "p", spec, map[string]domain.TableColumns{"public.t": info})
-	if len(f) != 1 || f[0].Code != "transform_key_column_nullable" || f[0].Fail {
-		t.Fatalf("%+v", f)
+}
+
+// ADR 0010: a computed date can't be a key; the refusal points at partitioning the timestamp by day.
+func TestComputedDateKeyHint(t *testing.T) {
+	info := domain.TableColumns{PrimaryKey: []string{"id"}, Columns: []domain.PreviewColumn{{Name: "id", Type: "bigint"}, {Name: "made", Type: "text"}}}
+	spec := mustSpec(t, `{"source": {"tables": {"include": ["public.t"]}}}`)
+	step := domain.Transform{Type: "computed", Table: "public.t", Name: "d", Function: "parse_date", Args: []domain.ComputedArg{{Column: "made"}, {Text: ptr("yyyy-MM-dd")}}}
+	if got := domain.ComputedKeyProblem("postgresql", spec, "public.t", step, info); !strings.Contains(got, "partition it by its day under Partition by") {
+		t.Fatal(got)
 	}
 }

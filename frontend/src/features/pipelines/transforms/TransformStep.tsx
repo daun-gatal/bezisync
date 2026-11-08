@@ -141,7 +141,13 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
     : [];
   const exprChecks = useExpressionChecks(project.id, pipeline.id, exprKeys.map((e) => expressionKeyBody(e.step, e.table)));
   const expressionWhy: Record<string, Record<string, string | null>> = {};
-  exprKeys.forEach((e, i) => ((expressionWhy[e.table.name] ??= {})[e.step.name!] = expressionKeyProblem(exprChecks[i]?.data, exprChecks[i]?.failed)));
+  // The kind each expression writes, from the same answer (the key editor shows it).
+  const expressionKind: Record<string, Record<string, string>> = {};
+  exprKeys.forEach((e, i) => {
+    (expressionWhy[e.table.name] ??= {})[e.step.name!] = expressionKeyProblem(exprChecks[i]?.data, exprChecks[i]?.failed);
+    const kind = exprChecks[i]?.data?.error ? undefined : exprChecks[i]?.data?.kind;
+    if (kind) (expressionKind[e.table.name] ??= {})[e.step.name!] = kind;
+  });
   const keyErr = flink ? (tables.map((t) => flinkKeyProblem(t, { source: draft.source, keys }, steps, expressionWhy[t.name])).find(Boolean) ?? null) : null;
   const dirty = JSON.stringify(draft) !== JSON.stringify(spec);
   useImperativeHandle(handle, () => ({
@@ -418,7 +424,7 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
                 open={open === 'keys'}
                 onToggle={() => setOpen(open === 'keys' ? null : 'keys')}
               >
-                <KeysEditor keys={keys} ctx={ctxFor(steps.length)} onChange={setKeys} expressionWhy={expressionWhy} />
+                <KeysEditor keys={keys} ctx={ctxFor(steps.length)} onChange={setKeys} expressionWhy={expressionWhy} expressionKind={expressionKind} />
               </StepRow>
             </>
           ) : null}
