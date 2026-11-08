@@ -36,7 +36,11 @@ import {
   textError,
   toggleFlinkOperation,
   TRUNCATE_SOURCES,
+  flinkKeyProblem,
+  keyChoices,
+  KIND_NAMES,
   type Caps,
+  type KeyChoice,
   type TableInfo,
 } from './model';
 import type { FullSpec } from '../spec';
@@ -765,10 +769,29 @@ export function CustomEditor({ step, ctx, onChange }: { step: TransformStep; ctx
   );
 }
 
-export function KeysEditor({ keys, ctx, onChange }: { keys: Record<string, string[]>; ctx: EditorContext; onChange: (k: Record<string, string[]>) => void }) {
+/**
+ * Key columns per table (ADR 0010). On Flink CDC the destination's primary key, made of any column
+ * the table writes: source columns under their written names, added fields and computed columns.
+ * On Debezium the message key, made of source columns only (fields steps add are shown disabled,
+ * with the reason). Each choice shows its type; a chosen column the table no longer writes stays
+ * listed, ticked, so it can be removed, and the row says why it blocks.
+ */
+export function KeysEditor({
+  keys,
+  ctx,
+  onChange,
+  expressionWhy = {},
+}: {
+  keys: Record<string, string[]>;
+  ctx: EditorContext;
+  onChange: (k: Record<string, string[]>) => void;
+  /** The server's answer for expression columns, table → column → why (undefined: checking). */
+  expressionWhy?: Record<string, Record<string, string | null>>;
+}) {
   // Rows being edited stay open while columns are ticked (tables without a key start open).
   const [editing, setEditing] = useState<Set<string>>(new Set([...Object.keys(keys), ...ctx.tables.filter((t) => !t.primaryKey.length).map((t) => t.name)]));
   const tables = [...ctx.tables].sort((a, b) => Number(a.primaryKey.length > 0) - Number(b.primaryKey.length > 0) || a.name.localeCompare(b.name));
+  const steps = ctx.steps;
   return (
     <table className="w-full border-collapse text-sm">
       <thead>
@@ -781,6 +804,35 @@ export function KeysEditor({ keys, ctx, onChange }: { keys: Record<string, strin
         {tables.map((t) => {
           const cols = keys[t.name];
           const open = editing.has(t.name);
+          const choices = keyChoices(t, ctx.spec, steps, ctx.flink, ctx.sourceType).map((c) => {
+            if (c.expression === undefined) return c;
+            if (!c.expression.trim()) return { ...c, why: 'Its expression is empty.' };
+            const why = expressionWhy[t.name]?.[c.value];
+            return why === undefined || why === 'Checking its expression…' ? { ...c, checking: true } : why ? { ...c, why } : c;
+          });
+          const dangling = (cols ?? []).filter((c) => !choices.some((x) => x.value === c));
+          const error = ctx.flink ? flinkKeyProblem(t, { ...ctx.spec, keys }, steps, expressionWhy[t.name]) : null;
+          const computed = ctx.flink ? (cols ?? []).filter((c) => choices.some((x) => x.value === c && x.from === 'computed')) : [];
+          // Flink CDC writes an empty key column as '' (seen on Iceberg): those rows share one key.
+          const nullable = ctx.flink
+            ? (cols ?? []).filter((c) => !t.primaryKey.includes(c) && t.columns.some((x) => x.name === c && x.nullable !== false) && choices.some((x) => x.value === c && x.from === 'column'))
+            : [];
+          const put = (next: string[]) => {
+            const out = { ...keys };
+            if (next.length) out[t.name] = next;
+            else delete out[t.name];
+            onChange(out);
+          };
+          const label = (c: KeyChoice) => (
+            <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
+              <span className="font-mono text-sm">{c.label}</span>
+              <span className="text-xs text-muted">
+                {c.renamedFrom ? `from ${c.renamedFrom} · ` : c.from === 'added' ? 'added · ' : c.from === 'computed' ? 'computed · ' : ''}
+                {c.from === 'column' ? c.type : (KIND_NAMES[c.type] ?? c.type)}
+                {c.checking ? ' · checking…' : ''}
+              </span>
+            </span>
+          );
           return (
             <tr key={t.name} className="border-t border-line align-top">
               <td className="py-2 pr-3">
@@ -791,34 +843,63 @@ export function KeysEditor({ keys, ctx, onChange }: { keys: Record<string, strin
               </td>
               <td className="py-2">
                 {open ? (
-                  <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    {t.columns.map((c) => (
-                      <Check
-                        key={c.name}
-                        label={<span className="font-mono text-sm">{c.name}</span>}
-                        checked={cols?.includes(c.name) ?? false}
-                        onChange={(on) => {
-                          const next = on ? [...(cols ?? []), c.name] : (cols ?? []).filter((x) => x !== c.name);
-                          const out = { ...keys };
-                          if (next.length) out[t.name] = next;
-                          else delete out[t.name];
-                          onChange(out);
-                        }}
-                      />
-                    ))}
-                    {t.primaryKey.length ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          const out = { ...keys };
-                          delete out[t.name];
-                          onChange(out);
-                          setEditing(new Set([...editing].filter((x) => x !== t.name)));
-                        }}
-                      >
-                        Use the primary key
-                      </Button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      {choices.map((c) => {
+                        const checked = cols?.includes(c.value) ?? false;
+                        return (
+                          <Check
+                            key={`${c.from}:${c.value}`}
+                            label={label(c)}
+                            checked={checked}
+                            // A chosen column that can't be a key stays ticked so it can be removed.
+                            disabled={Boolean(c.why) && !checked}
+                            why={c.why ?? null}
+                            onChange={(on) => put(on ? [...(cols ?? []), c.value] : (cols ?? []).filter((x) => x !== c.value))}
+                          />
+                        );
+                      })}
+                      {dangling.map((c) => (
+                        <Check
+                          key={`gone:${c}`}
+                          label={
+                            <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
+                              <span className="font-mono text-sm">{c}</span>
+                              <span className="text-xs text-bad">not written</span>
+                            </span>
+                          }
+                          checked
+                          onChange={() => put((cols ?? []).filter((x) => x !== c))}
+                        />
+                      ))}
+                      {t.primaryKey.length ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            put([]);
+                            setEditing(new Set([...editing].filter((x) => x !== t.name)));
+                          }}
+                        >
+                          Use the primary key
+                        </Button>
+                      ) : null}
+                    </div>
+                    {error ? (
+                      <span role="alert" className="text-xs text-bad wrap-anywhere">
+                        {error}
+                      </span>
+                    ) : null}
+                    {nullable.length ? (
+                      <Meta>
+                        {nullable.join(', ')} can be empty in the source: rows where {nullable.length === 1 ? 'it is' : 'they are'} empty would share one key and replace each other.
+                      </Meta>
+                    ) : null}
+                    {computed.length ? (
+                      <Meta>
+                        {computed.join(', ')} {computed.length === 1 ? 'is' : 'are'} computed: a row whose key changes is written as a new row, and the old one
+                        stays.
+                      </Meta>
                     ) : null}
                   </div>
                 ) : (

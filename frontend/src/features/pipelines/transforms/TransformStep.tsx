@@ -14,6 +14,7 @@ import { defaultsOf, type JsonSchema } from '@/components/SchemaForm';
 import { useSaveSpec, type StepHandle } from '../useSaveSpec';
 import { AddFieldEditor, CustomEditor, FilterEditor, FlattenEditor, KeysEditor, RenameEditor, ShapeEditor, SoftDeleteEditor, ValuesEditor, type EditorContext, TruncateEditor, RouteEditor, ComputedEditor } from './editors';
 import { FlinkPreviewPanel } from './FlinkPreviewPanel';
+import { useExpressionChecks } from '@/lib/transforms';
 import { PartitionByEditor, partitionByFor, partitionError, partitionSummary, withPartitionBy, writtenByTable, type PartitionBy } from './PartitionBy';
 import { PreviewPanel } from './PreviewPanel';
 import {
@@ -25,6 +26,10 @@ import {
   FLINK_ONLY_STEPS,
   defaultStep,
   FLINK_TITLE,
+  flinkKey,
+  flinkKeyProblem,
+  expressionKeyBody,
+  expressionKeyProblem,
   moveStep,
   routeTargets,
   NO_CAPS,
@@ -128,10 +133,20 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
   const partitionErr = iceberg ? partitionError(partitionByFor(partitionBy, pipeline.engine), written, routed) : null;
   const shownOptions = iceberg ? deriveSinkOptions(draft.sink.options, sinkSchema, captured, keys, discovery.data?.tables) : draft.sink.options;
   const errors = stepErrors(steps, captured);
+  // On Flink CDC a chosen key column the table doesn't write stops the job (ADR 0010); checked once
+  // the table's columns are known, as the server does.
+  // Expression columns are judged by the server (kind, deterministic, never empty).
+  const exprKeys = flink
+    ? tables.flatMap((t) => steps.filter((s) => s.type === 'computed' && s.table === t.name && s.name && s.expression?.trim()).map((s) => ({ table: t, step: s })))
+    : [];
+  const exprChecks = useExpressionChecks(project.id, pipeline.id, exprKeys.map((e) => expressionKeyBody(e.step, e.table)));
+  const expressionWhy: Record<string, Record<string, string | null>> = {};
+  exprKeys.forEach((e, i) => ((expressionWhy[e.table.name] ??= {})[e.step.name!] = expressionKeyProblem(exprChecks[i]?.data, exprChecks[i]?.failed)));
+  const keyErr = flink ? (tables.map((t) => flinkKeyProblem(t, { source: draft.source, keys }, steps, expressionWhy[t.name])).find(Boolean) ?? null) : null;
   const dirty = JSON.stringify(draft) !== JSON.stringify(spec);
   useImperativeHandle(handle, () => ({
     dirty: () => dirty,
-    commit: async () => (errors.size || partitionErr ? false : dirty ? save({ spec: draft }) : true),
+    commit: async () => (errors.size || partitionErr || keyErr ? false : dirty ? save({ spec: draft }) : true),
   }));
   // The unwrap row (drawn and edited); ordering uses shapeIndex, the server's boundary.
   const shapeAt = steps.findIndex((t) => t.type === 'unwrap');
@@ -388,15 +403,22 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
                 summary={
                   Object.keys(keys).length
                     ? Object.entries(keys)
-                        .map(([t, c]) => `${t} → ${c.join(', ')}`)
+                        .map(([t, c]) => {
+                          // On Flink CDC the columns as the table writes them (a renamed one by its new name).
+                          const info = flink ? tables.find((x) => x.name === t) : undefined;
+                          const shown = info ? flinkKey(info, { source: draft.source, keys }, steps).columns.map((k) => k.written) : [];
+                          return `${t} → ${(shown.length === c.length ? shown : c).join(', ')}`;
+                        })
                         .join(' · ')
                     : 'Primary keys'
                 }
-                technical={expert && !flink ? 'message.key.columns' : undefined}
+                technical={expert ? (flink ? 'primary-keys' : 'message.key.columns') : undefined}
+                error={keyErr ?? undefined}
+                inlineErrors
                 open={open === 'keys'}
                 onToggle={() => setOpen(open === 'keys' ? null : 'keys')}
               >
-                <KeysEditor keys={keys} ctx={ctxFor(steps.length)} onChange={setKeys} />
+                <KeysEditor keys={keys} ctx={ctxFor(steps.length)} onChange={setKeys} expressionWhy={expressionWhy} />
               </StepRow>
             </>
           ) : null}
@@ -428,7 +450,17 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
           <SystemLine>BeziSync names each destination ({spec.sink.naming})</SystemLine>
         </Card>
         {flink ? (
-          <FlinkPreviewPanel spec={draft} steps={steps} tables={tables} pipelineName={pipeline.name} sinkType={pipeline.sink?.type} sinkCaps={sinkCaps} />
+          <FlinkPreviewPanel
+            spec={draft}
+            steps={steps}
+            tables={tables}
+            pipelineName={pipeline.name}
+            sinkType={pipeline.sink?.type}
+            sinkCaps={sinkCaps}
+            sourceType={sourceType}
+            projectId={project.id}
+            pipelineId={pipeline.id}
+          />
         ) : (
           <PreviewPanel projectId={project.id} pipelineId={pipeline.id} spec={draft} steps={steps} tables={tables} blocked={blocked} />
         )}
@@ -441,13 +473,15 @@ export function TransformStep({ pipeline, handle, onBack, onNext }: { pipeline: 
             <span className="text-sm text-bad">
               {errors.size} step{errors.size === 1 ? ' needs' : 's need'} attention.
             </span>
+          ) : keyErr ? (
+            <span className="text-sm text-bad">The primary key needs attention.</span>
           ) : partitionErr ? (
             <span className="text-sm text-bad">Partition by needs attention.</span>
           ) : null}
           <Button
             variant="primary"
-            disabled={errors.size > 0 || Boolean(partitionErr)}
-            why={errors.size ? 'Fix the highlighted steps first.' : 'Fix Partition by first.'}
+            disabled={errors.size > 0 || Boolean(keyErr) || Boolean(partitionErr)}
+            why={errors.size ? 'Fix the highlighted steps first.' : keyErr ? 'Fix the primary key first.' : 'Fix Partition by first.'}
             loading={pending}
             onClick={onNext}
           >
