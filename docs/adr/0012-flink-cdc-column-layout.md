@@ -98,10 +98,12 @@ the new columns) is future work: it needs an exact source position or a rewritte
 Iceberg: `UpdateSchema().AddColumn` (optional, at the end) through the catalog. StarRocks, Doris, OceanBase:
 `ALTER TABLE … ADD COLUMN … NULL` over SQL, waiting for an asynchronous schema change to finish. Elasticsearch:
 nothing (dynamic mapping; `dynamic: strict` or `false` is refused). Kafka: nothing. Paimon: refused with the
-statement to run (Paimon has no writer API in BeziSync). Every add is read back before the start; the audit entry
+statements to run, in preflight already (Paimon has no writer API in BeziSync). Every add is read back before the start; the audit entry
 lists the statements run. The new column's type: an added field and the soft-delete column are `STRING`; a
 computed column is wrapped in a `CAST` to the type its expression returns (D4), so the job and the table agree;
-a source column takes its mapped type.
+a source column (one held back, then released by Start over) takes the type Flink CDC 3.7.0 writes it as, where
+that doesn't depend on digits `information_schema` doesn't give (`domain.FlinkTypeOfSource`: PostgreSQL and MySQL
+integers, text, booleans, floats, dates, PostgreSQL timestamps); any other is refused, never guessed.
 
 ### D4 — Types
 
@@ -177,6 +179,8 @@ Go tests per commit; `make verify`; e2e `32-flink-cdc`, `34-flink-sinks`, `35-fl
 | L20 | Kafka / Elasticsearch | nothing to add; order irrelevant; Elasticsearch `strict` refused | connectors test |
 | L21 | Computed column added to an existing table | wrapped in `CAST` to its type; the table column has it | planner + compiler test |
 | L22 | Column names differing only in case on a case-insensitive destination | matched | planner test |
+| L23 | A held source column released by Start over (StarRocks, Doris) | added with the type Flink CDC writes it as; refused where that type isn't fixed | planner test; e2e 35 |
+| L24 | Paimon table lacking a column at a planned start | blocked in preflight with the ALTER statements | connectors test; e2e 35 |
 
 ## Consequences
 
