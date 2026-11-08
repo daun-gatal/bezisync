@@ -19,6 +19,7 @@ type StateStore interface {
 	LatestAfter(ctx context.Context, after int64) (*Saved, error)
 	List(ctx context.Context) ([]Saved, error)
 	Extract(ctx context.Context, id int64, stateDir string) (string, error)
+	MaxFlinkID(ctx context.Context) (int64, error)
 	Prune(ctx context.Context, keep int) error
 }
 
@@ -360,8 +361,40 @@ func (m *JobManager) extract(ctx context.Context, id int64) (string, error) {
 		}
 		logf("saved position #%d is from column generation %d (now %d): schema coordinator state left out: %v", id, from.Generation, m.Settings.Generation, changed)
 	}
+	if err := m.renumber(ctx, from, dir); err != nil {
+		return "", err
+	}
 	m.update(func(s *Status) { s.RestoredFrom = from })
 	return dir, nil
+}
+
+// renumber starts a restore of a position older than the newest checkpoint the pipeline stored
+// above every checkpoint id it reached (ADR 0014). Flink numbers the restored job's checkpoints from
+// the restored one, and Flink CDC's Iceberg committer skips a checkpoint id it has committed for the
+// writer's job id, which comes back from the restored state: without this, what the restored job
+// writes until it passes the old ids is dropped.
+func (m *JobManager) renumber(ctx context.Context, from *Saved, dir string) error {
+	highest, err := m.Store.MaxFlinkID(ctx)
+	if err != nil {
+		return fmt.Errorf("can't read the saved positions: %w", err)
+	}
+	restored, err := CheckpointID(dir)
+	if err != nil {
+		// A format the helper doesn't know: the stored id says whether the position is older.
+		if from.FlinkID >= highest {
+			return nil
+		}
+		return fmt.Errorf("saved position #%d is older than the newest one, and BeziSync can't renumber it: %w", from.ID, err)
+	}
+	if restored >= highest {
+		return nil
+	}
+	next := highest + checkpointGap
+	if err := SetCheckpointID(dir, next); err != nil {
+		return fmt.Errorf("saved position #%d can't be renumbered: %w", from.ID, err)
+	}
+	logf("saved position #%d is checkpoint %d, older than checkpoint %d: the restored job numbers its checkpoints from %d", from.ID, restored, highest, next)
+	return nil
 }
 
 // placeholderLine is a line whose whole value is a bare ${BZ_…} placeholder, as the compiler
@@ -681,7 +714,13 @@ func (m *JobManager) stop() {
 		logf("savepoint at an unexpected path %s", location)
 		return
 	}
-	if _, err := m.Store.Save(ctx, "savepoint", "stop", 0, m.Settings.StateDir, rel); err != nil {
+	// The savepoint's own checkpoint id, so a later restore of an older position numbers past it.
+	flinkID, err := CheckpointID(filepath.Join(m.Settings.StateDir, rel))
+	if err != nil {
+		logf("reading the savepoint's checkpoint id failed: %v", err)
+		flinkID = 0
+	}
+	if _, err := m.Store.Save(ctx, "savepoint", "stop", flinkID, m.Settings.StateDir, rel); err != nil {
 		logf("storing the savepoint failed (the newest checkpoint is kept): %v", err)
 		return
 	}

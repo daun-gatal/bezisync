@@ -3,6 +3,7 @@ package flinkhelper
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -125,7 +126,7 @@ func (f *fakeFlink) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		dir := filepath.Join(f.stateDir, "sp", "savepoint-"+parts[1][:6])
 		_ = os.MkdirAll(dir, 0o750)
-		_ = os.WriteFile(filepath.Join(dir, "_metadata"), []byte("savepoint"), 0o600)
+		_ = os.WriteFile(filepath.Join(dir, "_metadata"), metaFile(6), 0o600) // checkpoint id 42
 		f.jobs[parts[1]].cancelled = true
 		out(map[string]any{"status": map[string]any{"id": "COMPLETED"}, "operation": map[string]any{"location": "file:" + dir}})
 	case strings.HasSuffix(path, "/subtasks/metrics"):
@@ -233,6 +234,16 @@ func (s *memStore) Extract(_ context.Context, id int64, stateDir string) (string
 		}
 	}
 	return "", fmt.Errorf("saved position %d no longer exists", id)
+}
+
+func (s *memStore) MaxFlinkID(context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var highest int64
+	for _, v := range s.saved {
+		highest = max(highest, v.FlinkID)
+	}
+	return highest, nil
 }
 
 func (s *memStore) Prune(context.Context, int) error {
@@ -377,6 +388,13 @@ func TestJobManagerRunsStoresAndStopsWithSavepoint(t *testing.T) {
 	if k := h.store.kinds(); k[len(k)-1] != "savepoint:stop" {
 		t.Fatalf("stored %v", k)
 	}
+	// ADR 0014: with its own checkpoint id, read from its _metadata.
+	h.store.mu.Lock()
+	last := h.store.saved[len(h.store.saved)-1]
+	h.store.mu.Unlock()
+	if last.FlinkID != 42 {
+		t.Fatalf("savepoint stored with checkpoint id %d", last.FlinkID)
+	}
 }
 
 func TestJobManagerRestoresTheLatestPosition(t *testing.T) {
@@ -448,6 +466,59 @@ func TestJobManagerSwitchesColumnsAtAnOlderPosition(t *testing.T) {
 			h.waitFor(t, "a stored checkpoint", func(s Status) bool { return s.LastStored != nil })
 			if g := h.m.Status().LastStored.Generation; g != tc.now {
 				t.Fatalf("stored with generation %d", g)
+			}
+		})
+	}
+}
+
+// ADR 0014: a restore of a position older than the newest stored checkpoint numbers the restored
+// job's checkpoints past every id the pipeline reached; the newest restores as saved; an older one
+// the helper can't read doesn't start.
+func TestJobManagerRenumbersAnOlderPosition(t *testing.T) {
+	withID := func(id int64) []byte {
+		b := metaFile(6)
+		binary.BigEndian.PutUint64(b[8:], uint64(id)) //nolint:gosec // test ids
+		return b
+	}
+	cases := []struct {
+		name     string
+		restore  string
+		metadata []byte
+		want     int64 // the checkpoint id after; 0: not a Flink file
+		failed   bool
+	}{
+		{name: "older position", restore: "7", metadata: withID(2), want: 40 + checkpointGap},
+		{name: "the newest", restore: "latest", metadata: withID(40), want: 40},
+		{name: "older, unreadable", restore: "7", metadata: []byte("x"), failed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dirOld, dirNew string
+			h := start(t, []string{"postgresql", "iceberg"}, func(m *JobManager, _ *fakeFlink, s *memStore) {
+				m.Settings.Restore = tc.restore
+				dirOld = filepath.Join(m.Settings.StateDir, "cp", "old", "chk-2")
+				dirNew = filepath.Join(m.Settings.StateDir, "cp", "old", "chk-40")
+				for _, d := range []string{dirOld, dirNew} {
+					_ = os.MkdirAll(d, 0o750)
+					_ = os.WriteFile(filepath.Join(d, "_metadata"), tc.metadata, 0o600)
+				}
+				s.saved = []Saved{{ID: 7, Kind: "checkpoint", Reason: "periodic", FlinkID: 2, Path: "cp/old/chk-2"},
+					{ID: 9, Kind: "checkpoint", Reason: "periodic", FlinkID: 40, Path: "cp/old/chk-40"}}
+			})
+			if tc.failed {
+				st := h.waitFor(t, "failed", func(s Status) bool { return s.Phase == PhaseFailed })
+				if _, _, submits, _ := h.f.counts(); st.ErrorCode != "restore" || len(submits) != 0 || !strings.Contains(st.Error, "can't renumber") {
+					t.Fatalf("%+v submits %v", st, submits)
+				}
+				return
+			}
+			h.waitFor(t, "running", func(s Status) bool { return s.Phase == PhaseRunning })
+			dir := dirNew
+			if tc.restore == "7" {
+				dir = dirOld
+			}
+			if got, err := CheckpointID(dir); err != nil || got != tc.want {
+				t.Fatalf("checkpoint id %d, %v; want %d", got, err, tc.want)
 			}
 		})
 	}

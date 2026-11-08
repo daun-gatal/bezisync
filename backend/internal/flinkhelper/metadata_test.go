@@ -148,3 +148,33 @@ func TestForgetCoordinatorStateFile(t *testing.T) {
 		t.Fatal("temp file left")
 	}
 }
+
+func TestCheckpointIDReadAndRewrite(t *testing.T) {
+	dir := t.TempDir()
+	raw := metaFile(6, metaEntry("SchemaOperator", SchemaOperatorUID(metaShort), []byte("s"), 1))
+	if err := os.WriteFile(filepath.Join(dir, "_metadata"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := CheckpointID(dir); err != nil || id != 42 {
+		t.Fatal(id, err)
+	}
+	if err := SetCheckpointID(dir, 1042); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "_metadata"))
+	if id, _ := CheckpointID(dir); id != 1042 || !bytes.Equal(got[16:], raw[16:]) || !bytes.Equal(got[:8], raw[:8]) {
+		t.Fatalf("id %d; only the checkpoint id may change", id)
+	}
+	if err := SetCheckpointID(dir, 0); !errors.Is(err, errMetadata) {
+		t.Error("checkpoint id 0 accepted", err)
+	}
+	for name, bad := range map[string][]byte{"not metadata": []byte("PK\x03\x04 something"), "version 4": metaFile(4)} {
+		_ = os.WriteFile(filepath.Join(dir, "_metadata"), bad, 0o600)
+		if _, err := CheckpointID(dir); !errors.Is(err, errMetadata) {
+			t.Errorf("%s: read %v", name, err)
+		}
+		if err := SetCheckpointID(dir, 5); !errors.Is(err, errMetadata) {
+			t.Errorf("%s: rewrite %v", name, err)
+		}
+	}
+}

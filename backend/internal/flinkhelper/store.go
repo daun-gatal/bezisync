@@ -160,6 +160,14 @@ func (s *Store) LatestAfter(ctx context.Context, after int64) (*Saved, error) {
 	return &l[0], nil
 }
 
+// MaxFlinkID is the highest Flink checkpoint id among every stored state, set aside or not (0
+// when none recorded one).
+func (s *Store) MaxFlinkID(ctx context.Context) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `SELECT coalesce(max(flink_id), 0) FROM `+s.table).Scan(&id)
+	return id, err
+}
+
 // Extract restores a stored state into stateDir at the path it was taken from and returns the
 // directory to restore from.
 func (s *Store) Extract(ctx context.Context, id int64, stateDir string) (string, error) {
