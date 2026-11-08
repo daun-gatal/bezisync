@@ -335,11 +335,186 @@ project policy *Allow advanced properties*; the ones that pass show in preflight
 
 Each destination states what it needs from a pipeline, and the wizard only offers that: the names
 it accepts (with a live preview), its event formats, the event shape it requires, its own
-pipeline settings and the smallest connector size it runs in. Preflight checks the rest. Which
-engine writes each destination is in [Choose an engine](#choose-an-engine): Iceberg and Kafka take
-both, StarRocks, Doris, Fluss, Elasticsearch, Paimon and OceanBase only Flink CDC, the rest only Debezium.
+pipeline settings and the smallest connector size it runs in. Preflight checks the rest; every
+destination's checks and their fixes are in the [preflight check reference](reference/checks.md).
+
+Each destination below opens with the engine that writes it: Kafka and Iceberg take both (Debezium
+by default), StarRocks, Doris, Fluss, Elasticsearch, Paimon and OceanBase only Flink CDC, and the
+rest only Debezium. They are grouped by what they are for: event streams and queues (Kafka to HTTP),
+databases (JDBC, OceanBase), lakehouse tables (Iceberg, Paimon, Fluss), analytics (StarRocks, Doris)
+and search (Elasticsearch). [Choose an engine](#choose-an-engine) compares the engines.
+
+### Kafka
+
+**Engine:** Debezium (default) or Flink CDC (see [Kafka on Flink CDC](#kafka-on-flink-cdc)).
+
+One topic per table (naming `cdc.{schema}.{table}` by default), keyed by the row key so each row
+keeps its order. Presets: **Self-hosted Kafka**, **Confluent Cloud**, **Amazon MSK** (SASL/SCRAM) and
+**Redpanda**. The connection takes the bootstrap servers, the security protocol (`PLAINTEXT`, `SSL`,
+`SASL_PLAINTEXT`, `SASL_SSL`), the SASL mechanism, user and password, and in Expert mode a private CA.
+
+- **Topics** are created at deploy with the connection's partitions and replication factor (1 and 1
+  unless set in Expert mode), unless *Create topics automatically* is off (then they must exist).
+- **Formats** (Destination step): JSON (default), Avro or Protobuf with a schema registry URL
+  (Apicurio or Confluent), or CloudEvents. The Transform step chooses the event shape.
+- **Preflight** reads the broker list, reaches every broker, fetches metadata and signs in, checks
+  that the cluster has as many brokers as the replication factor, and that the user may create
+  topics (the fix gives the `kafka-acls` command).
+- The **Events** tab and the delivery canary read the newest records of each topic. Deleting a
+  pipeline with "drop destinations" deletes its topics.
+
+### Kafka on Flink CDC
+
+**Engine:** Flink CDC; Debezium writes Kafka by default (see [Kafka](#kafka)).
+
+On Flink CDC each table goes to the topic its naming
+pattern gives, created at deploy with the connection's partitions and replication factor; records are keyed
+by the primary key (`{"TableId": …, "id": …}`) and spread by it, and the value is Flink CDC's
+Debezium-style JSON: `before`, `after` and `op`, with a short `source` and no schema or `ts_ms`. Consumers
+written for Debezium's records need to accept that shape; switching a pipeline's engine changes it.
+Only JSON without the schema is available on Flink CDC, and the Transform step's event shape (Row after
+change, delete handling, added fields) doesn't apply there: it is hidden on Flink CDC, and records are
+always the change envelope above.
+
+### Google Pub/Sub
+
+**Engine:** Debezium.
+
+One topic per table in the connection's Google Cloud project, created at deploy unless turned off.
+With *Keep per-row order* (default) each message carries the row key as its ordering key; your
+subscriptions need message ordering turned on to use it. Sign in with a service-account key, or
+leave it empty to use the runtime's own identity (Workload Identity on GKE); the account needs
+`roles/pubsub.editor` (preflight signs in and lists the project's topics, and gives the `gcloud`
+command when it can't). Formats as for Kafka. BeziSync can't read Pub/Sub without taking messages
+from your subscriptions, so the Events tab has nothing to show and there is no delivery canary.
+"Drop destinations" deletes the topics. An emulator host (Expert) is for tests.
+
+### AWS Kinesis
+
+**Engine:** Debezium.
+
+One Kinesis data stream per table in the connection's region, created at deploy (one shard,
+more in Expert mode) unless turned off, records keyed by the row key. Sign in with an
+access key or the runtime's IAM role; the role needs `kinesis:ListStreams`,
+`kinesis:DescribeStreamSummary`, `kinesis:CreateStream`, `kinesis:PutRecord` and `kinesis:PutRecords` (preflight reaches
+the endpoint, signs in and says what is missing). A custom endpoint (Expert) points at a VPC
+endpoint or an emulator. Formats as for Kafka. The Events tab and the delivery canary read the newest
+records; "drop destinations" deletes the streams.
+
+### Amazon SQS and Amazon SNS
+
+**Engine:** Debezium.
+
+- **SQS**: every table of the pipeline goes to the connection's queue, one message per change, so it
+  suits low-volume tables; consumers tell tables apart by `source.table` (or `__table` with the
+  "row after change" shape). A FIFO queue needs content-based deduplication (Debezium sends no
+  deduplication ID). The Events tab *peeks* at messages still waiting (they stay available to your
+  consumers, but each look counts as a receive, so it is off when the queue's dead-letter redrive
+  allows fewer than 10 receives); there is no delivery canary, as consumers may take it first.
+  BeziSync keeps the connector from logging message bodies.
+- **SNS**: one topic per table (`cdc_{schema}_{table}`; names ending in `.fifo` make FIFO topics,
+  created with content-based deduplication and ordered per row key). Topics are created on deploy
+  unless turned off. SNS keeps nothing to read back, so BeziSync subscribes a small queue of its own
+  to each topic (`bz-preview-<topic>`, 15-minute retention) for the Events tab and the delivery
+  canary; deleting the pipeline removes them (and the topics with "drop destinations").
+- Both: keys or the runtime's IAM role; JSON or CloudEvents (SQS and SNS take text); deletes as
+  `__deleted` rows or dropped (they refuse empty "tombstone" messages, so BeziSync turns those off);
+  messages over 256 KiB (SNS, and SQS by default) stop the pipeline.
+
+### Azure Event Hubs
+
+**Engine:** Debezium.
+
+Every table of the pipeline goes to the connection's event hub (it must exist), partitioned by the
+row key so each row keeps its order; consumers tell tables apart by `source.table` (or `__table`).
+Sign in with a namespace connection string (shared access policy with **Send**), without
+`EntityPath`. The Events tab and the delivery canary read the last events of each partition, which
+needs **Listen**: add a second connection string for reading when the first cannot listen
+(preflight warns). Events over the tier's limit (1 MB on Standard) stop the pipeline. Entra ID
+sign-in is not available: Debezium's sink supports connection strings only.
+
+### Apache Pulsar
+
+**Engine:** Debezium.
+
+One persistent topic per table in the connection's tenant and namespace, keyed by the row key. The
+connector produces to the **service URL** (`pulsar://…:6650`, or `pulsar+ssl://…:6651` with an
+optional private CA); BeziSync uses the **admin URL** (`http(s)://…:8080`) to check the namespace,
+create missing topics on deploy, and read the newest messages for the Events tab and the delivery
+canary (`examinemessage`: no subscription, your consumers are untouched). Sign in with a token (JWT,
+or a StreamNative API key). A send that does not complete within 30 seconds fails the batch, which
+Debezium retries, rather than being lost.
+
+### Redis Streams
+
+**Engine:** Debezium.
+
+Every change is appended (`XADD`) to one stream per table, the row key as the entry's first field and
+the event as its value. Presets: **Redis** and **AWS ElastiCache**. The connection takes the host,
+port, an ACL user (Redis 6+), password and TLS. Streams grow with every change: set *Trim streams to
+N entries* (Expert, an approximate `MAXLEN`) to cap them. Preflight reaches Redis, signs in, checks
+the user may write streams, and warns when Redis uses more than 80% of `maxmemory`. The Events tab and
+the delivery canary read the newest entries; "drop destinations" deletes the streams.
+
+### NATS JetStream
+
+**Engine:** Debezium.
+
+One subject per table in a persistent JetStream stream (`CDC` by default). BeziSync creates the stream
+at deploy with the pipeline's subjects, or adds missing subjects to a stream that exists; it never
+changes the stream's limits or retention, so set those on the server. The connection takes the server
+URL and an optional user and password. Preflight reaches the server and checks that JetStream is
+enabled. The Events tab and the delivery canary read the newest messages.
+Deleting a pipeline leaves the stream in place.
+
+### HTTP
+
+**Engine:** Debezium.
+
+Every change event is sent as a `POST` to the connection's URL, one request per event (JSON by
+default; formats as for Kafka). A request that fails or takes longer than the timeout (10 seconds) is
+retried, 5 times 1 second apart; Expert mode changes all three. Preflight reaches the endpoint and
+checks that it answers HTTP; any status other than 2xx is a warning, as deliveries may fail. BeziSync keeps nothing to read back: the Events tab is empty and
+there is no delivery canary.
+
+### Database (JDBC)
+
+**Engine:** Debezium.
+
+Changes land in PostgreSQL, MySQL, MariaDB or SQL Server tables, one per source table, written by
+Debezium's JDBC sink connector (the official images ship the drivers).
+
+- **Tables** are created in the connection's schema (PostgreSQL), the login's default schema (SQL
+  Server, `dbo` unless set otherwise) or the database (MySQL, MariaDB) with the source's key as primary key, and get new columns as the source changes
+  (naming `{schema}_{table}`; dots become `_`). "Use existing tables only" turns that off.
+- **Rows** (Destination step): *upsert by key* (default: the table mirrors the source) or *insert
+  only* (every change is a new row; needs no key). **Deletes** delete the row, or are ignored. With
+  the "row after change" shape, BeziSync turns deletes into what this setting needs.
+- **Keys**: upserts need a key on every table; preflight blocks tables without one until you pick
+  key columns (Transform step) or insert only.
+- **Preflight** reaches the database, signs in, creates and drops a test table, and checks keys and
+  name lengths (63 characters in PostgreSQL, 64 in MySQL, 128 in SQL Server). The **Events** tab
+  and the delivery canary read rows of the tables.
+- Deleting a pipeline with "drop destinations" drops its tables.
+- Across databases, Debezium copies column defaults into the tables it creates: a PostgreSQL
+  `timestamptz DEFAULT now()` column fails to create in MySQL or MariaDB ("Invalid default value").
+  Exclude the column (Tables step) or create the table yourself and choose "Use existing tables only".
+
+### OceanBase
+
+**Engine:** Flink CDC.
+
+One table per source table in a database of a MySQL tenant, created by Flink CDC over
+JDBC with OceanBase Connector/J (in the reference image; no MySQL driver needed). The connection takes the
+host and port (2881, or 2883 through OBProxy), the database (created if missing), the user as
+`user@tenant` (`#cluster` through OBProxy) and its password. The connection is not encrypted (no TLS
+options): keep OceanBase and the runtime on a private network. Times are written in UTC. Only new and renamed
+columns are applied as schema changes; others stop the pipeline. Preflight signs in and creates and drops a
+test table; the Events tab reads rows; "drop destinations" drops the tables.
 
 ### Apache Iceberg
+
+**Engine:** Debezium (default) or Flink CDC (see *On Flink CDC* below).
 
 Changes land in Iceberg tables, one per source table, through an Iceberg REST catalog or AWS Glue.
 Presets: **Iceberg REST catalog** (Polaris, Lakekeeper, Gravitino, Nessie), **Amazon S3 Tables**
@@ -412,11 +587,38 @@ through the same catalogs.
   with the runtime's AWS role (no access keys). Catalog and storage credentials travel to the
   cluster as catalog properties, filled in by BeziSync's helper inside the pipeline's containers.
 
+### Apache Paimon
+
+**Engine:** Flink CDC.
+
+One primary-key Paimon table per source table in a filesystem catalog on S3 or an
+S3-compatible store (MinIO, RustFS, Ceph): the warehouse (`s3://bucket/path`), the database, the endpoint
+and path-style access for S3-compatible stores, and an access key (or the runtime's own credentials).
+Rows are written on each Flink checkpoint. Preflight writes and deletes a test object under the warehouse,
+and blocks a destination that already exists without a primary key (`paimon_keyless_table`: an append
+table can't take updates and deletes).
+BeziSync has no Paimon reader: the Events tab has nothing to show and health stays Unknown (read the
+tables with Flink SQL, Spark or Trino), and deleting a pipeline leaves its tables in place (the report says
+how to drop them). Tables are not partitioned.
+
+### Apache Fluss
+
+**Engine:** Flink CDC.
+
+Changes land in one primary-key table per source table in a Fluss database, created and evolved by
+Flink CDC; Fluss can tier those tables into a lakehouse. The connection takes the coordinators'
+`host:port` list and sign-in (none, or SASL PLAIN). BeziSync has no Fluss client: preflight checks
+that a coordinator can be reached, the Events tab has nothing to show (read the tables with Flink
+SQL or your own client), and deleting a pipeline leaves its tables in place (the report lists them as
+kept). Fluss documents no TLS for Flink CDC: keep it in a network you trust.
+
 ### StarRocks
+
+**Engine:** Flink CDC.
 
 Changes land in one primary-key table per source table in a StarRocks database (`cdc` by default,
 created if missing), written by Flink CDC with Stream Load; schema changes are applied to the
-tables. Only Flink CDC writes StarRocks. The connection takes the FE host, its query port (9030,
+tables. The connection takes the FE host, its query port (9030,
 MySQL protocol) and HTTP port (8030, Stream Load), a user and password, and the replicas of each
 table (1 on a single-node cluster). Flink CDC's StarRocks connector carries its own MySQL JDBC driver
 (Connector/J 5.1.49), so StarRocks needs no driver added to the image.
@@ -436,83 +638,19 @@ table (1 on a single-node cluster). Flink CDC's StarRocks connector carries its 
 
 ### Apache Doris
 
+**Engine:** Flink CDC.
+
 The same as StarRocks for Doris: one unique-key table per source table, written with Stream Load
 (no TLS), read back and dropped over the MySQL protocol, and column defaults left out the same way
 (new columns are held back until the next deploy). Doris needs no MySQL Connector/J. When the
 BE addresses the FE hands out can't be reached from the runtime (Doris in Docker or behind NAT),
 list the BEs under **BE nodes** (`host:HTTP port`) and Flink CDC loads into them directly.
 
-### Apache Fluss
-
-Changes land in one primary-key table per source table in a Fluss database, created and evolved by
-Flink CDC; Fluss can tier those tables into a lakehouse. The connection takes the coordinators'
-`host:port` list and sign-in (none, or SASL PLAIN). BeziSync has no Fluss client: preflight checks
-that a coordinator can be reached, the Events tab has nothing to show (read the tables with Flink
-SQL or your own client), and deleting a pipeline leaves its tables in place (the report lists them as
-kept). Fluss documents no TLS for Flink CDC: keep it in a network you trust.
-
-### Database (JDBC)
-
-Changes land in PostgreSQL, MySQL, MariaDB or SQL Server tables, one per source table, written by
-Debezium's JDBC sink connector (the official images ship the drivers).
-
-- **Tables** are created in the connection's schema (PostgreSQL), the login's default schema (SQL
-  Server, `dbo` unless set otherwise) or the database (MySQL, MariaDB) with the source's key as primary key, and get new columns as the source changes
-  (naming `{schema}_{table}`; dots become `_`). "Use existing tables only" turns that off.
-- **Rows** (Destination step): *upsert by key* (default: the table mirrors the source) or *insert
-  only* (every change is a new row; needs no key). **Deletes** delete the row, or are ignored. With
-  the "row after change" shape, BeziSync turns deletes into what this setting needs.
-- **Keys**: upserts need a key on every table; preflight blocks tables without one until you pick
-  key columns (Transform step) or insert only.
-- **Preflight** reaches the database, signs in, creates and drops a test table, and checks keys and
-  name lengths (63 characters in PostgreSQL, 64 in MySQL, 128 in SQL Server). The **Events** tab
-  and the delivery canary read rows of the tables.
-- Deleting a pipeline with "drop destinations" drops its tables.
-- Across databases, Debezium copies column defaults into the tables it creates: a PostgreSQL
-  `timestamptz DEFAULT now()` column fails to create in MySQL or MariaDB ("Invalid default value").
-  Exclude the column (Tables step) or create the table yourself and choose "Use existing tables only".
-
-### Amazon SQS and Amazon SNS
-
-- **SQS**: every table of the pipeline goes to the connection's queue, one message per change, so it
-  suits low-volume tables; consumers tell tables apart by `source.table` (or `__table` with the
-  "row after change" shape). A FIFO queue needs content-based deduplication (Debezium sends no
-  deduplication ID). The Events tab *peeks* at messages still waiting (they stay available to your
-  consumers, but each look counts as a receive, so it is off when the queue's dead-letter redrive
-  allows fewer than 10 receives); there is no delivery canary, as consumers may take it first.
-  BeziSync keeps the connector from logging message bodies.
-- **SNS**: one topic per table (`cdc_{schema}_{table}`; names ending in `.fifo` make FIFO topics,
-  created with content-based deduplication and ordered per row key). Topics are created on deploy
-  unless turned off. SNS keeps nothing to read back, so BeziSync subscribes a small queue of its own
-  to each topic (`bz-preview-<topic>`, 15-minute retention) for the Events tab and the delivery
-  canary; deleting the pipeline removes them (and the topics with "drop destinations").
-- Both: keys or the runtime's IAM role; JSON or CloudEvents (SQS and SNS take text); deletes as
-  `__deleted` rows or dropped (they refuse empty "tombstone" messages, so BeziSync turns those off);
-  messages over 256 KiB (SNS, and SQS by default) stop the pipeline.
-
-### Azure Event Hubs
-
-Every table of the pipeline goes to the connection's event hub (it must exist), partitioned by the
-row key so each row keeps its order; consumers tell tables apart by `source.table` (or `__table`).
-Sign in with a namespace connection string (shared access policy with **Send**), without
-`EntityPath`. The Events tab and the delivery canary read the last events of each partition, which
-needs **Listen**: add a second connection string for reading when the first cannot listen
-(preflight warns). Events over the tier's limit (1 MB on Standard) stop the pipeline. Entra ID
-sign-in is not available: Debezium's sink supports connection strings only.
-
-### Apache Pulsar
-
-One persistent topic per table in the connection's tenant and namespace, keyed by the row key. The
-connector produces to the **service URL** (`pulsar://…:6650`, or `pulsar+ssl://…:6651` with an
-optional private CA); BeziSync uses the **admin URL** (`http(s)://…:8080`) to check the namespace,
-create missing topics on deploy, and read the newest messages for the Events tab and the delivery
-canary (`examinemessage`: no subscription, your consumers are untouched). Sign in with a token (JWT,
-or a StreamNative API key). A send that does not complete within 30 seconds fails the batch, which
-Debezium retries, rather than being lost.
-
 ### Elasticsearch
 
-**Flink CDC only.** One index per source table (the naming pattern, dots as `_`, lower-cased), one document per row
+**Engine:** Flink CDC.
+
+One index per source table (the naming pattern, dots as `_`, lower-cased), one document per row
 whose id is the primary key: an update replaces it and a delete removes it. Indexes are created by
 their first document with dynamic mappings (decimals arrive as text, NULL fields are left out); create
 an index template beforehand for other mappings. The connection takes the hosts (`http(s)://host:port`),
@@ -521,39 +659,6 @@ compares the version, and writes and deletes a test index (the user needs `creat
 `delete_index`, and automatic index creation must be allowed). The sink takes no CA: use `https` only
 with a certificate from a public CA, otherwise keep the cluster in a network you trust. The Events tab
 reads documents, and deleting a pipeline with "drop destinations" deletes its indexes.
-
-### Apache Paimon
-
-**Flink CDC only.** One primary-key Paimon table per source table in a filesystem catalog on S3 or an
-S3-compatible store (MinIO, RustFS, Ceph): the warehouse (`s3://bucket/path`), the database, the endpoint
-and path-style access for S3-compatible stores, and an access key (or the runtime's own credentials).
-Rows are written on each Flink checkpoint. Preflight writes and deletes a test object under the warehouse,
-and blocks a destination that already exists without a primary key (`paimon_keyless_table`: an append
-table can't take updates and deletes).
-BeziSync has no Paimon reader: the Events tab has nothing to show and health stays Unknown (read the
-tables with Flink SQL, Spark or Trino), and deleting a pipeline leaves its tables in place (the report says
-how to drop them). Tables are not partitioned.
-
-### OceanBase
-
-**Flink CDC only.** One table per source table in a database of a MySQL tenant, created by Flink CDC over
-JDBC with OceanBase Connector/J (in the reference image; no MySQL driver needed). The connection takes the
-host and port (2881, or 2883 through OBProxy), the database (created if missing), the user as
-`user@tenant` (`#cluster` through OBProxy) and its password. The connection is not encrypted (no TLS
-options): keep OceanBase and the runtime on a private network. Times are written in UTC. Only new and renamed
-columns are applied as schema changes; others stop the pipeline. Preflight signs in and creates and drops a
-test table; the Events tab reads rows; "drop destinations" drops the tables.
-
-### Kafka on Flink CDC
-
-Kafka runs on either engine (Debezium is the default). On Flink CDC each table goes to the topic its naming
-pattern gives, created at deploy with the connection's partitions and replication factor; records are keyed
-by the primary key (`{"TableId": …, "id": …}`) and spread by it, and the value is Flink CDC's
-Debezium-style JSON: `before`, `after` and `op`, with a short `source` and no schema or `ts_ms`. Consumers
-written for Debezium's records need to accept that shape; switching a pipeline's engine changes it.
-Only JSON without the schema is available on Flink CDC, and the Transform step's event shape (Row after
-change, delete handling, added fields) doesn't apply there: it is hidden on Flink CDC, and records are
-always the change envelope above.
 
 ## Databases behind a bastion (SSH)
 

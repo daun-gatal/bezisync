@@ -5,6 +5,15 @@ source by `bezisync check-docs` — do not edit by hand. In the UI each check li
 
 ## PostgreSQL
 
+*Read by Debezium and by Flink CDC.*
+
+On Flink CDC, these checks run for it too:
+
+- [Primary keys](#flink-primary-key) (`flink_primary_key`, under Flink CDC)
+- [Whole-row changes](#flink-replica-identity) (`flink_replica_identity`, under Flink CDC)
+- [Replication slots for the copy](#flink-replication-slots) (`flink_replication_slots`, under Flink CDC)
+- [Tables for Flink CDC](#flink-tables-unknown) (`flink_tables_unknown`, under Flink CDC)
+
 <a id="pg-capacity"></a>
 ### `pg_capacity`
 
@@ -185,6 +194,14 @@ SELECT pg_reload_conf();
 
 ## MySQL / MariaDB
 
+*Read by Debezium and by Flink CDC.*
+
+On Flink CDC, these checks run for it too:
+
+- [Primary keys](#flink-primary-key) (`flink_primary_key`, under Flink CDC)
+- [MySQL server ids](#flink-server-ids) (`flink_server_ids`, under Flink CDC)
+- [Tables for Flink CDC](#flink-tables-unknown) (`flink_tables_unknown`, under Flink CDC)
+
 <a id="mysql-binlog"></a>
 ### `mysql_binlog`
 
@@ -344,6 +361,13 @@ SET GLOBAL binlog_row_image = 'FULL';
 
 ## SQL Server
 
+*Read by Debezium and by Flink CDC.*
+
+On Flink CDC, these checks run for it too:
+
+- [Primary keys](#flink-primary-key) (`flink_primary_key`, under Flink CDC)
+- [Tables for Flink CDC](#flink-tables-unknown) (`flink_tables_unknown`, under Flink CDC)
+
 <a id="mssql-agent"></a>
 ### `mssql_agent`
 
@@ -458,6 +482,8 @@ ALTER ROLE db_owner ADD MEMBER {user};
 
 ## MongoDB
 
+*Read by Debezium only.*
+
 <a id="mongo-change-stream"></a>
 ### `mongo_change_stream`
 
@@ -525,6 +551,18 @@ mongosh --eval 'rs.initiate()'
 **MongoDB version**
 
 ## Oracle
+
+*Read by Debezium and by Flink CDC.*
+
+On Flink CDC, these checks run for it too:
+
+- [Table statistics](#flink-oracle-analyze) (`flink_oracle_analyze`, under Flink CDC)
+- [LogMiner flush table](#flink-oracle-flush-table) (`flink_oracle_flush_table`, under Flink CDC)
+- [Oracle for Flink CDC](#flink-oracle-unknown) (`flink_oracle_unknown`, under Flink CDC)
+- [Oracle version](#flink-oracle-version) (`flink_oracle_version`, under Flink CDC)
+- [Primary keys](#flink-primary-key) (`flink_primary_key`, under Flink CDC)
+- [Added tables](#flink-tables-added) (`flink_tables_added`, under Flink CDC)
+- [Tables for Flink CDC](#flink-tables-unknown) (`flink_tables_unknown`, under Flink CDC)
 
 <a id="ora-archive-retention"></a>
 ### `ora_archive_retention`
@@ -776,6 +814,8 @@ ALTER SYSTEM SET UNDO_RETENTION = <seconds>;
 
 ## CockroachDB
 
+*Read by Debezium only.*
+
 <a id="crdb-create"></a>
 ### `crdb_create`
 
@@ -943,6 +983,8 @@ GRANT SELECT ON TABLE {tables} TO {user};
 
 ## Vitess
 
+*Read by Debezium only.*
+
 <a id="vt-binlog-retention"></a>
 ### `vt_binlog_retention`
 
@@ -1086,6 +1128,8 @@ SET PERSIST binlog_expire_logs_seconds = 86400;
 
 ## Google Cloud Spanner
 
+*Read by Debezium only.*
+
 <a id="sp-capture-type"></a>
 ### `sp_capture_type`
 
@@ -1204,6 +1248,8 @@ gcloud spanner databases add-iam-policy-binding {database} --instance={instance}
 
 ## Kafka
 
+*Written by Debezium (the default) and by Flink CDC.*
+
 <a id="kafka-auth"></a>
 ### `kafka_auth`
 
@@ -1273,6 +1319,8 @@ Check security protocol (PLAINTEXT vs SASL_SSL) and that advertised.listeners re
 
 ## HTTP
 
+*Written by Debezium only.*
+
 <a id="http-network-blocked"></a>
 ### `http_network_blocked`
 
@@ -1301,6 +1349,8 @@ Check security protocol (PLAINTEXT vs SASL_SSL) and that advertised.listeners re
 
 ## Google Pub/Sub
 
+*Written by Debezium only.*
+
 <a id="pubsub-auth"></a>
 ### `pubsub_auth`
 
@@ -1313,6 +1363,8 @@ gcloud projects add-iam-policy-binding {project_id} --member=serviceAccount:<sa-
 ```
 
 ## AWS Kinesis
+
+*Written by Debezium only.*
 
 <a id="kinesis-auth"></a>
 ### `kinesis_auth`
@@ -1331,6 +1383,8 @@ Allow kinesis:ListStreams, kinesis:DescribeStreamSummary, kinesis:CreateStream, 
 **Reach Kinesis**
 
 ## Redis Streams
+
+*Written by Debezium only.*
 
 <a id="redis-auth"></a>
 ### `redis_auth`
@@ -1377,6 +1431,8 @@ Allow kinesis:ListStreams, kinesis:DescribeStreamSummary, kinesis:CreateStream, 
 
 ## NATS JetStream
 
+*Written by Debezium only.*
+
 <a id="nats-jetstream"></a>
 ### `nats_jetstream`
 
@@ -1404,6 +1460,8 @@ Allow kinesis:ListStreams, kinesis:DescribeStreamSummary, kinesis:CreateStream, 
 - Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
 
 ## Apache Iceberg
+
+*Written by Debezium (the default) and by Flink CDC.*
 
 <a id="iceberg-auth"></a>
 ### `iceberg_auth`
@@ -1621,6 +1679,8 @@ Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Table
 
 ## StarRocks
 
+*Written by Flink CDC only.*
+
 <a id="starrocks-config"></a>
 ### `starrocks_config`
 
@@ -1688,6 +1748,8 @@ GRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';
 
 ## Apache Doris
 
+*Written by Flink CDC only.*
+
 <a id="doris-config"></a>
 ### `doris_config`
 
@@ -1753,6 +1815,8 @@ GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{da
 
 ## Apache Fluss
 
+*Written by Flink CDC only.*
+
 <a id="fluss-config"></a>
 ### `fluss_config`
 
@@ -1780,6 +1844,8 @@ GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{da
 - Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
 
 ## Elasticsearch
+
+*Written by Flink CDC only.*
 
 <a id="elasticsearch-config"></a>
 ### `elasticsearch_config`
@@ -1866,6 +1932,8 @@ Point the connection at an Elasticsearch 6, 7 or 8 cluster.
 
 ## Apache Paimon
 
+*Written by Flink CDC only.*
+
 <a id="paimon-config"></a>
 ### `paimon_config`
 
@@ -1910,6 +1978,8 @@ Allow the address in BEZISYNC_SSRF_ALLOW_CIDRS, or use another endpoint.
 ```
 
 ## OceanBase
+
+*Written by Flink CDC only.*
 
 <a id="oceanbase-config"></a>
 ### `oceanbase_config`
@@ -1957,6 +2027,8 @@ GRANT CREATE ON *.* TO '{user}';
 - Why: No TCP connection: allow the port from where connectors run (firewall, security group, peering).
 
 ## Database (JDBC)
+
+*Written by Debezium only.*
 
 <a id="jdbc-config"></a>
 ### `jdbc_config`
@@ -2040,6 +2112,8 @@ Choose key columns for them in the Transform step (Message key), or insert only 
 
 ## Amazon SQS
 
+*Written by Debezium only.*
+
 <a id="sqs-auth"></a>
 ### `sqs_auth`
 
@@ -2089,6 +2163,8 @@ aws sqs set-queue-attributes --queue-url <url> --attributes ContentBasedDeduplic
 
 ## Amazon SNS
 
+*Written by Debezium only.*
+
 <a id="sns-auth"></a>
 ### `sns_auth`
 
@@ -2123,6 +2199,8 @@ Allow sqs:CreateQueue, sqs:SetQueueAttributes, sqs:GetQueueAttributes, sqs:Recei
 ```
 
 ## Azure Event Hubs
+
+*Written by Debezium only.*
 
 <a id="eventhubs-auth"></a>
 ### `eventhubs_auth`
@@ -2179,6 +2257,8 @@ Add a connection string with Listen rights for reading.
 - Why: No TCP connection on port 5671 (AMQP over TLS): allow it from where connectors run.
 
 ## Apache Pulsar
+
+*Written by Debezium only.*
 
 <a id="pulsar-admin"></a>
 ### `pulsar_admin`

@@ -6,10 +6,12 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/daun-gatal/bezisync/backend/internal/engine"
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
 )
 
@@ -160,6 +162,15 @@ type Entry struct {
 	Titles  []string `json:"titles"`
 	Whys    []string `json:"whys"`
 	Fixes   []string `json:"fixes"`
+	// Also lists the other sections the check runs for: a Flink CDC check that reads a source
+	// is linked from that source's section too.
+	Also []string `json:"also,omitempty"`
+}
+
+// Connector names the connection type a reference section is about.
+type Connector struct {
+	Kind string `json:"kind"` // source or sink
+	Type string `json:"type"`
 }
 
 // Catalog is the check reference (internal/checks/catalog.json). Every check code the
@@ -167,6 +178,27 @@ type Entry struct {
 type Catalog struct {
 	Sections []string `json:"sections"`
 	Entries  []Entry  `json:"entries"`
+	// Connectors maps the sections about one source or destination to its connection type, so
+	// each says which engines read or write it.
+	Connectors map[string]Connector `json:"connectors"`
+}
+
+// EnginesLine says which engines read or write a connection type (from engine.Supports).
+func EnginesLine(c Connector) string {
+	if c.Kind == "source" {
+		if engine.Supports(engine.FlinkCDC, c.Type, "") {
+			return "Read by Debezium and by Flink CDC."
+		}
+		return "Read by Debezium only."
+	}
+	switch {
+	case engine.FlinkOnlySink(c.Type):
+		return "Written by Flink CDC only."
+	case engine.Supports(engine.FlinkCDC, "postgresql", c.Type):
+		return "Written by Debezium (the default) and by Flink CDC."
+	default:
+		return "Written by Debezium only."
+	}
 }
 
 //go:embed catalog.json
@@ -206,6 +238,25 @@ func Render(c Catalog) string {
 		}
 		sort.Strings(codes)
 		lines = append(lines, "## "+section, "")
+		if conn, ok := c.Connectors[section]; ok {
+			lines = append(lines, "*"+EnginesLine(conn)+"*", "")
+		}
+		var also []string
+		for code, e := range byCode {
+			if slices.Contains(e.Also, section) {
+				also = append(also, code)
+			}
+		}
+		if len(also) > 0 {
+			sort.Strings(also)
+			lines = append(lines, "On Flink CDC, these checks run for it too:", "")
+			for _, code := range also {
+				e := byCode[code]
+				title := strings.Join(e.Titles, " / ")
+				lines = append(lines, "- ["+title+"](#"+strings.ReplaceAll(code, "_", "-")+") (`"+code+"`, under "+e.Section+")")
+			}
+			lines = append(lines, "")
+		}
 		for _, code := range codes {
 			e := byCode[code]
 			anchor := strings.ReplaceAll(code, "_", "-")

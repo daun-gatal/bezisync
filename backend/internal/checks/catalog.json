@@ -3120,7 +3120,13 @@
     "Tables for Flink CDC"
    ],
    "whys": [],
-   "fixes": []
+   "fixes": [],
+   "also": [
+    "PostgreSQL",
+    "MySQL / MariaDB",
+    "SQL Server",
+    "Oracle"
+   ]
   },
   {
    "code": "flink_primary_key",
@@ -3131,6 +3137,12 @@
    "whys": [],
    "fixes": [
     "Pick key columns for these tables in the Transform step (Primary key), or add a primary key in the database."
+   ],
+   "also": [
+    "PostgreSQL",
+    "MySQL / MariaDB",
+    "SQL Server",
+    "Oracle"
    ]
   },
   {
@@ -3144,6 +3156,9 @@
    ],
    "fixes": [
     "ALTER TABLE \"{schema}\".\"{table}\" REPLICA IDENTITY FULL;"
+   ],
+   "also": [
+    "PostgreSQL"
    ]
   },
   {
@@ -3157,6 +3172,9 @@
    ],
    "whys": [
     "While a Flink CDC pipeline copies a PostgreSQL source, each of its readers opens its own temporary replication slot (and WAL sender) next to the pipeline's own one, so a copy needs 1 + parallelism of each. Without enough, the copy stops part-way."
+   ],
+   "also": [
+    "PostgreSQL"
    ]
   },
   {
@@ -3168,6 +3186,9 @@
    "whys": [],
    "fixes": [
     "Create this pipeline again: a new pipeline gets other server ids."
+   ],
+   "also": [
+    "MySQL / MariaDB"
    ]
   },
   {
@@ -3208,6 +3229,9 @@
    ],
    "fixes": [
     "Pause the pipeline and use Positions → Start over (it copies every table again), then deploy. Or capture the new tables in a second pipeline."
+   ],
+   "also": [
+    "Oracle"
    ]
   },
   {
@@ -3222,6 +3246,9 @@
    "fixes": [
     "Run this pipeline on Debezium, which reads this release (Iceberg and the event destinations), or read from an Enterprise, Standard or Express Edition database up to 23ai.",
     "Grant SELECT_CATALOG_ROLE to the connector user."
+   ],
+   "also": [
+    "Oracle"
    ]
   },
   {
@@ -3236,6 +3263,9 @@
    "fixes": [
     "Grant ANALYZE ANY to the connector user inside the PDB (the check shows the statement).",
     "Unlock the tables' statistics with DBMS_STATS.UNLOCK_TABLE_STATS."
+   ],
+   "also": [
+    "Oracle"
    ]
   },
   {
@@ -3249,6 +3279,9 @@
    ],
    "fixes": [
     "In the CDB root, create the table with one row (the check shows the statements), or give the user CREATE TABLE and quota there."
+   ],
+   "also": [
+    "Oracle"
    ]
   },
   {
@@ -3262,6 +3295,9 @@
    ],
    "fixes": [
     "Fix what the source checks report, then run the checks again."
+   ],
+   "also": [
+    "Oracle"
    ]
   },
   {
@@ -3681,5 +3717,111 @@
     "GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}';\nGRANT CREATE ON *.* TO '{user}';"
    ]
   }
- ]
+ ],
+ "connectors": {
+  "PostgreSQL": {
+   "kind": "source",
+   "type": "postgresql"
+  },
+  "MySQL / MariaDB": {
+   "kind": "source",
+   "type": "mysql"
+  },
+  "SQL Server": {
+   "kind": "source",
+   "type": "sqlserver"
+  },
+  "MongoDB": {
+   "kind": "source",
+   "type": "mongodb"
+  },
+  "Oracle": {
+   "kind": "source",
+   "type": "oracle"
+  },
+  "CockroachDB": {
+   "kind": "source",
+   "type": "cockroachdb"
+  },
+  "Vitess": {
+   "kind": "source",
+   "type": "vitess"
+  },
+  "Google Cloud Spanner": {
+   "kind": "source",
+   "type": "spanner"
+  },
+  "Kafka": {
+   "kind": "sink",
+   "type": "kafka"
+  },
+  "HTTP": {
+   "kind": "sink",
+   "type": "http"
+  },
+  "Google Pub/Sub": {
+   "kind": "sink",
+   "type": "pubsub"
+  },
+  "AWS Kinesis": {
+   "kind": "sink",
+   "type": "kinesis"
+  },
+  "Redis Streams": {
+   "kind": "sink",
+   "type": "redis"
+  },
+  "NATS JetStream": {
+   "kind": "sink",
+   "type": "nats"
+  },
+  "Apache Iceberg": {
+   "kind": "sink",
+   "type": "iceberg"
+  },
+  "StarRocks": {
+   "kind": "sink",
+   "type": "starrocks"
+  },
+  "Apache Doris": {
+   "kind": "sink",
+   "type": "doris"
+  },
+  "Apache Fluss": {
+   "kind": "sink",
+   "type": "fluss"
+  },
+  "Elasticsearch": {
+   "kind": "sink",
+   "type": "elasticsearch"
+  },
+  "Apache Paimon": {
+   "kind": "sink",
+   "type": "paimon"
+  },
+  "OceanBase": {
+   "kind": "sink",
+   "type": "oceanbase"
+  },
+  "Database (JDBC)": {
+   "kind": "sink",
+   "type": "jdbc"
+  },
+  "Amazon SQS": {
+   "kind": "sink",
+   "type": "sqs"
+  },
+  "Amazon SNS": {
+   "kind": "sink",
+   "type": "sns"
+  },
+  "Azure Event Hubs": {
+   "kind": "sink",
+   "type": "eventhubs"
+  },
+  "Apache Pulsar": {
+   "kind": "sink",
+   "type": "pulsar"
+  }
+ }
 }
