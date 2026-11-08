@@ -1413,7 +1413,7 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 			configChecks = append(configChecks, routeChecks(found, spec)...)
 		}
 	}
-	configChecks = append(configChecks, transformChecks(ctx, sourceConn, discover, p.Name, spec)...)
+	configChecks = append(configChecks, transformChecks(ctx, sourceConn, discover, p.Engine, p.Name, spec)...)
 	configChecks = append(configChecks, personalDataChecks(ctx, srcDesc, discover, spec)...)
 	if sinkDesc != nil && compiled != nil {
 		cctx := connectors.CompileContext{PipelineID: p.ID.String(), ShortID: p.ShortID(), Name: p.Name, Spec: spec}

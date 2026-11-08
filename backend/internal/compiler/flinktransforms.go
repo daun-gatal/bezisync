@@ -61,7 +61,22 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		cut := map[string]int{}
 		var added, addedNames []string
 		var filters []string
-		for _, t := range spec.Transforms {
+		// The primary key: a source column under its written name, or a column a step adds (ADR 0010).
+		var known []string
+		if cols, ok := columns[table]; ok && len(cols) > 0 {
+			known = cols
+		}
+		key, err := domain.FlinkKey(spec, table, known)
+		if err != nil {
+			return nil, problem.New(422, "column_unknown", err.Error())
+		}
+		keyed := map[int]bool{}
+		for _, k := range key {
+			if k.From != domain.KeyFromColumn {
+				keyed[k.Step] = true
+			}
+		}
+		for i, t := range spec.Transforms {
 			if t.Tables != nil && !slices.Contains(t.Tables, table) {
 				continue
 			}
@@ -87,6 +102,9 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 					return nil, err
 				}
 				sql, err := domain.ComputedSQL(t)
+				if err == nil && keyed[i] {
+					sql, err = domain.KeyColumnSQL(t, sql)
+				}
 				if err != nil {
 					return nil, problem.New(422, "transform_expression", fmt.Sprintf("%s, step %s: %v", table, t.Name, err))
 				}
@@ -98,7 +116,11 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				if t.Value.Kind == "pipeline" {
 					value = c.Name
 				}
-				added = append(added, sqlString(value)+" AS "+sqlIdent(t.Name))
+				sql := sqlString(value)
+				if keyed[i] {
+					sql, _ = domain.KeyColumnSQL(t, sql)
+				}
+				added = append(added, sql+" AS "+sqlIdent(t.Name))
 			case "filter":
 				if t.Type == "filter" && t.Typed() {
 					if err := janinoColumns(t, table); err != nil {
@@ -165,15 +187,9 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 			rule = append(rule, yamlKV{"filter", strings.Join(filters, " AND ")})
 		}
 		if len(keys) > 0 {
-			names := make([]string, len(keys))
-			for i, k := range keys {
-				if to, ok := renames[k]; ok {
-					k = to
-				}
-				if slices.Contains(rules.Exclude, k) {
-					return nil, problem.New(422, "column_unknown", fmt.Sprintf("%s: the key column %s is left out.", table, k))
-				}
-				names[i] = k
+			names := make([]string, len(key))
+			for i, k := range key {
+				names[i] = k.Written
 			}
 			rule = append(rule, yamlKV{"primary-keys", strings.Join(names, ",")})
 		}

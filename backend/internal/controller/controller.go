@@ -609,14 +609,14 @@ func (c *Controller) trackSchema(ctx context.Context, tx pgx.Tx, p *models.Pipel
 	}
 	st := statusCopy(p)
 	st["schema_pending_breaking"] = pending
-	st["transform_drift"] = transformDrift(source.Type, p.Name, spec, current)
+	st["transform_drift"] = transformDrift(p.Engine, source.Type, p.Name, spec, current)
 	p.Status = st
 	return nil
 }
 
 // transformDrift is what the deployed steps would do with the schema just read: messages for
 // steps whose columns are gone, rules that cannot match, fields that would collide.
-func transformDrift(sourceType, pipeline string, spec domain.PipelineSpec, current domain.Schema) []any {
+func transformDrift(engine, sourceType, pipeline string, spec domain.PipelineSpec, current domain.Schema) []any {
 	if !services.NeedsColumns(spec) {
 		return []any{}
 	}
@@ -630,12 +630,16 @@ func transformDrift(sourceType, pipeline string, spec domain.PipelineSpec, curre
 		tc := domain.TableColumns{}
 		for _, name := range names {
 			typ, _ := cols[name]["type"].(string)
-			tc.Columns = append(tc.Columns, domain.PreviewColumn{Name: name, Type: typ})
+			nullable, known := cols[name]["nullable"].(bool)
+			if !known {
+				nullable = true // not recorded: it may be NULL (ADR 0010 key checks fail closed)
+			}
+			tc.Columns = append(tc.Columns, domain.PreviewColumn{Name: name, Type: typ, Nullable: nullable})
 		}
 		tables[table] = tc
 	}
 	out := []any{}
-	for _, f := range domain.TransformFindings(sourceType, pipeline, spec, tables) {
+	for _, f := range domain.TransformFindings(engine, sourceType, pipeline, spec, tables) {
 		out = append(out, map[string]any{"code": f.Code, "fail": f.Fail, "table": f.Table, "step": f.Step, "message": f.Message})
 	}
 	return out

@@ -77,9 +77,9 @@ type TransformFinding struct {
 	Message string `json:"message"`
 }
 
-// TransformFindings checks the steps against the tables' columns. Tables without known
-// columns are skipped.
-func TransformFindings(sourceType, pipeline string, spec PipelineSpec, tables map[string]TableColumns) []TransformFinding {
+// TransformFindings checks the steps against the tables' columns on an engine ("debezium" or
+// "flink-cdc"). Tables without known columns are skipped.
+func TransformFindings(engine, sourceType, pipeline string, spec PipelineSpec, tables map[string]TableColumns) []TransformFinding {
 	var out []TransformFinding
 	names := make([]string, 0, len(tables))
 	for t := range tables {
@@ -132,7 +132,23 @@ func TransformFindings(sourceType, pipeline string, spec PipelineSpec, tables ma
 				}
 			}
 		}
-		if keyCols, ok := spec.Keys[table]; ok {
+		if keyCols, ok := spec.Keys[table]; ok && engine == "flink-cdc" {
+			// The destination's primary key: any column the table writes (ADR 0010); one it doesn't
+			// write stops the job.
+			names := make([]string, len(info.Columns))
+			for i, c := range info.Columns {
+				names[i] = c.Name
+			}
+			if _, err := FlinkKey(spec, table, names); err != nil {
+				out = append(out, TransformFinding{Code: "transform_key_column_unknown", Fail: true, Table: table, Step: -1, Message: err.Error()})
+			}
+			for _, msg := range FlinkKeyProblems(sourceType, spec, table, info) {
+				out = append(out, TransformFinding{Code: "transform_key_column_unfit", Fail: true, Table: table, Step: -1, Message: msg})
+			}
+			for _, msg := range FlinkKeyWarnings(spec, table, info) {
+				out = append(out, TransformFinding{Code: "transform_key_column_nullable", Table: table, Step: -1, Message: msg})
+			}
+		} else if ok {
 			var missing []string
 			for _, c := range keyCols {
 				if _, found := columnOf(info.Columns, c); !found {
@@ -222,11 +238,14 @@ func TransformChecks(spec PipelineSpec, findings []TransformFinding) []checks.Ch
 		group[f.Code] = append(group[f.Code], f.Message)
 	}
 	titles := map[string]string{
-		"transform_field_conflict":     "Transforms: field names",
-		"transform_column_missing":     "Transforms: columns",
-		"transform_rule_type":          "Transforms: filter rules",
-		"transform_key_column_missing": "Transforms: message keys",
-		"transform_computed_input":     "Transforms: computed columns",
+		"transform_field_conflict":      "Transforms: field names",
+		"transform_column_missing":      "Transforms: columns",
+		"transform_rule_type":           "Transforms: filter rules",
+		"transform_key_column_missing":  "Transforms: message keys",
+		"transform_key_column_unknown":  "Transforms: primary keys",
+		"transform_key_column_unfit":    "Transforms: primary keys",
+		"transform_key_column_nullable": "Transforms: primary keys",
+		"transform_computed_input":      "Transforms: computed columns",
 	}
 	for _, code := range order {
 		msgs := group[code]
@@ -238,6 +257,16 @@ func TransformChecks(spec PipelineSpec, findings []TransformFinding) []checks.Ch
 			c.Status, c.Blocking = checks.Fail, true
 			c.Why = "Flink CDC stops the job when a projection reads a column the table lacks, or calls a function on a value of another type."
 			c.Fix = &checks.Fix{Kind: "text", Who: "You", Code: "Pick another column for the computed column, under Transform."}
+		}
+		if code == "transform_key_column_unknown" {
+			c.Status, c.Blocking = checks.Fail, true
+			c.Why = "Flink CDC writes each row by its key: a key column the table doesn't write stops the job."
+			c.Fix = &checks.Fix{Kind: "text", Who: "You", Code: "Pick the key columns again under Transform (Primary key)."}
+		}
+		if code == "transform_key_column_unfit" {
+			c.Status, c.Blocking = checks.Fail, true
+			c.Why = "Flink CDC writes each row by its key, so a key column needs a value on every row that doesn't change on its own."
+			c.Fix = &checks.Fix{Kind: "text", Who: "You", Code: "Pick other key columns under Transform (Primary key), or change the computed column."}
 		}
 		if code == "transform_field_conflict" {
 			c.Status, c.Blocking = checks.Fail, true

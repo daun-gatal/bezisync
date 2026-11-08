@@ -45,7 +45,7 @@ func TablesOf(d connectors.Discovery, captured []string) map[string]domain.Table
 }
 
 // transformChecks are the preflight checks of the steps against the source's tables.
-func transformChecks(ctx context.Context, conn *models.Connection, discover *discoverOnce, pipeline string, spec domain.PipelineSpec) []checks.Check {
+func transformChecks(ctx context.Context, conn *models.Connection, discover *discoverOnce, engine, pipeline string, spec domain.PipelineSpec) []checks.Check {
 	if !NeedsColumns(spec) {
 		return domain.TransformChecks(spec, nil)
 	}
@@ -55,7 +55,7 @@ func transformChecks(ctx context.Context, conn *models.Connection, discover *dis
 			Category: checks.CatDestination, Status: checks.Warn,
 			Message: "Could not read the tables' columns to check the transform steps: " + domain.Truncate(pyErrString(err), 200)})
 	}
-	findings := domain.TransformFindings(conn.Type, pipeline, spec, TablesOf(found, spec.Source.Tables.Include))
+	findings := domain.TransformFindings(engine, conn.Type, pipeline, spec, TablesOf(found, spec.Source.Tables.Include))
 	return domain.TransformChecks(spec, findings)
 }
 

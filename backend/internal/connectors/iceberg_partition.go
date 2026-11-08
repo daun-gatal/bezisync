@@ -404,12 +404,27 @@ func equalityFields(spec domain.PipelineSpec, t TableInfo, opts map[string]any, 
 		}
 		return out
 	}
-	keys := t.PrimaryKey
-	if chosen := spec.Keys[id]; len(chosen) > 0 {
-		keys = chosen
+	if len(spec.Keys[id]) > 0 {
+		// Any column the table writes (ADR 0010); a key column that doesn't resolve fails its own
+		// check (transform_key_column_unknown) and counts here as named, so the table stays keyed.
+		var names []string // nil when the columns weren't read: names are taken as they are
+		for _, c := range t.Columns {
+			names = append(names, c.Name)
+		}
+		var out []string
+		for _, k := range spec.Keys[id] {
+			one := spec
+			one.Keys = map[string][]string{id: {k}}
+			if key, err := domain.FlinkKey(one, id, names); err == nil {
+				out = append(out, key[0].Written)
+			} else {
+				out = append(out, renamedTo(spec, id, k, engine)) // still keyed: it fails its own check
+			}
+		}
+		return out
 	}
-	out := make([]string, len(keys))
-	for i, k := range keys {
+	out := make([]string, len(t.PrimaryKey))
+	for i, k := range t.PrimaryKey {
 		out[i] = renamedTo(spec, id, k, engine)
 	}
 	return out

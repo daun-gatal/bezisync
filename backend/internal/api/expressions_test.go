@@ -19,6 +19,17 @@ func TestExpressionCheckEndpoint(t *testing.T) {
 	if ok.Str("canonical") != "UPPER(`status`) || '-'" || ok.Str("kind") != "text" || ok.At("deterministic") != true || ok.At("error") != nil {
 		t.Fatal(string(ok.Raw))
 	}
+	// ADR 0010: key_problem, given the columns sent as not nullable (absent: they can be NULL).
+	if ok.At("key_problem") == nil {
+		t.Fatal(string(ok.Raw))
+	}
+	strict := []any{map[string]any{"name": "id", "type": "bigint", "nullable": false}, map[string]any{"name": "status", "type": "text", "nullable": false}}
+	for expression, want := range map[string]bool{"upper(status) || '-'": true, "cast(id as string)": true, "status || cast(id / 2 as string)": false, "ifnull(status, 'x')": false, "now()": false} {
+		if r := admin.post(u, map[string]any{"use": "column", "table": "shop.orders", "expression": expression, "columns": strict}).expect(200); (r.At("key_problem") == nil) != want {
+			t.Fatal(expression, string(r.Raw))
+		}
+	}
+	admin.post(u, map[string]any{"use": "column", "table": "shop.orders", "expression": "id", "columns": []any{map[string]any{"name": "id", "type": "bigint", "nullable": "maybe"}}}).expect(422)
 	// Without columns every column is accepted (preflight checks them).
 	if r := admin.post(u, map[string]any{"use": "column", "table": "shop.orders", "expression": "upper(anything)"}).expect(200); r.At("error") != nil {
 		t.Fatal(string(r.Raw))

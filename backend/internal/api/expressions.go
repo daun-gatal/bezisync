@@ -56,6 +56,10 @@ func parseExpressionRequest(v *val.V, o *val.Object) expressionRequest {
 				if g := co.Get("type"); g.Required() {
 					c.Type, _ = v.Constrained(g.Loc, g.Raw, val.StrRules{Max: 200})
 				}
+				c.Nullable = true // absent: it can be NULL
+				if g := co.Get("nullable"); g.Present {
+					c.Nullable, _ = v.Bool(g.Loc, g.Raw)
+				}
 				co.Forbid()
 				req.Columns = append(req.Columns, c)
 			}
@@ -118,6 +122,15 @@ func expressionRoutes(r chi.Router) {
 				cols = []string{}
 			}
 			out = map[string]any{"canonical": expr.Canonical(n), "kind": string(res.Kind), "deterministic": res.Deterministic, "columns": cols, "error": nil}
+			if req.Use == expr.UseColumn {
+				// As a Flink CDC key column (ADR 0010): the rule preflight applies, or null when it fits.
+				var why any
+				if w := domain.ComputedKeyProblem(source.Type, *spec, req.Table, domain.Transform{Type: "computed", Table: req.Table, Expression: expr.Canonical(n)},
+					domain.TableColumns{Columns: req.Columns}); w != "" {
+					why = w
+				}
+				out["key_problem"] = why
+			}
 		case errors.As(err, &e):
 			start := utf16Offset(req.Expression, e.Pos)
 			out["error"] = map[string]any{"message": e.Msg, "offset": start, "length": utf16Offset(req.Expression, e.Pos+e.Len) - start}

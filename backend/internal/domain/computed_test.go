@@ -83,7 +83,7 @@ func TestComputedPreviewAndFindings(t *testing.T) {
 		}
 		res := domain.Preview(domain.PreviewInput{SourceType: "postgresql", Pipeline: "p", Spec: s, Table: "public.orders", Operation: "insert",
 			Columns: cols, PrimaryKey: []string{"id"}})
-		f := domain.TransformFindings("postgresql", "p", s, map[string]domain.TableColumns{"public.orders": {Columns: cols, PrimaryKey: []string{"id"}, KeyKnown: true}})
+		f := domain.TransformFindings("debezium", "postgresql", "p", s, map[string]domain.TableColumns{"public.orders": {Columns: cols, PrimaryKey: []string{"id"}, KeyKnown: true}})
 		return res, f
 	}
 	res, f := run(computed("date_format", colArg("created_at"), textArg("yyyy-MM")))

@@ -2871,6 +2871,18 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "key_problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a column: why it can't be in a Flink CDC primary key, given the columns sent (ADR 0010); null when it can.",
+            "title": "Key Problem"
           }
         },
         "required": [
@@ -2957,6 +2969,11 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "nullable": {
+            "description": "The column can be NULL (in the source, and not in its primary key); absent means it can.",
+            "title": "Nullable",
+            "type": "boolean"
           },
           "type": {
             "maxLength": 200,
