@@ -45,6 +45,8 @@ type Saved struct {
 	TakenAt time.Time `json:"taken_at"`
 	Size    int64     `json:"size"`
 	SHA256  string    `json:"sha256"`
+	// Generation is the column generation of the job that saved it (ADR 0013).
+	Generation int `json:"generation"`
 }
 
 // Store keeps a pipeline's saved positions in the state database, encrypted with the pipeline's
@@ -53,6 +55,8 @@ type Store struct {
 	pool  *pgxpool.Pool
 	table string
 	aead  cipher.AEAD
+	// Generation is recorded with every state this job saves (Settings.Generation).
+	Generation int
 }
 
 // TableName is the state table of a pipeline.
@@ -96,6 +100,11 @@ func OpenStore(ctx context.Context, cfg *pgxpool.Config, shortID, key string) (*
 		pool.Close()
 		return nil, err
 	}
+	// ADR 0013: the column generation each state was saved under (0 before it was recorded).
+	if _, err := pool.Exec(ctx, `ALTER TABLE `+s.table+` ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 0`); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -118,15 +127,15 @@ func (s *Store) Save(ctx context.Context, kind, reason string, flinkID int64, st
 	if len(sealed) > MaxStateBytes {
 		return nil, fmt.Errorf("%w (%d MB)", ErrStateTooLarge, len(sealed)>>20)
 	}
-	out := &Saved{Kind: kind, Reason: reason, FlinkID: flinkID, Path: rel, Size: int64(len(sealed)), SHA256: hex.EncodeToString(sum[:])}
-	err = s.pool.QueryRow(ctx, `INSERT INTO `+s.table+` (kind, reason, flink_id, path, size, sha256, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, taken_at`, kind, reason, flinkID, rel, out.Size, out.SHA256, sealed).Scan(&out.ID, &out.TakenAt)
+	out := &Saved{Kind: kind, Reason: reason, FlinkID: flinkID, Path: rel, Size: int64(len(sealed)), SHA256: hex.EncodeToString(sum[:]), Generation: s.Generation}
+	err = s.pool.QueryRow(ctx, `INSERT INTO `+s.table+` (kind, reason, flink_id, path, size, sha256, payload, generation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, taken_at`, kind, reason, flinkID, rel, out.Size, out.SHA256, sealed, s.Generation).Scan(&out.ID, &out.TakenAt)
 	return out, err
 }
 
 // List returns the stored states, newest first, without payloads.
 func (s *Store) List(ctx context.Context) ([]Saved, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, kind, reason, flink_id, path, taken_at, size, sha256 FROM `+s.table+` ORDER BY id DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT id, kind, reason, flink_id, path, taken_at, size, sha256, generation FROM `+s.table+` ORDER BY id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +143,7 @@ func (s *Store) List(ctx context.Context) ([]Saved, error) {
 	var out []Saved
 	for rows.Next() {
 		var v Saved
-		if err := rows.Scan(&v.ID, &v.Kind, &v.Reason, &v.FlinkID, &v.Path, &v.TakenAt, &v.Size, &v.SHA256); err != nil {
+		if err := rows.Scan(&v.ID, &v.Kind, &v.Reason, &v.FlinkID, &v.Path, &v.TakenAt, &v.Size, &v.SHA256, &v.Generation); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

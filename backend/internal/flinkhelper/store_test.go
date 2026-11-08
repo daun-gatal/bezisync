@@ -78,6 +78,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.Generation = 2 // ADR 0013: recorded with each state this job saves
 	b, err := s.Save(ctx, "checkpoint", "periodic", 4, src, "cp/abc/chk-4")
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +87,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("saved %+v %+v", a, b)
 	}
 	latest, err := s.LatestAfter(ctx, 0)
-	if err != nil || latest.ID != b.ID || latest.FlinkID != 4 || latest.Path != "cp/abc/chk-4" {
+	if err != nil || latest.ID != b.ID || latest.FlinkID != 4 || latest.Path != "cp/abc/chk-4" || latest.Generation != 2 {
 		t.Fatalf("latest = %+v, %v", latest, err)
 	}
 	if after, err := s.LatestAfter(ctx, b.ID); err != nil || after != nil {

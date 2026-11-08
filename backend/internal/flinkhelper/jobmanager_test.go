@@ -1,6 +1,7 @@
 package flinkhelper
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -184,6 +185,8 @@ type memStore struct {
 	extract []int64
 	pruned  int
 	fail    bool
+	// generation is recorded with what Save stores (Store.Generation).
+	generation int
 }
 
 func (s *memStore) Save(_ context.Context, kind, reason string, flinkID int64, stateDir, rel string) (*Saved, error) {
@@ -195,7 +198,7 @@ func (s *memStore) Save(_ context.Context, kind, reason string, flinkID int64, s
 	if _, err := os.Stat(filepath.Join(stateDir, rel, "_metadata")); err != nil {
 		return nil, err
 	}
-	v := Saved{ID: int64(len(s.saved) + 1), Kind: kind, Reason: reason, FlinkID: flinkID, Path: rel}
+	v := Saved{ID: int64(len(s.saved) + 1), Kind: kind, Reason: reason, FlinkID: flinkID, Path: rel, Generation: s.generation}
 	s.saved = append(s.saved, v)
 	return &v, nil
 }
@@ -394,6 +397,59 @@ func TestJobManagerRestoresTheLatestPosition(t *testing.T) {
 	args := strings.Join(submits[0], " ")
 	if !strings.Contains(args, "-s file://"+stateDirFile) || !strings.Contains(args, "-cm no_claim") || !strings.Contains(args, " -n") {
 		t.Fatal(args)
+	}
+}
+
+// ADR 0013: a position saved before the columns changed restores without the schema
+// coordinator's state; one from the current generation restores as saved; one the helper can't
+// change doesn't start.
+func TestJobManagerSwitchesColumnsAtAnOlderPosition(t *testing.T) {
+	uid := SchemaOperatorUID("0123456789ab")
+	withState := metaFile(6, metaEntry("Source", "bz-0123456789ab-source", []byte("offsets"), 1), metaEntry("SchemaOperator", uid, []byte("old schemas"), 1))
+	cases := []struct {
+		name            string
+		saved, now      int
+		metadata        []byte
+		wantCoordinator bool
+		wantFailed      bool
+	}{
+		{name: "older generation", saved: 1, now: 2, metadata: withState},
+		{name: "before generations were recorded", saved: 0, now: 1, metadata: withState},
+		{name: "same generation", saved: 2, now: 2, metadata: withState, wantCoordinator: true},
+		{name: "metadata it can't change", saved: 0, now: 1, metadata: []byte("not flink"), wantFailed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := ""
+			h := start(t, []string{"postgresql", "iceberg"}, func(m *JobManager, _ *fakeFlink, s *memStore) {
+				m.Settings.ShortID, m.Settings.Restore, m.Settings.Generation = "0123456789ab", "latest", tc.now
+				dir = filepath.Join(m.Settings.StateDir, "sp", "savepoint-old")
+				_ = os.MkdirAll(dir, 0o750)
+				_ = os.WriteFile(filepath.Join(dir, "_metadata"), tc.metadata, 0o600)
+				s.saved = []Saved{{ID: 7, Kind: "savepoint", Reason: "stop", Path: "sp/savepoint-old", Generation: tc.saved}}
+				s.generation = tc.now
+			})
+			if tc.wantFailed {
+				st := h.waitFor(t, "failed", func(s Status) bool { return s.Phase == PhaseFailed })
+				if _, _, submits, _ := h.f.counts(); st.ErrorCode != "restore" || len(submits) != 0 || !strings.Contains(st.Error, "before the columns changed") {
+					t.Fatalf("%+v submits %v", st, submits)
+				}
+				return
+			}
+			h.waitFor(t, "running", func(s Status) bool { return s.Phase == PhaseRunning })
+			raw, _ := os.ReadFile(filepath.Join(dir, "_metadata"))
+			if got := bytes.Contains(raw, []byte("old schemas")); got != tc.wantCoordinator {
+				t.Fatalf("coordinator state kept = %v, want %v", got, tc.wantCoordinator)
+			}
+			if !bytes.Contains(raw, []byte("offsets")) {
+				t.Fatal("the source's state was touched")
+			}
+			// What this job saves carries the current generation.
+			h.waitFor(t, "a stored checkpoint", func(s Status) bool { return s.LastStored != nil })
+			if g := h.m.Status().LastStored.Generation; g != tc.now {
+				t.Fatalf("stored with generation %d", g)
+			}
+		})
 	}
 }
 

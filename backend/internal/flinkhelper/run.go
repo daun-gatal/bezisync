@@ -107,6 +107,7 @@ func RunJobManager(layout Layout) error {
 		return nil // stopped before the state database answered
 	}
 	defer store.Close()
+	store.Generation = s.Generation
 	m.Store = store
 	return m.Run(ctx)
 }
