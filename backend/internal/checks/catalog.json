@@ -3241,10 +3241,10 @@
     "Columns written"
    ],
    "whys": [
-    "A Flink CDC job that resumes a saved position keeps writing the columns it started with: a column a step adds is dropped, one it no longer writes stays and goes empty, without an error. A version that changes the columns a running or paused pipeline writes is refused while a saved position is left; after Start over nothing is left to restore, and that start writes the new columns. Rolling back to a version with other columns is the same change. A forced deploy can't skip this check."
+    "A Flink CDC job that resumes a saved position would keep writing the columns it started with: a column a step adds would be dropped, one it no longer writes would stay and go empty, without an error. So when a version changes the columns a running or paused pipeline writes, BeziSync switches columns at the saved position: once the running job has stopped with a savepoint, BeziSync adds the new columns to the destination tables and the job resumes from exactly there writing the new columns, with nothing copied again and no change lost. Rows written before keep the columns they had. Rolling back to a version with other columns is the same switch. A warning means BeziSync couldn't read the saved positions."
    ],
    "fixes": [
-    "Pause the pipeline and use Positions → Start over (copy the tables again, or read changes from now), then deploy: that start writes the new columns, and BeziSync adds them to the destination tables first."
+    "Nothing to do. To also fill the new columns for the rows already written, pause the pipeline and use Positions → Start over (copy the tables again), then deploy."
    ]
   },
   {
@@ -3254,7 +3254,7 @@
     "Destination columns"
    ],
    "whys": [
-    "Iceberg and Paimon write a row's values into the table by position, and Flink CDC 3.7 doesn't change a table that already exists: a job that starts without a saved position into a table whose columns differ writes values into the wrong columns. Before such a start BeziSync reads each destination table, writes its columns in the table's order (a column the pipeline no longer writes stays, empty), and adds the columns the table lacks (Iceberg, StarRocks, Doris, OceanBase; Paimon tables are changed by you). It refuses a start that would empty a key, partition or NOT NULL column, that needs a type it can't name, or whose destination it can't read. BeziSync can't read Fluss tables: an existing one drops the columns it lacks. A forced deploy can't skip this check."
+    "Iceberg and Paimon write a row's values into the table by position, and Flink CDC 3.7 doesn't change a table that already exists: a job that starts without a saved position, or switches columns at one, into a table whose columns differ writes values into the wrong columns. Before such a start BeziSync reads each destination table, writes its columns in the table's order (a column the pipeline no longer writes stays, empty), and adds the columns the table lacks (Iceberg, StarRocks, Doris, OceanBase; Paimon tables are changed by you). It refuses a start that would empty a key, partition or NOT NULL column, that needs a type it can't name, or whose destination it can't read. BeziSync can't read Fluss tables: an existing one drops the columns it lacks. A forced deploy can't skip this check."
    ],
    "fixes": [
     "Change the steps so the pipeline keeps writing these columns, or change the destination tables (or name new ones in the Destination step), then run preflight again."
