@@ -47,3 +47,4 @@ The other options, and why they lost.
 | [0007](0007-partition-by-in-transform.md) | Partition by in the Transform step; no Iceberg change log on Flink CDC | Accepted |
 | [0008](0008-flink-cdc-expressions.md) | Flink CDC expressions: more column functions, and custom expressions BeziSync parses | Accepted |
 | [0009](0009-flink-cdc-destinations.md) | More Flink CDC destinations: Kafka, Elasticsearch, Apache Paimon and OceanBase | Accepted |
+| [0010](0010-flink-cdc-keys-from-steps.md) | Column types in the Destination table, and Flink CDC keys from any written column | Accepted |
