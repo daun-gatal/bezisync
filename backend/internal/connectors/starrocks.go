@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
+	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
 )
 
@@ -53,7 +54,8 @@ func (s *starrocksSink) FlinkSink(conn Resolved, c CompileContext) (*FlinkBlock,
 	}
 	// No driver to add: Flink CDC's StarRocks connector bundles MySQL Connector/J 5.1.49, which it
 	// falls back to when the image carries no newer driver.
-	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SINK_PASSWORD": cfg.Password}, Connector: "starrocks", NoDefaults: true}, nil
+	return &FlinkBlock{Options: o, Env: map[string]string{"BZ_SINK_PASSWORD": cfg.Password}, Connector: "starrocks", NoDefaults: true,
+		SoftDeleteField: domain.FlinkSoftDeleteField("starrocks")}, nil
 }
 
 func (s *starrocksSink) FlinkDestination(conn Resolved, _ CompileContext, routed string) string {

@@ -112,6 +112,12 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   reads it and drops it, with the connection's credentials; catalogs that do not purge on drop
   (RustFS) keep its few bytes of files. BeziSync's catalog, S3 and AWS calls go through the SSRF
   guard; the connector's own (Java) traffic does not.
+- **Flink CDC starts change destination tables (ADR 0012).** Before a Flink CDC start without a
+  saved position the controller reads every destination table and adds the columns the job writes
+  that a table lacks (Iceberg through its catalog; StarRocks, Doris and OceanBase with `ALTER TABLE
+  … ADD COLUMN … NULL`), with the connection's own credentials and through the SSRF guard. It
+  never drops, renames or retypes a column, names every column back-quoted, takes types from a
+  fixed list, and records each statement in the audit log (`pipeline.layout_planned`).
 - **Network exposure.** Terminate TLS in front of the web service, keep the API private to
   it, and restrict who can reach `/metrics` (it requires `BEZISYNC_METRICS_TOKEN`).
 - **Supply chain.** The backend, controller and agent are one static Go binary on a distroless

@@ -136,7 +136,7 @@ var fatal = []struct {
 	code, text string
 }{
 	{regexp.MustCompile(`Unable to coerce data record`), "destination_mismatch",
-		"The destination tables no longer match what this pipeline writes (a destination was renamed or changed). Start over to copy the tables again."},
+		"The destination tables no longer match what this pipeline writes (a destination was renamed or changed). Pause the pipeline and use Positions → Start over: BeziSync reads the tables first and writes their columns in place, or says what to change."},
 	{regexp.MustCompile(`TableNotExistException|NoSuchTableException|Table does not exist|Unknown table`), "destination_missing",
 		"A destination table the saved position refers to is gone. Start over to create and copy the tables again."},
 	{regexp.MustCompile(`Before data is null for UPDATE/DELETE event`), "replica_identity",
@@ -213,6 +213,9 @@ func (m *JobManager) lifecycle(ctx context.Context) {
 		m.fail(PhaseFailed, "restore", err.Error())
 		return
 	}
+	if !m.mayStart(restore) {
+		return
+	}
 	attempt := 0
 	backoff := 30 * time.Second
 	for ctx.Err() == nil {
@@ -257,6 +260,9 @@ func (m *JobManager) lifecycle(ctx context.Context) {
 				m.fail(PhaseFailed, "restore", err.Error())
 				return
 			}
+			if !m.mayStart(restore) {
+				return
+			}
 		case outcomeFinished:
 			<-ctx.Done()
 			return
@@ -287,6 +293,18 @@ func (m *JobManager) waitForTaskManagers(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+}
+
+// mayStart reports whether the job may be submitted from restore: a start without a saved
+// position only when BeziSync planned one (Settings.FreshStart, ADR 0012); otherwise the helper
+// stops with no_position instead of starting fresh into tables whose columns it can't see.
+func (m *JobManager) mayStart(restore string) bool {
+	if restore != "" || m.Settings.FreshStart || m.Settings.Restore != "latest" {
+		return true
+	}
+	m.fail(PhaseFailed, "no_position", "There is no saved position to restore, and BeziSync didn't plan a start without one: "+
+		"starting fresh could write the destination tables' columns into the wrong places. Restore a saved position from Positions, or Start over.")
+	return false
 }
 
 // restorePoint resolves Settings.Restore to a directory to restore from ("" = start fresh).

@@ -20,8 +20,19 @@ import (
 // copied by the first copy is an insert too: Flink CDC doesn't tell them apart.
 var flinkEventTypes = map[string][]string{"insert": {"+I"}, "snapshot": {"+I"}, "update": {"-U", "+U"}, "delete": {"-D"}}
 
+// flinkItem is one column a table's projection writes: its name in the destination and the
+// expression that gives it, with what the layout planner needs to know about it (ADR 0012).
+type flinkItem struct {
+	sql string
+	col domain.FlinkColumn
+}
+
+// flinkTransforms renders the transform rules. layouts (destination → the stored layout, ADR
+// 0012) writes a table's projection column by column in the layout's order; nil compiles as
+// before. produced, when not nil, receives each table's columns in the order the spec writes them.
 func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, source connectors.Resolved, columns, defaults map[string][]string,
-	newColumns string, sink *connectors.FlinkBlock) ([]yamlMap, error) {
+	newColumns string, sink *connectors.FlinkBlock, destinations map[string]string, layouts map[string][]domain.LayoutColumn,
+	produced map[string][]domain.FlinkColumn) ([]yamlMap, error) {
 	spec := c.Spec
 	if sink.NoDefaults && newColumns != "hold" {
 		return nil, problem.New(422, "engine_settings", "This destination refuses the column defaults Flink CDC copies from the source, "+
@@ -38,6 +49,9 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		case t.Type == "soft_delete":
 			// A delete becomes a row marked with its change type (T4).
 			field := domain.SoftDeleteField["flink-cdc"]
+			if sink.SoftDeleteField != "" {
+				field = sink.SoftDeleteField
+			}
 			for _, table := range spec.Source.Tables.Include {
 				if slices.Contains(columns[table], field) {
 					return nil, problem.New(422, "transform_field_conflict", fmt.Sprintf("Step %d: %s already has a column %s, which the soft delete would overwrite (field name duplication).", i+1, table, field))
@@ -60,6 +74,7 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		renames := map[string]string{}
 		cut := map[string]int{}
 		var added, addedNames []string
+		var addedItems []flinkItem
 		var filters []string
 		// The primary key: a source column under its written name, or a column a step adds (ADR 0010).
 		var known []string
@@ -110,6 +125,8 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				}
 				added = append(added, sql+" AS "+sqlIdent(t.Name))
 				addedNames = append(addedNames, t.Name)
+				addType, addCast := domain.FlinkTypeOfKind(string(computedKind(t)))
+				addedItems = append(addedItems, flinkItem{sql, domain.FlinkColumn{Name: t.Name, AddType: addType, AddCast: addCast}})
 			case "add_field":
 				addedNames = append(addedNames, t.Name)
 				value := t.Value.Text
@@ -121,6 +138,7 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 					sql, _ = domain.KeyColumnSQL(t, sql)
 				}
 				added = append(added, sql+" AS "+sqlIdent(t.Name))
+				addedItems = append(addedItems, flinkItem{sql, domain.FlinkColumn{Name: t.Name, Type: "VARCHAR"}})
 			case "filter":
 				if t.Type == "filter" && t.Typed() {
 					if err := janinoColumns(t, table); err != nil {
@@ -143,6 +161,7 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		// columns reach the destination.
 		explicit := newColumns == "hold" || len(rules.Exclude) > 0 || len(renames) > 0 || len(cut) > 0
 		var projection []string
+		var items []flinkItem
 		if explicit {
 			cols, ok := columns[table]
 			if !ok || len(cols) == 0 {
@@ -162,24 +181,61 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 				if to, ok := renames[col]; ok {
 					name = to
 				}
+				var expr string
 				switch {
 				case cut[col] > 0:
-					projection = append(projection, fmt.Sprintf("SUBSTR(%s, 1, %d) AS %s", sqlIdent(col), cut[col], sqlIdent(name)))
+					expr = fmt.Sprintf("SUBSTR(%s, 1, %d)", sqlIdent(col), cut[col])
+					projection = append(projection, expr+" AS "+sqlIdent(name))
 				case sink.NoDefaults && slices.Contains(defaults[table], col):
 					// An expression carries no default (a plain or renamed column keeps the source's).
-					projection = append(projection, "CASE WHEN TRUE THEN "+sqlIdent(col)+" END AS "+sqlIdent(name))
+					expr = "CASE WHEN TRUE THEN " + sqlIdent(col) + " END"
+					projection = append(projection, expr+" AS "+sqlIdent(name))
 				case name != col:
-					projection = append(projection, sqlIdent(col)+" AS "+sqlIdent(name))
+					expr = sqlIdent(col)
+					projection = append(projection, expr+" AS "+sqlIdent(name))
 				default:
-					projection = append(projection, sqlIdent(col))
+					expr = sqlIdent(col)
+					projection = append(projection, expr)
 				}
+				items = append(items, flinkItem{expr, domain.FlinkColumn{Name: name, Source: col}})
 			}
 		} else {
 			projection = []string{"*"}
+			for _, col := range columns[table] {
+				items = append(items, flinkItem{sqlIdent(col), domain.FlinkColumn{Name: col, Source: col}})
+			}
+		}
+		items = append(items, addedItems...)
+		for _, p := range sink.Projection {
+			at := strings.LastIndex(p, " AS `")
+			if at < 0 {
+				return nil, fmt.Errorf("compiler: destination projection %q has no name", p)
+			}
+			items = append(items, flinkItem{p[:at], domain.FlinkColumn{Name: strings.Trim(p[at+4:], "`"), Type: "VARCHAR"}})
+		}
+		for i := range items {
+			items[i].col.Key = slices.ContainsFunc(key, func(k domain.FlinkKeyColumn) bool { return k.Written == items[i].col.Name })
+		}
+		if produced != nil {
+			cols := make([]domain.FlinkColumn, len(items))
+			for i, it := range items {
+				cols[i] = it.col
+			}
+			produced[table] = cols
 		}
 		projection = append(append(projection, added...), sink.Projection...)
+		layout := layouts[destinations[table]]
+		if layout != nil {
+			if !explicit && len(columns[table]) == 0 {
+				return nil, problem.New(422, "columns_unknown", fmt.Sprintf("BeziSync could not read the columns of %s, which it needs to write them in the destination's order.", table))
+			}
+			var err error
+			if projection, err = layoutProjection(table, layout, items); err != nil {
+				return nil, err
+			}
+		}
 		keys := spec.Keys[table]
-		if !explicit && len(added) == 0 && len(filters) == 0 && len(keys) == 0 && len(sink.Projection) == 0 && sink.Converter == "" {
+		if layout == nil && !explicit && len(added) == 0 && len(filters) == 0 && len(keys) == 0 && len(sink.Projection) == 0 && sink.Converter == "" {
 			continue // written as it is
 		}
 		rule := yamlMap{{"source-table", src.FlinkTableID(source, table)}, {"projection", strings.Join(projection, ", ")}}
@@ -199,6 +255,62 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 		out = append(out, rule)
 	}
 	return out, nil
+}
+
+// layoutProjection writes a table's columns in the stored layout's order (ADR 0012): a column the
+// table writes by its expression (cast where the layout says), a retired one, or one this table
+// doesn't write (another table routed to the same destination does), as an empty value of its
+// type; what the layout doesn't name goes at the end.
+func layoutProjection(table string, layout []domain.LayoutColumn, items []flinkItem) ([]string, error) {
+	var out []string
+	used := map[string]bool{}
+	for _, l := range layout {
+		i := slices.IndexFunc(items, func(it flinkItem) bool { return strings.EqualFold(it.col.Name, l.Name) })
+		if l.Retired || i < 0 {
+			if l.Type == "" {
+				return nil, problem.New(422, "flink_layout_type", fmt.Sprintf("%s doesn't write %s, and BeziSync doesn't know the type to write it empty with: start the pipeline over.", table, l.Name))
+			}
+			out = append(out, "CAST(NULL AS "+l.Type+") AS "+sqlIdent(l.Name))
+			continue
+		}
+		used[strings.ToLower(items[i].col.Name)] = true
+		sql := items[i].sql
+		if l.Cast {
+			sql = "CAST(" + sql + " AS " + l.Type + ")"
+		}
+		if sql == sqlIdent(l.Name) {
+			out = append(out, sql)
+		} else {
+			out = append(out, sql+" AS "+sqlIdent(l.Name))
+		}
+	}
+	for _, it := range items {
+		if !used[strings.ToLower(it.col.Name)] {
+			if it.sql == sqlIdent(it.col.Name) {
+				out = append(out, it.sql)
+			} else {
+				out = append(out, it.sql+" AS "+sqlIdent(it.col.Name))
+			}
+		}
+	}
+	return out, nil
+}
+
+// computedKind is the kind a computed column's expression returns, read without the table's
+// columns ("unknown" when it follows them).
+func computedKind(t domain.Transform) expr.Kind {
+	n := domain.ComputedTree(t)
+	if t.Expression != "" {
+		var err error
+		if n, err = domain.ExpressionOf(t); err != nil {
+			return expr.Unknown
+		}
+	}
+	res, err := expr.Check(n, expr.Env{}, expr.UseColumn)
+	if err != nil {
+		return expr.Unknown
+	}
+	return res.Kind
 }
 
 func maskedColumns(spec domain.PipelineSpec) []string {

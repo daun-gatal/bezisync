@@ -557,7 +557,8 @@ through the same catalogs.
   ones Iceberg allows for the type the engine writes: no buckets of a true/false or
   floating-point value, no truncation of a date. It is applied when the table is created; a table
   that already exists keeps its partitioning, so preflight blocks asking it for other partitioning
-  (`iceberg_partition_existing`: keep its own, or Start over, dropping destinations).
+  (`iceberg_partition_existing`: keep its own, or drop the table with another engine on the
+  catalog and Start over so the pipeline creates it).
   - **Upserted tables are partitioned only by key columns** (`iceberg_partition_key`). Rows are
     upserted by writing deletes on the key, and Iceberg applies a delete only to rows in its own
     partition: partitioned by a column outside the key (an `updated_at` day, a `status`), an update
@@ -1029,6 +1030,34 @@ asks more of the database than Debezium Server does, and reads less:
 Oracle. MongoDB, Vitess and TiDB have none (only Flink SQL readers, which can't apply schema changes
 or routes), and its OceanBase connector writes rather than reads, so these stay on Debezium (TiDB and
 OceanBase have no BeziSync connection type).
+
+**Changing columns.** Iceberg and Paimon write a row's values into a table by position, and Flink CDC
+3.7 never changes a table that already exists, so a job writing other columns than its table has would
+put values into the wrong columns. BeziSync keeps that from happening:
+
+- **While the pipeline runs**, columns the source adds, renames, widens or drops reach the destination
+  as Flink CDC applies them (with *Apply them*): an added column at the end, a renamed one as a new
+  column with the old one kept empty, a dropped one kept empty.
+- **A version that changes the columns the pipeline writes** (a step that adds, computes or removes a
+  column, keeping deleted rows, leaving a column out, rolling back to a version with other columns)
+  can't be deployed while the pipeline would resume a saved position: Flink CDC keeps writing the
+  columns it started with and would drop the change without a word. Preflight blocks it
+  (`flink_columns_changed`, even when forced): pause the pipeline, use Positions → Start over, then
+  deploy.
+- **A start without a saved position** (the first one, one after Start over) is planned: BeziSync reads
+  every destination table that exists, writes its columns in the table's order (a column the pipeline
+  no longer writes stays, empty for new rows), and adds the columns a table lacks at its end before the
+  start (Iceberg, StarRocks, Doris and OceanBase; Paimon tables you change yourself: preflight gives the
+  statement). It refuses a start that would empty a key, partition or NOT NULL column, needs a type it
+  can't name, or whose table it can't read (`flink_destination_columns`). Where it had to fix the order,
+  new source columns wait for the next deploy. BeziSync can't read Fluss tables: preflight warns that an
+  existing one drops the columns it doesn't have.
+- **The helper never starts fresh on its own.** With nothing to restore and no planned start (a crash
+  before the first saved position, state too large to save), the pipeline stops with `no_position`
+  instead: Restore a saved position or Start over.
+- A saved position from before the last Start over can't be restored (`position_before_layout`): its job
+  wrote other columns.
+- **StarRocks** reserves `__op`, so *Keep deleted rows* writes the change type into `__bz_op` there.
 
 **Operating it.** The Overview shows the cluster: the job, its JobManager and TaskManagers, the
 last saved position and where the pipeline started from. Health comes from the job itself and is

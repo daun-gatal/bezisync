@@ -474,3 +474,14 @@ describe('flinkWords', () => {
     expect(keyChoices(orders, spec, [], true, 'postgresql').find((c) => c.value === 'status')?.why).toBe('Left out of the table.');
   });
 });
+
+import { flinkSoftDeleteField } from '../model';
+
+describe('flinkSoftDeleteField', () => {
+  // ADR 0012 E8: StarRocks reserves __op, so keeping deleted rows writes __bz_op there.
+  it('names the soft-delete column per destination', () => {
+    expect(flinkSoftDeleteField('starrocks')).toBe('__bz_op');
+    expect(flinkSoftDeleteField('iceberg')).toBe('__op');
+    expect(flinkSoftDeleteField(undefined)).toBe('__op');
+  });
+});

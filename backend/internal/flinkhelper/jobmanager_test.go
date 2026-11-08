@@ -399,13 +399,30 @@ func TestJobManagerRestoresTheLatestPosition(t *testing.T) {
 
 func TestJobManagerStartsFreshAfterAStartOver(t *testing.T) {
 	h := start(t, []string{"mysql", "starrocks"}, func(m *JobManager, _ *fakeFlink, s *memStore) {
-		m.Settings.Restore, m.Settings.RestoreAfter = "latest", 7
+		m.Settings.Restore, m.Settings.RestoreAfter, m.Settings.FreshStart = "latest", 7, true
 		s.saved = []Saved{{ID: 7, Kind: "savepoint", Path: "sp/old"}}
 	})
 	st := h.waitFor(t, "running", func(s Status) bool { return s.Phase == PhaseRunning })
 	_, _, submits, _ := h.f.counts()
 	if st.RestoredFrom != nil || strings.Contains(strings.Join(submits[0], " "), "-s ") {
 		t.Fatalf("restored a position set aside by Start over: %+v %v", st.RestoredFrom, submits[0])
+	}
+}
+
+// ADR 0012 L14/L15: with nothing to restore the helper starts a job fresh only when BeziSync
+// planned that start; otherwise it stops with no_position and submits nothing.
+func TestJobManagerNeverStartsFreshUnplanned(t *testing.T) {
+	for name, saved := range map[string][]Saved{"nothing saved": nil, "only positions set aside": {{ID: 7, Kind: "savepoint", Path: "sp/old"}}} {
+		t.Run(name, func(t *testing.T) {
+			h := start(t, []string{"postgresql", "iceberg"}, func(m *JobManager, _ *fakeFlink, s *memStore) {
+				m.Settings.Restore, m.Settings.RestoreAfter = "latest", 7
+				s.saved = saved
+			})
+			st := h.waitFor(t, "failed", func(s Status) bool { return s.Phase == PhaseFailed })
+			if _, _, submits, _ := h.f.counts(); st.ErrorCode != "no_position" || len(submits) != 0 || !strings.Contains(st.Error, "Start over") {
+				t.Fatalf("%+v submits %v", st, submits)
+			}
+		})
 	}
 }
 

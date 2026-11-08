@@ -1533,7 +1533,7 @@ ALTER TABLE … SET IDENTIFIER FIELDS <key columns> (Spark), or drop the table s
 Fix:
 
 ```
-Drop them and let the pipeline create them with the table's key (Positions → Start over, dropping destinations), or write them with a Debezium pipeline, which appends every change correctly.
+Drop them (with Spark, Trino or another engine on the same catalog) and use Positions → Start over (copy the tables again), so the pipeline creates them with the table's key, or write them with a Debezium pipeline, which appends every change correctly.
 ```
 
 <a id="iceberg-key-columns"></a>
@@ -1598,7 +1598,7 @@ Run preflight again once the source is reachable.
 Fix:
 
 ```
-Partition by what the table has, or drop the table (Positions → Start over, dropping destinations) so the pipeline creates it again.
+Partition by what the table has, or drop the table (with Spark, Trino or another engine on the same catalog), then Positions → Start over (copy the tables again) so the pipeline creates it.
 ```
 
 Fix:
@@ -1623,7 +1623,7 @@ In the Transform step (Partition by), partition these tables by their key column
 Fix:
 
 ```
-Drop and recreate them (Positions → Start over, dropping destinations). Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates (SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1).
+Drop them (with Spark, Trino or another engine on the same catalog), then Positions → Start over (copy the tables again) so the pipeline creates them. Outside BeziSync, a data engineer can instead give the table identifier fields that cover its partition columns and remove the duplicates (SELECT <key>, count(*) FROM <table> GROUP BY <key> HAVING count(*) > 1).
 ```
 
 Fix:
@@ -2793,6 +2793,32 @@ Fix:
 
 ```
 Use the automatic shape, or smaller TaskManagers, in Review → Size.
+```
+
+<a id="flink-columns-changed"></a>
+### `flink_columns_changed`
+
+**Columns written**
+
+- Why: A Flink CDC job that resumes a saved position keeps writing the columns it started with: a column a step adds is dropped, one it no longer writes stays and goes empty, without an error. A version that changes the columns a running or paused pipeline writes is refused while a saved position is left; after Start over nothing is left to restore, and that start writes the new columns. Rolling back to a version with other columns is the same change. A forced deploy can't skip this check.
+
+Fix:
+
+```
+Pause the pipeline and use Positions → Start over (copy the tables again, or read changes from now), then deploy: that start writes the new columns, and BeziSync adds them to the destination tables first.
+```
+
+<a id="flink-destination-columns"></a>
+### `flink_destination_columns`
+
+**Destination columns**
+
+- Why: Iceberg and Paimon write a row's values into the table by position, and Flink CDC 3.7 doesn't change a table that already exists: a job that starts without a saved position into a table whose columns differ writes values into the wrong columns. Before such a start BeziSync reads each destination table, writes its columns in the table's order (a column the pipeline no longer writes stays, empty), and adds the columns the table lacks (Iceberg, StarRocks, Doris, OceanBase; Paimon tables are changed by you). It refuses a start that would empty a key, partition or NOT NULL column, that needs a type it can't name, or whose destination it can't read. BeziSync can't read Fluss tables: an existing one drops the columns it lacks. A forced deploy can't skip this check.
+
+Fix:
+
+```
+Change the steps so the pipeline keeps writing these columns, or change the destination tables (or name new ones in the Destination step), then run preflight again.
 ```
 
 <a id="flink-kubernetes-services"></a>

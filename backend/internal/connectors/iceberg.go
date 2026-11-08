@@ -721,6 +721,12 @@ func (s *icebergSink) CheckPipeline(ctx context.Context, conn Resolved, c Compil
 		c := checks.Check{Code: "iceberg_existing_tables", Title: "Existing tables", Status: checks.Pass, Category: checks.CatDestination,
 			Message: fmt.Sprintf("%s already %s; the pipeline writes into %s, adding new columns, with %s partitioning.", strings.Join(existing, ", "),
 				pluralVerb(len(existing), "exists", "exist"), pluralVerb(len(existing), "it", "them"), pluralVerb(len(existing), "its", "their"))}
+		if facts.FlinkCDC {
+			// Flink CDC writes an existing table by position and never changes it (ADR 0012): what
+			// it writes is planned and checked under Destination columns.
+			c.Message = fmt.Sprintf("%s already %s, with %s partitioning; Destination columns says how the pipeline writes %s.", strings.Join(existing, ", "),
+				pluralVerb(len(existing), "exists", "exist"), pluralVerb(len(existing), "its", "their"), pluralVerb(len(existing), "it", "them"))
+		}
 		if len(noIdentity) > 0 {
 			c.Status = checks.Warn
 			c.Message = fmt.Sprintf("%s %s no row identity: changes are appended to %s instead of upserted.", strings.Join(noIdentity, ", "),

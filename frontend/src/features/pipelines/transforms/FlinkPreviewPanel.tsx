@@ -5,7 +5,7 @@ import { Select } from '@/components/ui/select';
 import type { SinkCaps } from '@/lib/connections';
 import { sinkDestinationFor, type FullSpec, type TransformStep } from '../spec';
 import { useExpressionCheck } from '@/lib/transforms';
-import { flinkColumns, KIND_NAMES, summarize, type FlinkColumn, type FlinkWords, type TableInfo } from './model';
+import { flinkColumns, flinkSoftDeleteField, KIND_NAMES, summarize, type FlinkColumn, type FlinkWords, type TableInfo } from './model';
 
 /**
  * What a Flink CDC pipeline writes: for each captured table, the destination table and its
@@ -107,7 +107,7 @@ export function FlinkPreviewPanel({
             ))}
             {keepsDeletes ? (
               <tr className="border-t border-line align-top">
-                <td className="py-1.5 pr-3 font-mono">__op</td>
+                <td className="py-1.5 pr-3 font-mono">{flinkSoftDeleteField(sinkType)}</td>
                 <td className="py-1.5 pr-3">text</td>
                 <td className="py-1.5 text-muted">{events ? 'change type: a delete is sent as an insert marked -D' : 'change type: deleted rows stay, marked -D'}</td>
               </tr>

@@ -51,6 +51,10 @@ type Settings struct {
 	// RestoreAfter: saved positions up to this id were set aside (Start over) and are never
 	// restored by "latest".
 	RestoreAfter int64 `json:"restore_after"`
+	// FreshStart: BeziSync planned a start without a saved position (ADR 0012: the destination
+	// tables were read and the job writes their columns). Without it the helper never starts a
+	// job fresh: with nothing to restore it stops with no_position.
+	FreshStart bool `json:"fresh_start,omitempty"`
 	// AllowNonRestored drops saved state of operators the new pipeline no longer has (a removed
 	// table).
 	AllowNonRestored bool `json:"allow_non_restored"`

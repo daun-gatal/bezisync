@@ -57,6 +57,9 @@ type FlinkBlock struct {
 	// the source writes them (StarRocks, Doris). Every column that has one is written as an
 	// expression, which carries none, so new columns must be held back until a deploy.
 	NoDefaults bool
+	// SoftDeleteField: the column "keep deleted rows" writes the change type into, when it isn't
+	// __op (StarRocks reserves __op: domain.FlinkSoftDeleteField).
+	SoftDeleteField string
 }
 
 // FlinkEndpoint is where the pipeline reaches the source: the connection's host, or the SSH

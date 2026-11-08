@@ -80,3 +80,6 @@ export const SPANNER_REST_FROM_RUNNER = 'http://bezisync-e2e-k3s:30920/v1/projec
 export const ELASTICSEARCH = { hosts: `http://elasticsearch.${DATA}:9200`, version: '8', username: 'elastic', password: 'es-pw' };
 export const OCEANBASE = { host: `oceanbase.${DATA}`, query_port: 2881, database: 'cdc', user: 'root@test', password: 'ob-pw' };
 export const PAIMON = { warehouse: 's3://warehouse/paimon', s3_endpoint: `http://rustfs.${DATA}:9000`, region: 'us-east-1', path_style: true, access_key_id: 'lake-admin', secret_access_key: 'lake-secret-123' };
+/** Opt-in StarRocks and Doris (deploy/e2e/fixtures-olap, E2E_OLAP=1): database cdc, user bz_writer. */
+export const STARROCKS = { host: `starrocks.${DATA}`, query_port: 9030, http_port: 8080, database: 'cdc', user: 'bz_writer', replicas: 1, password: 'bz-writer-pw' };
+export const DORIS = { host: `doris.${DATA}`, query_port: 9030, http_port: 8030, be_nodes: `doris.${DATA}:8040`, database: 'cdc', user: 'bz_writer', replicas: 1, password: 'bz-writer-pw' };

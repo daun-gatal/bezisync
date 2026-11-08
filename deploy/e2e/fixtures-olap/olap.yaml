@@ -1,0 +1,187 @@
+# Opt-in destinations for e2e 35-flink-cdc-columns (ADR 0012), applied only with E2E_OLAP=1 (each
+# asks for 3 GiB): starrocks:9030 (StarRocks 3.4 all-in-one; Stream Load through feproxy on 8080)
+# and doris:9030 (Doris 3.0, FE HTTP 8030, BE HTTP 8040). root has root-pw; bz_writer / bz-writer-pw
+# owns database cdc. The scripts are the playground's (bezisync-lab playground/scripts).
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: olap-scripts }
+data:
+  olap-start.sh: |
+    #!/bin/bash
+    # Starts StarRocks or Doris (OLAP_ENGINE) all-in-one with what a sample pod needs, then hands over
+    # to the image's own entrypoint:
+    # - memory: the FE's JVM gets 1.5 GiB (the images ask for 8) and the BE 2 GiB, inside the
+    #   container's limit;
+    # - Doris: its FE and BE always use 127.0.0.1. The FE records its own address in its metadata and
+    #   the BE is registered under it, but the image pins only the BE, and only on the very first start:
+    #   a recreated pod (a new IP) would never start again;
+    # - root's password: once the "users" container has set it (/bz/root-password-set), the image's
+    #   start-up checks sign in with it (MYSQL_PWD).
+    set -euo pipefail
+    case "$OLAP_ENGINE" in
+      starrocks)
+        home=/data/deploy
+        fe=$home/starrocks/fe/conf/fe.conf be=$home/starrocks/be/conf/be.conf
+        start=(/bin/sh -c ./entrypoint.sh)
+        ;;
+      doris)
+        home=/opt/apache-doris
+        fe=$home/fe/conf/fe.conf be=$home/be/conf/be.conf
+        start=(bash entry_point.sh)
+        for conf in "$fe" "$be"; do
+          grep -q '^priority_networks' "$conf" || echo 'priority_networks = 127.0.0.1/24' >>"$conf"
+        done
+        ;;
+      *) echo "unknown OLAP_ENGINE $OLAP_ENGINE" >&2; exit 1 ;;
+    esac
+    sed -i -E 's/-Xmx[0-9]+[mMgG]/-Xmx1536m/; s/-Xms[0-9]+[mMgG]/-Xms256m/' "$fe"
+    if grep -q '^mem_limit' "$be"; then
+      sed -i 's/^mem_limit.*/mem_limit = 2G/' "$be"
+    else
+      echo 'mem_limit = 2G' >>"$be"
+    fi
+    if [ -f /bz/root-password-set ]; then
+      export MYSQL_PWD=$OLAP_ROOT_PASSWORD
+    fi
+    cd "$home"
+    exec "${start[@]}"
+  olap-users.sh: |
+    #!/bin/bash
+    # Beside StarRocks or Doris (OLAP_ENGINE): once the FE answers, root gets OLAP_ROOT_PASSWORD (the
+    # images start without one), then database cdc and user bz_writer (OLAP_PASSWORD) with the rights
+    # BeziSync's preflight asks for. Idempotent: runs on every start, and bz_writer's password is set
+    # again when it changed (root's is set once). Then marks the pod ready and stays up. mysql signs in with MYSQL_PWD (never an argument).
+    set -euo pipefail
+    sql() { MYSQL_PWD=$OLAP_ROOT_PASSWORD mysql -h127.0.0.1 -P9030 -uroot --batch -N -e "$1"; }
+    root=${OLAP_ROOT_PASSWORD//\'/\'\'}
+    until sql 'SELECT 1' >/dev/null 2>&1; do
+      # A fresh FE: root has no password yet.
+      if mysql -h127.0.0.1 -P9030 -uroot --batch -N -e 'SELECT 1' >/dev/null 2>&1; then
+        case "$OLAP_ENGINE" in
+          starrocks) mysql -h127.0.0.1 -P9030 -uroot -e "ALTER USER 'root' IDENTIFIED BY '$root'" ;;
+          *) mysql -h127.0.0.1 -P9030 -uroot -e "SET PASSWORD FOR 'root' = PASSWORD('$root')" ;;
+        esac
+        continue
+      fi
+      sleep 3
+    done
+    # The image's start-up checks sign in as root with MYSQL_PWD from now on (olap-start.sh).
+    touch /bz/root-password-set
+    # The BE registers a little after the FE answers: tables can't be created before it is alive.
+    until sql 'SHOW BACKENDS' 2>/dev/null | grep -q true; do sleep 3; done
+    sql 'CREATE DATABASE IF NOT EXISTS cdc'
+    pw=${OLAP_PASSWORD//\'/\'\'}
+    case "$OLAP_ENGINE" in
+      starrocks)
+        sql "CREATE USER IF NOT EXISTS 'bz_writer'@'%' IDENTIFIED BY '$pw'"
+        sql "ALTER USER 'bz_writer'@'%' IDENTIFIED BY '$pw'"
+        sql "GRANT CREATE DATABASE ON CATALOG default_catalog TO USER 'bz_writer'@'%'"
+        sql "GRANT ALL ON DATABASE cdc TO USER 'bz_writer'@'%'"
+        sql "GRANT ALL ON ALL TABLES IN DATABASE cdc TO USER 'bz_writer'@'%'"
+        ;;
+      doris)
+        sql "CREATE USER IF NOT EXISTS 'bz_writer'@'%' IDENTIFIED BY '$pw'"
+        sql "SET PASSWORD FOR 'bz_writer'@'%' = PASSWORD('$pw')"
+        sql "GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.cdc.* TO 'bz_writer'@'%'"
+        ;;
+      *) echo "unknown OLAP_ENGINE $OLAP_ENGINE" >&2; exit 1 ;;
+    esac
+    echo "bz_writer ready on $OLAP_ENGINE"
+    touch /tmp/ready
+    exec sleep infinity
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: starrocks }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: starrocks } }
+  template:
+    metadata: { labels: { app: starrocks, app.bezisync.io/fixture: "true" } }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: starrocks
+          image: starrocks/allin1-ubuntu:3.4.5
+          command: [/bin/bash, /scripts/olap-start.sh]
+          env:
+            - { name: OLAP_ENGINE, value: starrocks }
+            - { name: OLAP_ROOT_PASSWORD, value: root-pw }
+          ports: [{ containerPort: 9030 }, { containerPort: 8080 }]
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: data, mountPath: /bz, subPath: bz }
+            - { name: data, mountPath: /data/deploy/starrocks/fe/meta, subPath: meta }
+            - { name: data, mountPath: /data/deploy/starrocks/be/storage, subPath: be }
+          readinessProbe: { tcpSocket: { port: 9030 }, periodSeconds: 10 }
+          resources: { requests: { memory: 3Gi }, limits: { memory: 5Gi } }
+        - name: users
+          image: mysql:8.4
+          command: [/bin/bash, /scripts/olap-users.sh]
+          env:
+            - { name: OLAP_ENGINE, value: starrocks }
+            - { name: OLAP_ROOT_PASSWORD, value: root-pw }
+            - { name: OLAP_PASSWORD, value: bz-writer-pw }
+          volumeMounts: [{ name: scripts, mountPath: /scripts }, { name: data, mountPath: /bz, subPath: bz }]
+          readinessProbe: { exec: { command: [test, -f, /tmp/ready] }, periodSeconds: 5, failureThreshold: 240 }
+      volumes:
+        - { name: scripts, configMap: { name: olap-scripts } }
+        - { name: data, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: starrocks }
+spec:
+  selector: { app: starrocks }
+  ports:
+    - { name: query, port: 9030, targetPort: 9030 }
+    - { name: load, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: doris }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: doris } }
+  template:
+    metadata: { labels: { app: doris, app.bezisync.io/fixture: "true" } }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: doris
+          image: apache/doris:3.0.8-all
+          command: [/bin/bash, /scripts/olap-start.sh]
+          env:
+            - { name: SKIP_CHECK_ULIMIT, value: "true" }
+            - { name: OLAP_ENGINE, value: doris }
+            - { name: OLAP_ROOT_PASSWORD, value: root-pw }
+          ports: [{ containerPort: 9030 }, { containerPort: 8030 }, { containerPort: 8040 }]
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: data, mountPath: /bz, subPath: bz }
+            - { name: data, mountPath: /opt/apache-doris/fe/doris-meta, subPath: fe }
+            - { name: data, mountPath: /opt/apache-doris/be/storage, subPath: be }
+          readinessProbe: { tcpSocket: { port: 9030 }, periodSeconds: 10 }
+          resources: { requests: { memory: 3Gi }, limits: { memory: 5Gi } }
+        - name: users
+          image: mysql:8.4
+          command: [/bin/bash, /scripts/olap-users.sh]
+          env:
+            - { name: OLAP_ENGINE, value: doris }
+            - { name: OLAP_ROOT_PASSWORD, value: root-pw }
+            - { name: OLAP_PASSWORD, value: bz-writer-pw }
+          volumeMounts: [{ name: scripts, mountPath: /scripts }, { name: data, mountPath: /bz, subPath: bz }]
+          readinessProbe: { exec: { command: [test, -f, /tmp/ready] }, periodSeconds: 5, failureThreshold: 240 }
+      volumes:
+        - { name: scripts, configMap: { name: olap-scripts } }
+        - { name: data, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: doris }
+spec:
+  selector: { app: doris }
+  ports:
+    - { name: query, port: 9030, targetPort: 9030 }
+    - { name: fe-http, port: 8030, targetPort: 8030 }
+    - { name: be-http, port: 8040, targetPort: 8040 }

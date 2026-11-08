@@ -79,6 +79,16 @@ var TruncateSources = []string{"postgresql", "mysql"}
 // unwrap adds __deleted ("true" for a delete); Flink CDC writes its change type as __op ("-D").
 var SoftDeleteField = map[string]string{"debezium": "__deleted", "flink-cdc": "__op"}
 
+// FlinkSoftDeleteField is the soft-delete column on a Flink CDC destination: __op, except on
+// StarRocks, which reserves __op for its own upsert/delete marker and refuses a column of that
+// name (ADR 0012 E8): __bz_op there.
+func FlinkSoftDeleteField(sinkType string) string {
+	if sinkType == "starrocks" {
+		return "__bz_op"
+	}
+	return SoftDeleteField["flink-cdc"]
+}
+
 // Operations a filter keeps, with Debezium's op codes.
 var FilterOperations = map[string]string{"insert": "c", "update": "u", "delete": "d", "snapshot": "r"}
 

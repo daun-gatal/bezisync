@@ -259,6 +259,9 @@ func RestoreSavedPosition(ctx context.Context, q db.Querier, a *auth.ProjectAcce
 	if err := restoreBelowFloor(p, id); err != nil {
 		return nil, err
 	}
+	if err := restoreBeforeLayout(p, id); err != nil {
+		return nil, err
+	}
 	conn, err := stateConn(ctx)
 	if err != nil {
 		return nil, err

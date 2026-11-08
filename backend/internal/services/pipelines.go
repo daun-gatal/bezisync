@@ -1388,6 +1388,11 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 		} else if c != nil {
 			configChecks = append(configChecks, *c)
 		}
+		layoutChecks, err := flinkLayoutChecks(ctx, q, p, spec, source, sink)
+		if err != nil {
+			return nil, err
+		}
+		configChecks = append(configChecks, layoutChecks...)
 	}
 	discover := &discoverOnce{src: source, typ: sourceConn.Type}
 	var recommended []Recommendation

@@ -71,7 +71,7 @@ export function FlinkRunSettings({
                     description: 'Not for this destination: it refuses the column defaults Flink CDC copies, so new columns wait for a deploy that writes them without.',
                     disabled: true,
                   }
-                : { value: 'send', label: 'Send', description: 'New columns reach the destination as they appear.' },
+                : { value: 'send', label: 'Send', description: 'New columns reach the destination as they appear, except in a table whose column order BeziSync kept after a Start over: there they wait for the next deploy.' },
             ]}
           />
         )}
