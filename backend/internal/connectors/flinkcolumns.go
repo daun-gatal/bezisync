@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -103,6 +104,15 @@ func icebergTypeOf(flinkType string) (iceberg.Type, error) {
 		return iceberg.PrimitiveTypes.Date, nil
 	case t == "BYTES":
 		return iceberg.PrimitiveTypes.Binary, nil
+	case t == "TIMESTAMP(6)":
+		return iceberg.PrimitiveTypes.Timestamp, nil
+	case t == "TIMESTAMP_LTZ(6)":
+		return iceberg.PrimitiveTypes.TimestampTz, nil
+	}
+	if m := flinkDecimal.FindStringSubmatch(t); m != nil {
+		p, _ := strconv.Atoi(m[1])
+		s, _ := strconv.Atoi(m[2])
+		return iceberg.DecimalTypeOf(p, s), nil
 	}
 	return nil, fmt.Errorf("BeziSync doesn't add %s columns to Iceberg tables", flinkType)
 }
@@ -144,6 +154,8 @@ func (s *icebergSink) AddFlinkColumns(ctx context.Context, conn Resolved, destin
 	}
 	return ran, nil
 }
+
+var flinkDecimal = regexp.MustCompile(`^DECIMAL\((\d+),\s*(\d+)\)$`)
 
 // --- Paimon: positional, read from the warehouse's schema files ---
 
@@ -315,6 +327,10 @@ func (o olapSink) olapColumnType(flinkType string) (string, error) {
 		return t, nil
 	case t == "BOOLEAN":
 		return "BOOLEAN", nil
+	case t == "TIMESTAMP(6)", t == "TIMESTAMP_LTZ(6)":
+		return "DATETIME", nil
+	case flinkDecimal.MatchString(t):
+		return t, nil
 	}
 	return "", fmt.Errorf("BeziSync doesn't add %s columns to %s tables", flinkType, o.title)
 }

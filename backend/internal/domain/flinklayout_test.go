@@ -198,3 +198,23 @@ func TestPlanFlinkLayoutCastsANewComputedColumn(t *testing.T) {
 		t.Fatal(problems)
 	}
 }
+
+// A source column BeziSync adds to an existing table takes the type Flink CDC writes it as, only
+// where that type doesn't depend on digits information_schema doesn't give.
+func TestFlinkTypeOfSource(t *testing.T) {
+	for _, c := range []struct{ src, typ, want string }{
+		{"postgresql", "integer", "INT"}, {"postgresql", "text", "VARCHAR"}, {"postgresql", "timestamp with time zone", "TIMESTAMP_LTZ(6)"},
+		{"postgresql", "numeric", ""}, {"mysql", "bigint", "BIGINT"}, {"mysql", "datetime", ""}, {"mysql", "decimal", ""},
+		{"sqlserver", "int", ""}, {"oracle", "NUMBER", ""},
+	} {
+		if got := FlinkTypeOfSource(c.src, c.typ); got != c.want {
+			t.Errorf("%s %s: %q, want %q", c.src, c.typ, got, c.want)
+		}
+	}
+	// The planner adds a source column with that type when the table lacks it.
+	plan, problems := PlanFlinkLayout([]FlinkColumn{{Name: "id"}, {Name: "c", Source: "c", AddType: FlinkTypeOfSource("postgresql", "text")}},
+		[]DestColumn{col("id")}, true, LayoutTarget{CaseInsensitive: true})
+	if len(problems) > 0 || len(plan.Add) != 1 || plan.Add[0].Type != "VARCHAR" || plan.Add[0].Cast {
+		t.Fatal(plan, problems)
+	}
+}

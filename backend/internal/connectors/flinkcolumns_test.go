@@ -56,8 +56,16 @@ func TestFlinkColumnTypes(t *testing.T) {
 			t.Errorf("%s: %v %v", in, typ, err)
 		}
 	}
-	if _, err := icebergTypeOf("DECIMAL(10, 2)"); err == nil {
-		t.Fatal("a decimal BeziSync didn't name exactly is refused")
+	for in, want := range map[string]string{"DECIMAL(10, 2)": "decimal(10, 2)", "TIMESTAMP(6)": "timestamp", "TIMESTAMP_LTZ(6)": "timestamptz"} {
+		if typ, err := icebergTypeOf(in); err != nil || typ.String() != want {
+			t.Errorf("%s: %v %v", in, typ, err)
+		}
+	}
+	if _, err := icebergTypeOf("TIME"); err == nil {
+		t.Fatal("a type BeziSync doesn't name is refused")
+	}
+	if typ, _ := doris.olapColumnType("TIMESTAMP_LTZ(6)"); typ != "DATETIME" {
+		t.Fatal(typ)
 	}
 	if typ, _ := starrocks.olapColumnType("VARCHAR"); typ != "STRING" {
 		t.Fatal(typ)
@@ -65,7 +73,7 @@ func TestFlinkColumnTypes(t *testing.T) {
 	if typ, _ := oceanbase.olapColumnType("VARCHAR"); typ != "LONGTEXT" {
 		t.Fatal(typ)
 	}
-	if _, err := doris.olapColumnType("TIMESTAMP_LTZ(6)"); err == nil {
+	if _, err := doris.olapColumnType("BYTES"); err == nil {
 		t.Fatal("refused")
 	}
 	// Every Flink CDC destination either plans its tables or has none to plan.

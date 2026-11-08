@@ -82,14 +82,40 @@ type layoutPlan struct {
 // planLayout reads the source's columns and every destination table and plans the start; it
 // changes nothing.
 func planLayout(ctx context.Context, q db.Querier, p *models.Pipeline, spec domain.PipelineSpec, source, sink connectors.Resolved) (*layoutPlan, error) {
-	cols, defaults, err := liveColumns(ctx, q, p, spec.Source.Tables.Include)
+	conn, err := GetConnection(ctx, q, p.SourceID)
 	if err != nil {
 		return nil, err
+	}
+	if conn == nil {
+		return nil, problem.NotFound("Source")
+	}
+	found, err := Discover(ctx, q, conn)
+	if err != nil {
+		return nil, err
+	}
+	cols, defaults, types := map[string][]string{}, map[string][]string{}, map[string]map[string]string{}
+	for name, t := range TablesOf(found, spec.Source.Tables.Include) {
+		types[name] = map[string]string{}
+		for _, c := range t.Columns {
+			cols[name] = append(cols[name], c.Name)
+			types[name][c.Name] = c.Type
+			if c.HasDefault {
+				defaults[name] = append(defaults[name], c.Name)
+			}
+		}
 	}
 	out := &layoutPlan{tables: map[string]domain.LayoutPlan{}, columns: cols, defaults: defaults}
 	produced, destinations, err := compiler.FlinkProduced(compileContext(p, spec), source, sink, cols, defaults)
 	if err != nil {
 		return nil, err
+	}
+	// A source column the table lacks gets the type Flink CDC writes it as, where that is fixed.
+	for table, list := range produced {
+		for i := range list {
+			if c := &list[i]; c.Source != "" && c.Type == "" && c.AddType == "" {
+				c.AddType = domain.FlinkTypeOfSource(source.Type, types[table][c.Source])
+			}
+		}
 	}
 	snk, err := connectors.GetSink(sink.Type)
 	if err != nil {

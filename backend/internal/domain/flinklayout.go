@@ -29,6 +29,9 @@ type FlinkColumn struct {
 	// when AddCast; "" when BeziSync can't name it.
 	AddType string `json:"-"`
 	AddCast bool   `json:"-"`
+	// Source is the source column it is written from, under its source name ("" for a column a
+	// step adds).
+	Source string `json:"-"`
 }
 
 // DestColumn is a column a destination table has, as BeziSync read it.
@@ -205,6 +208,25 @@ func FlinkTypeOfKind(kind string) (string, bool) {
 		return "DATE", false
 	}
 	return "", false
+}
+
+// FlinkTypeOfSource is the Flink type Flink CDC 3.7.0 writes a source column of this type
+// (information_schema's data_type) as, when it is the same whatever the column's length or
+// precision; "" otherwise (numeric and decimal without their digits, MySQL's datetime and
+// timestamp with their fraction digits, every other source's types): BeziSync then can't add such
+// a column to an existing table.
+func FlinkTypeOfSource(sourceType, dataType string) string {
+	t := strings.ToLower(strings.TrimSpace(dataType))
+	switch sourceType {
+	case "postgresql":
+		return map[string]string{"integer": "INT", "bigint": "BIGINT", "text": "VARCHAR", "character varying": "VARCHAR", "boolean": "BOOLEAN",
+			"double precision": "DOUBLE", "real": "FLOAT", "date": "DATE", "timestamp without time zone": "TIMESTAMP(6)",
+			"timestamp with time zone": "TIMESTAMP_LTZ(6)", "uuid": "VARCHAR", "json": "VARCHAR", "jsonb": "VARCHAR"}[t]
+	case "mysql":
+		return map[string]string{"int": "INT", "bigint": "BIGINT", "varchar": "VARCHAR", "text": "VARCHAR", "mediumtext": "VARCHAR",
+			"longtext": "VARCHAR", "double": "DOUBLE", "float": "FLOAT", "date": "DATE", "json": "VARCHAR"}[t]
+	}
+	return ""
 }
 
 var (

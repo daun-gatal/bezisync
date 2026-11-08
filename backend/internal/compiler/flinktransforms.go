@@ -197,12 +197,12 @@ func flinkTransforms(c connectors.CompileContext, src connectors.FlinkSource, so
 					expr = sqlIdent(col)
 					projection = append(projection, expr)
 				}
-				items = append(items, flinkItem{expr, domain.FlinkColumn{Name: name}})
+				items = append(items, flinkItem{expr, domain.FlinkColumn{Name: name, Source: col}})
 			}
 		} else {
 			projection = []string{"*"}
 			for _, col := range columns[table] {
-				items = append(items, flinkItem{sqlIdent(col), domain.FlinkColumn{Name: col}})
+				items = append(items, flinkItem{sqlIdent(col), domain.FlinkColumn{Name: col, Source: col}})
 			}
 		}
 		items = append(items, addedItems...)
