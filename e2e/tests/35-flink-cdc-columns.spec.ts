@@ -178,9 +178,12 @@ async function journey(j: Journey) {
   const newest = async () => (await positions())[0]?.id ?? 0;
   const beforeDeploy = await newest();
   await api.send('POST', `${url}/deploy`, {});
-  // Rows the source writes while the job stops and switches.
-  await ownerSql(ins(3));
+  // Rows the source writes while the job stops and switches. Not on Elasticsearch: Flink CDC 3.7's
+  // writer can't read back requests it buffered at the savepoint (elasticsearch_state, ADR 0014).
+  const duringSwitch = j.type !== 'elasticsearch';
+  if (duringSwitch) await ownerSql(ins(3));
   await lifecycle(api, url, 'streaming');
+  if (!duringSwitch) await ownerSql(ins(3));
   await ownerSql(`${ins(4)}; UPDATE ${table} SET a = 'a1x' WHERE id = 1`);
   await waitFor(`${j.type}: rows across the switch, every value in its own column`, async () => {
     const all = await rows(api, url, table);
