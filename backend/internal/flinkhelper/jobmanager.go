@@ -368,8 +368,9 @@ func (m *JobManager) extract(ctx context.Context, id int64) (string, error) {
 	return dir, nil
 }
 
-// renumber starts a restore of a position older than the newest checkpoint the pipeline stored
-// above every checkpoint id it reached (ADR 0014). Flink numbers the restored job's checkpoints from
+// renumber starts a restore of a position older than the newest checkpoint the pipeline stored, or
+// of a periodic checkpoint (a crash may have left committed checkpoints unstored), above every
+// checkpoint id it reached (ADR 0014). Flink numbers the restored job's checkpoints from
 // the restored one, and Flink CDC's Iceberg committer skips a checkpoint id it has committed for the
 // writer's job id, which comes back from the restored state: without this, what the restored job
 // writes until it passes the old ids is dropped.
@@ -381,15 +382,17 @@ func (m *JobManager) renumber(ctx context.Context, from *Saved, dir string) erro
 	restored, err := CheckpointID(dir)
 	if err != nil {
 		// A format the helper doesn't know: the stored id says whether the position is older.
-		if from.FlinkID >= highest {
+		if from.FlinkID >= highest && from.Kind == "savepoint" {
 			return nil
 		}
-		return fmt.Errorf("saved position #%d is older than the newest one, and BeziSync can't renumber it: %w", from.ID, err)
+		return fmt.Errorf("saved position #%d may be followed by checkpoints its job committed, and BeziSync can't renumber it: %w", from.ID, err)
 	}
-	if restored >= highest {
+	// A stop savepoint is where its job ended; a periodic checkpoint may have been followed by
+	// checkpoints the job completed and committed before it crashed, unseen.
+	if restored >= highest && from.Kind == "savepoint" {
 		return nil
 	}
-	next := highest + checkpointGap
+	next := max(highest, restored) + checkpointGap
 	if err := SetCheckpointID(dir, next); err != nil {
 		return fmt.Errorf("saved position #%d can't be renumbered: %w", from.ID, err)
 	}

@@ -483,13 +483,16 @@ func TestJobManagerRenumbersAnOlderPosition(t *testing.T) {
 	cases := []struct {
 		name     string
 		restore  string
+		newest   string // the newest position's kind
 		metadata []byte
-		want     int64 // the checkpoint id after; 0: not a Flink file
+		want     int64
 		failed   bool
 	}{
-		{name: "older position", restore: "7", metadata: withID(2), want: 40 + checkpointGap},
-		{name: "the newest", restore: "latest", metadata: withID(40), want: 40},
-		{name: "older, unreadable", restore: "7", metadata: []byte("x"), failed: true},
+		{name: "older position", restore: "7", newest: "savepoint", metadata: withID(2), want: 40 + checkpointGap},
+		{name: "the newest, a stop savepoint", restore: "latest", newest: "savepoint", metadata: withID(40), want: 40},
+		{name: "the newest, a checkpoint (after a crash)", restore: "latest", newest: "checkpoint", metadata: withID(40), want: 40 + checkpointGap},
+		{name: "older, unreadable", restore: "7", newest: "savepoint", metadata: []byte("x"), failed: true},
+		{name: "the newest checkpoint, unreadable", restore: "latest", newest: "checkpoint", metadata: []byte("x"), failed: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -503,7 +506,7 @@ func TestJobManagerRenumbersAnOlderPosition(t *testing.T) {
 					_ = os.WriteFile(filepath.Join(d, "_metadata"), tc.metadata, 0o600)
 				}
 				s.saved = []Saved{{ID: 7, Kind: "checkpoint", Reason: "periodic", FlinkID: 2, Path: "cp/old/chk-2"},
-					{ID: 9, Kind: "checkpoint", Reason: "periodic", FlinkID: 40, Path: "cp/old/chk-40"}}
+					{ID: 9, Kind: tc.newest, Reason: "periodic", FlinkID: 40, Path: "cp/old/chk-40"}}
 			})
 			if tc.failed {
 				st := h.waitFor(t, "failed", func(s Status) bool { return s.Phase == PhaseFailed })

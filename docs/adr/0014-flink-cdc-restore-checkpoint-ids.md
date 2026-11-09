@@ -28,19 +28,23 @@ them), then commits new changes under ids the committer has seen, and drops them
 ## Decision
 
 **When the helper restores a position whose checkpoint id is below the highest checkpoint id the pipeline stored,
-it rewrites the restored copy's checkpoint id to that highest id + 1000** before it submits. The restored job, its
-Iceberg writer included, then numbers every commit above anything committed. The stored position isn't changed.
+or restores a periodic checkpoint at all, it rewrites the restored copy's checkpoint id to the higher of the two +
+1000** before it submits. The restored job, its Iceberg writer included, then numbers every commit above anything
+committed. The stored position isn't changed.
 
 - **Highest id.** `MaxFlinkID` reads the largest `flink_id` among every stored position, set aside or not (a
   restore sets the newer ones aside; they still say how far the job got). A savepoint is now stored with its own
   checkpoint id, read from its `_metadata` (before, `0`).
 - **The gap of 1000.** A job can complete checkpoints between two polls, or stop without a savepoint, and commit
   them unseen; checkpoint ids are 64-bit, so a gap costs nothing.
-- **Only older positions.** The newest position (the usual restart after a stop) is restored as saved, so sinks
-  that probe transactions by checkpoint id after a crash (Kafka exactly-once, Doris two-phase commit) keep their
-  numbering.
-- **A format the helper doesn't know.** The restore goes on unchanged when the stored id shows the position is the
-  newest; otherwise it fails (`failed`/`restore`) instead of dropping rows.
+- **Which restores.** An older position (Positions → Restore), and a periodic checkpoint even when it is the newest:
+  the job may have completed and committed later checkpoints before it crashed, without the helper storing them,
+  and the restored job's first commits would reuse their ids. A stop savepoint is where its job ended, so the
+  usual restart after a stop is restored as saved. Raising the ids is safe for every destination BeziSync
+  configures: Kafka runs at least once and Doris without two-phase commit (Flink CDC's defaults), so no sink looks
+  for its own lingering transactions by checkpoint id.
+- **A format the helper doesn't know.** The restore goes on unchanged when the stored row shows the newest stop
+  savepoint; otherwise it fails (`failed`/`restore`) instead of dropping rows.
 
 The rewrite applies to every destination: it only raises numbers.
 
@@ -54,8 +58,9 @@ position of the switched job and check that a row written after the restore arri
 | ID | Case | Expected | Test |
 |---|---|---|---|
 | R1 | Restore a position older than the newest stored checkpoint | checkpoint id rewritten to the highest + 1000; rows written after the restore committed | `TestJobManagerRenumbersAnOlderPosition`; e2e 35 |
-| R2 | Restore the newest position | restored as saved | `TestJobManagerRenumbersAnOlderPosition` |
-| R3 | An older position whose `_metadata` the helper can't read | refused, nothing submitted | `TestJobManagerRenumbersAnOlderPosition` |
+| R2 | Restore the newest position, a stop savepoint | restored as saved | `TestJobManagerRenumbersAnOlderPosition` |
+| R2b | Restore the newest position, a periodic checkpoint (after a crash) | renumbered | `TestJobManagerRenumbersAnOlderPosition` |
+| R3 | A position to renumber whose `_metadata` the helper can't read | refused, nothing submitted | `TestJobManagerRenumbersAnOlderPosition` |
 | R4 | Only the 8 bytes of the id change; another format is refused | as stated | `TestCheckpointIDReadAndRewrite` |
 | R5 | A stop savepoint | stored with its own checkpoint id | `TestJobManagerRunsStoresAndStopsWithSavepoint` |
 | R6 | The highest id counts positions set aside by a restore | as stated | `TestStoreRoundTrip` (`MaxFlinkID`) |
@@ -74,5 +79,5 @@ position of the switched job and check that a row written after the restore arri
 - **Remove the Iceberg writer's state** so it draws a new job id. Subtask state has many handle formats; the
   committer's pending commits would go with it.
 - **Refuse restoring an older position into Iceberg.** Takes away a recovery tool to hide a numbering problem.
-- **Renumber every restore.** Breaks sinks that look for their own lingering transactions by checkpoint id after a
-  crash.
+- **Renumber every restore.** Gains nothing for a stop savepoint, and would move the numbering of every
+  ordinary restart.
