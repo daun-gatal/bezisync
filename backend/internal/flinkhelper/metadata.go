@@ -62,11 +62,8 @@ func ForgetCoordinatorState(dir, uid string) (bool, error) {
 // parallelism and max parallelism (int32 each), the coordinator state (a stream handle: 0 = none,
 // 1 = bytes: Java UTF name, int32 length, the bytes), then the subtask states.
 func forgetCoordinatorState(raw []byte, uid string) ([]byte, bool, error) {
-	if len(raw) < 8 || binary.BigEndian.Uint32(raw) != metadataMagic {
-		return nil, false, fmt.Errorf("%w: not a Flink metadata file", errMetadata)
-	}
-	if v := binary.BigEndian.Uint32(raw[4:]); v != 5 && v != 6 {
-		return nil, false, fmt.Errorf("%w: metadata version %d (BeziSync knows 5 and 6)", errMetadata, v)
+	if err := metadataHeader(raw); err != nil {
+		return nil, false, err
 	}
 	if len(uid) == 0 || len(uid) > 0xffff {
 		return nil, false, fmt.Errorf("%w: invalid operator uid", errMetadata)
@@ -120,4 +117,57 @@ func forgetCoordinatorState(raw []byte, uid string) ([]byte, bool, error) {
 	out = append(out, 0)
 	out = append(out, raw[end:]...)
 	return out, true, nil
+}
+
+// checkpointGap is how far above the highest checkpoint id this pipeline stored a restore of an
+// older position starts numbering (ADR 0014): a job can complete a few checkpoints between two
+// polls, or stop without a savepoint, and commit them unseen; ids are 64-bit, so a gap costs nothing.
+const checkpointGap = 1000
+
+// metadataHeader checks a _metadata file's magic number and version (5 or 6: the checkpoint id is
+// the int64 after them).
+func metadataHeader(raw []byte) error {
+	if len(raw) < 16 || binary.BigEndian.Uint32(raw) != metadataMagic {
+		return fmt.Errorf("%w: not a Flink metadata file", errMetadata)
+	}
+	if v := binary.BigEndian.Uint32(raw[4:]); v != 5 && v != 6 {
+		return fmt.Errorf("%w: metadata version %d (BeziSync knows 5 and 6)", errMetadata, v)
+	}
+	return nil
+}
+
+// CheckpointID is the checkpoint id a checkpoint or savepoint directory's _metadata records.
+func CheckpointID(dir string) (int64, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "_metadata")) //nolint:gosec // under state_dir
+	if err != nil {
+		return 0, err
+	}
+	if err := metadataHeader(raw); err != nil {
+		return 0, err
+	}
+	return int64(binary.BigEndian.Uint64(raw[8:])), nil //nolint:gosec // Flink writes a signed long
+}
+
+// SetCheckpointID rewrites the checkpoint id a restored copy's _metadata records. Flink numbers
+// the restored job's checkpoints from it, and so do sinks that deduplicate commits by checkpoint id
+// (Flink CDC's Iceberg committer skips any id at or below the highest one it committed for the
+// writer's job id, which comes back from the writer's state).
+func SetCheckpointID(dir string, id int64) error {
+	path := filepath.Join(dir, "_metadata")
+	raw, err := os.ReadFile(path) //nolint:gosec // under state_dir
+	if err != nil {
+		return err
+	}
+	if err := metadataHeader(raw); err != nil {
+		return err
+	}
+	if id <= 0 {
+		return fmt.Errorf("%w: invalid checkpoint id %d", errMetadata, id)
+	}
+	binary.BigEndian.PutUint64(raw[8:], uint64(id))
+	tmp := path + ".bz"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil { //nolint:gosec // beside the _metadata the helper extracted under state_dir
+		return err
+	}
+	return os.Rename(tmp, path)
 }

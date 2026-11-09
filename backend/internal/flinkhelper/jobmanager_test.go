@@ -3,6 +3,7 @@ package flinkhelper
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -125,7 +126,7 @@ func (f *fakeFlink) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		dir := filepath.Join(f.stateDir, "sp", "savepoint-"+parts[1][:6])
 		_ = os.MkdirAll(dir, 0o750)
-		_ = os.WriteFile(filepath.Join(dir, "_metadata"), []byte("savepoint"), 0o600)
+		_ = os.WriteFile(filepath.Join(dir, "_metadata"), metaFile(6), 0o600) // checkpoint id 42
 		f.jobs[parts[1]].cancelled = true
 		out(map[string]any{"status": map[string]any{"id": "COMPLETED"}, "operation": map[string]any{"location": "file:" + dir}})
 	case strings.HasSuffix(path, "/subtasks/metrics"):
@@ -233,6 +234,16 @@ func (s *memStore) Extract(_ context.Context, id int64, stateDir string) (string
 		}
 	}
 	return "", fmt.Errorf("saved position %d no longer exists", id)
+}
+
+func (s *memStore) MaxFlinkID(context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var highest int64
+	for _, v := range s.saved {
+		highest = max(highest, v.FlinkID)
+	}
+	return highest, nil
 }
 
 func (s *memStore) Prune(context.Context, int) error {
@@ -377,6 +388,13 @@ func TestJobManagerRunsStoresAndStopsWithSavepoint(t *testing.T) {
 	if k := h.store.kinds(); k[len(k)-1] != "savepoint:stop" {
 		t.Fatalf("stored %v", k)
 	}
+	// ADR 0014: with its own checkpoint id, read from its _metadata.
+	h.store.mu.Lock()
+	last := h.store.saved[len(h.store.saved)-1]
+	h.store.mu.Unlock()
+	if last.FlinkID != 42 {
+		t.Fatalf("savepoint stored with checkpoint id %d", last.FlinkID)
+	}
 }
 
 func TestJobManagerRestoresTheLatestPosition(t *testing.T) {
@@ -453,6 +471,62 @@ func TestJobManagerSwitchesColumnsAtAnOlderPosition(t *testing.T) {
 	}
 }
 
+// ADR 0014: a restore of a position older than the newest stored checkpoint numbers the restored
+// job's checkpoints past every id the pipeline reached; the newest restores as saved; an older one
+// the helper can't read doesn't start.
+func TestJobManagerRenumbersAnOlderPosition(t *testing.T) {
+	withID := func(id int64) []byte {
+		b := metaFile(6)
+		binary.BigEndian.PutUint64(b[8:], uint64(id)) //nolint:gosec // test ids
+		return b
+	}
+	cases := []struct {
+		name     string
+		restore  string
+		newest   string // the newest position's kind
+		metadata []byte
+		want     int64
+		failed   bool
+	}{
+		{name: "older position", restore: "7", newest: "savepoint", metadata: withID(2), want: 40 + checkpointGap},
+		{name: "the newest, a stop savepoint", restore: "latest", newest: "savepoint", metadata: withID(40), want: 40},
+		{name: "the newest, a checkpoint (after a crash)", restore: "latest", newest: "checkpoint", metadata: withID(40), want: 40 + checkpointGap},
+		{name: "older, unreadable", restore: "7", newest: "savepoint", metadata: []byte("x"), failed: true},
+		{name: "the newest checkpoint, unreadable", restore: "latest", newest: "checkpoint", metadata: []byte("x"), failed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dirOld, dirNew string
+			h := start(t, []string{"postgresql", "iceberg"}, func(m *JobManager, _ *fakeFlink, s *memStore) {
+				m.Settings.Restore = tc.restore
+				dirOld = filepath.Join(m.Settings.StateDir, "cp", "old", "chk-2")
+				dirNew = filepath.Join(m.Settings.StateDir, "cp", "old", "chk-40")
+				for _, d := range []string{dirOld, dirNew} {
+					_ = os.MkdirAll(d, 0o750)
+					_ = os.WriteFile(filepath.Join(d, "_metadata"), tc.metadata, 0o600)
+				}
+				s.saved = []Saved{{ID: 7, Kind: "checkpoint", Reason: "periodic", FlinkID: 2, Path: "cp/old/chk-2"},
+					{ID: 9, Kind: tc.newest, Reason: "periodic", FlinkID: 40, Path: "cp/old/chk-40"}}
+			})
+			if tc.failed {
+				st := h.waitFor(t, "failed", func(s Status) bool { return s.Phase == PhaseFailed })
+				if _, _, submits, _ := h.f.counts(); st.ErrorCode != "restore" || len(submits) != 0 || !strings.Contains(st.Error, "can't renumber") {
+					t.Fatalf("%+v submits %v", st, submits)
+				}
+				return
+			}
+			h.waitFor(t, "running", func(s Status) bool { return s.Phase == PhaseRunning })
+			dir := dirNew
+			if tc.restore == "7" {
+				dir = dirOld
+			}
+			if got, err := CheckpointID(dir); err != nil || got != tc.want {
+				t.Fatalf("checkpoint id %d, %v; want %d", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestJobManagerStartsFreshAfterAStartOver(t *testing.T) {
 	h := start(t, []string{"mysql", "starrocks"}, func(m *JobManager, _ *fakeFlink, s *memStore) {
 		m.Settings.Restore, m.Settings.RestoreAfter, m.Settings.FreshStart = "latest", 7, true
@@ -522,6 +596,10 @@ func TestJobManagerStopsOnFailuresThatDontHeal(t *testing.T) {
 		"java.lang.RuntimeException: Fail to analyze table in chunk splitter.\nCaused by: java.sql.SQLSyntaxErrorException: ORA-01031: insufficient privileges": "oracle_analyze",
 		"io.debezium.DebeziumException: Failed to flush Oracle LogWriter (LGWR) buffers to disk":                                                                "oracle_flush_table",
 		"java.lang.IllegalArgumentException: Cannot find any table by the option 'tables' = SHOP.ORDERS":                                                        "tables_missing",
+		// Replaying a source ADD COLUMN the Iceberg table already has (ADR 0014).
+		"org.apache.flink.cdc.common.exceptions.SchemaEvolveException: SchemaEvolveException{applyingEvent=AddColumnEvent{…}, exceptionMessage='Cannot add column, name already exists: aa'}": "schema_change_replayed",
+		// As the e2e run logged it (ADR 0014).
+		"java.lang.OutOfMemoryError: Java heap space\n\tat com.esotericsoftware.kryo.io.Input.<init>(Input.java:52)\n\tat org.apache.flink.cdc.connectors.elasticsearch.v2.OperationSerializer.deserialize(OperationSerializer.java:67)": "elasticsearch_state",
 	}
 	for trace, code := range cases {
 		t.Run(code, func(t *testing.T) {

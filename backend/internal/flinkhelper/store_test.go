@@ -90,6 +90,9 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil || latest.ID != b.ID || latest.FlinkID != 4 || latest.Path != "cp/abc/chk-4" || latest.Generation != 2 {
 		t.Fatalf("latest = %+v, %v", latest, err)
 	}
+	if highest, err := s.MaxFlinkID(ctx); err != nil || highest != 4 {
+		t.Fatalf("max flink id %d, %v", highest, err)
+	}
 	if after, err := s.LatestAfter(ctx, b.ID); err != nil || after != nil {
 		t.Fatalf("a position at or below the floor was returned: %+v %v", after, err)
 	}

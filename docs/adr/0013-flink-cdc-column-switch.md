@@ -149,7 +149,7 @@ Elasticsearch, Paimon, StarRocks, Doris) and `32-flink-cdc` against the real Fli
   every deploy refreshes the source columns it writes (`RefreshFlinkColumns`); a column the source added while the
   pipeline was stopped, after its last saved position, is then named before the restored job has read it, and the
   job fails on it. A follow-up decides how to release held columns only once the job has read them.
-- Open, not caused by this ADR, found while testing it: restoring an **older** position into Iceberg reuses the
+- Open, not caused by this ADR, found while testing it (the Iceberg part fixed by [0014](0014-flink-cdc-restore-checkpoint-ids.md)): restoring an **older** position into Iceberg reuses the
   Iceberg writer's job id from its state, so the restored job's checkpoint ids overlap ones already committed and
   Flink CDC's committer skips them (`Checkpoint id N has been committed …, skipping`); and a Postgres job restored
   from a checkpoint taken while its first copy was finishing stopped reading new changes. The switch restores the

@@ -8,6 +8,7 @@ import { ownerSql, waitFor } from './data';
  * start. On the real engine, per destination: columns the source adds and renames while it runs land
  * by name; a version that changes the columns the pipeline writes switches columns at the saved
  * position (ADR 0013): no Start over, no row lost, the new columns from exactly where the job stopped;
+ * restoring an older position loses nothing written after it (ADR 0014);
  * after Start over the deploy plans the start and writes
  * every value into its own column; and a saved position from before the Start over can't be restored. Every value names its own column (a3, bb3, …), so a shifted one shows.
  * Needs E2E_FLINK_IMAGE; StarRocks and Doris also E2E_OLAP (deploy/e2e/fixtures-olap).
@@ -172,10 +173,17 @@ async function journey(j: Journey) {
   const ins = (id: number) => (j.newColumns === 'send'
     ? `INSERT INTO ${table} (id, a, bb, c) VALUES (${id}, 'a${id}', 'bb${id}', 'c${id}')`
     : `INSERT INTO ${table} (id, a, b, c) VALUES (${id}, 'a${id}', 'b${id}', 'c${id}')`);
+  type Positions = { positions: { id: number }[] };
+  const positions = async () => (await api.get<Positions>(`${url}/positions`)).positions;
+  const newest = async () => (await positions())[0]?.id ?? 0;
+  const beforeDeploy = await newest();
   await api.send('POST', `${url}/deploy`, {});
-  // Rows the source writes while the job stops and switches.
-  await ownerSql(ins(3));
+  // Rows the source writes while the job stops and switches. Not on Elasticsearch: Flink CDC 3.7's
+  // writer can't read back requests it buffered at the savepoint (elasticsearch_state, ADR 0014).
+  const duringSwitch = j.type !== 'elasticsearch';
+  if (duringSwitch) await ownerSql(ins(3));
   await lifecycle(api, url, 'streaming');
+  if (!duringSwitch) await ownerSql(ins(3));
   await ownerSql(`${ins(4)}; UPDATE ${table} SET a = 'a1x' WHERE id = 1`);
   await waitFor(`${j.type}: rows across the switch, every value in its own column`, async () => {
     const all = await rows(api, url, table);
@@ -199,6 +207,35 @@ async function journey(j: Journey) {
     const r2 = all.get(2)!;
     expect(r2.a, JSON.stringify(r2)).toBe('a2');
     expect(r2.f2 ?? null, JSON.stringify(r2)).toBeNull();
+    return true;
+  }, 600_000);
+
+  // ADR 0014: restoring an older position loses nothing written after it. The switched job saves a
+  // position (after the old job's stop savepoint), writes row 6 and saves more; restoring that
+  // position numbers the restored job's checkpoints past every one the pipeline reached, so the
+  // Iceberg committer doesn't skip them as committed.
+  await waitFor(`${j.type}: a position of the switched job`, async () => (await positions()).filter((p) => p.id > beforeDeploy).length >= 2, 600_000, 5_000);
+  const older = await newest();
+  await ownerSql(ins(6));
+  await waitFor(`${j.type}: row 6, then a later position`, async () => !!(await rows(api, url, table)).get(6) && (await newest()) > older, 600_000, 5_000);
+  await api.send('POST', `${url}/pause`);
+  await lifecycle(api, url, 'paused', 300_000);
+  await waitFor(`${j.type}: restore position #${older}`, async () => {
+    const res = await api.raw('POST', `${url}/positions/${older}/restore`, { confirm: name });
+    if (res.status() === 409 && (await res.json()).code === 'still_running') return false;
+    expect(res.status(), await res.text()).toBe(200);
+    return true;
+  }, 300_000, 5_000);
+  await api.send('POST', `${url}/resume`);
+  await lifecycle(api, url, 'streaming');
+  await ownerSql(ins(7));
+  await waitFor(`${j.type}: rows after restoring an older position`, async () => {
+    const all = await rows(api, url, table);
+    const r7 = all.get(7);
+    if (!r7 || !all.get(6)) return false;
+    expect(r7.a, JSON.stringify(r7)).toBe('a7');
+    expect(r7.f2, JSON.stringify(r7)).toBe('two');
+    expect(r7.label, JSON.stringify(r7)).toBe('A7');
     return true;
   }, 600_000);
 
@@ -254,7 +291,7 @@ async function journey(j: Journey) {
 }
 
 for (const j of JOURNEYS) {
-  test(`Flink CDC → ${j.type}: columns land in their own place across live changes, a column switch, Start over and a planned start`, async () => {
+  test(`Flink CDC → ${j.type}: columns land in their own place across live changes, a column switch, a restore, Start over and a planned start`, async () => {
     test.skip(!!j.olap && !OLAP, 'set E2E_OLAP to run the StarRocks and Doris journeys');
     test.setTimeout(2_400_000);
     await journey(j);

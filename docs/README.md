@@ -1069,7 +1069,7 @@ last saved position and where the pipeline started from. Health comes from the j
 never green before it runs and reads changes. Logs choose the JobManager or a TaskManager. Pause, resume, restart, new versions and rollback work as for Debezium: each stop saves
 the position first and the next start resumes from it. The **Positions** tab (instead of Snapshots)
 lists the saved positions (encrypted in the state database; positions set aside by a restore or
-start over, and all but the newest 10 savepoints, are removed after 7 days) and, while the pipeline is paused, can **Restore** an earlier one or **Start over**: copy every table
+start over, and all but the newest 10 savepoints, are removed after 7 days) and, while the pipeline is paused, can **Restore** an earlier one (the job reads the changes since that position again: keyed tables are upserted, tables without a key get those rows twice; one from before a source column change the destination already has fails with `schema_change_replayed`, a Flink CDC 3.7 limit) or **Start over**: copy every table
 again, read from now, or read since a time (MySQL and SQL Server). Re-copying selected tables is
 not available: start over instead. Deleting the pipeline removes its saved positions and, for
 PostgreSQL, every replication slot it created.

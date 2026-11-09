@@ -126,7 +126,8 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   changes only a format it checks byte by byte (Flink metadata 5 or 6, the schema operator's ID found
   once, an inline handle) and refuses anything else, so a crafted or unknown file can't make it write
   outside the entry. The column generation it compares sits in the state table, which only BeziSync's
-  roles write.
+  roles write. A restore of an older position also rewrites the copy's checkpoint id (8 bytes after
+  the checked header, ADR 0014).
 - **Network exposure.** Terminate TLS in front of the web service, keep the API private to
   it, and restrict who can reach `/metrics` (it requires `BEZISYNC_METRICS_TOKEN`).
 - **Supply chain.** The backend, controller and agent are one static Go binary on a distroless
