@@ -356,9 +356,31 @@ func (k *KubernetesDriver) Observe(ctx context.Context, shortID string) (Observa
 		return Observation{}, err
 	}
 	if pod == nil {
-		return Observation{Phase: PhasePending, ConfigHash: hash, Reason: "Waiting for the pod to be created."}, nil
+		return Observation{Phase: PhasePending, ConfigHash: hash, Reason: noPodReason(dep)}, nil
 	}
 	return podObservation(pod, hash), nil
+}
+
+// ReasonNoPod is a pending workload's reason while its pod doesn't exist yet: the pod isn't
+// counted in the runtime's measured capacity (preflight counts its need itself).
+const ReasonNoPod = "Waiting for the pod to be created."
+
+// ReasonRefusedPrefix starts a pending workload's reason when Kubernetes won't create its pod.
+const ReasonRefusedPrefix = "Kubernetes won't create the pod: "
+
+// noPodReason says why a Deployment has no pod: Kubernetes' refusal (a ResourceQuota exceeded, an
+// admission webhook) when its ReplicaSet reported one, else ReasonNoPod.
+func noPodReason(dep *appsv1.Deployment) string {
+	for _, c := range dep.Status.Conditions {
+		if c.Type == appsv1.DeploymentReplicaFailure && c.Status == corev1.ConditionTrue && c.Message != "" {
+			msg := c.Message
+			if len(msg) > 300 {
+				msg = msg[:300]
+			}
+			return ReasonRefusedPrefix + msg
+		}
+	}
+	return ReasonNoPod
 }
 
 // podObservation reads a pod's first container.

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -111,8 +112,18 @@ func TestKubernetesApplyAndObserve(t *testing.T) {
 		t.Fatalf("other owner sees %v", ids)
 	}
 	obs, _ := d.Observe(ctx, "abc123def456")
-	if obs.Phase != runtime.PhasePending || *obs.ConfigHash != "h1" {
+	if obs.Phase != runtime.PhasePending || *obs.ConfigHash != "h1" || obs.Reason != runtime.ReasonNoPod {
 		t.Fatalf("observe without pod %+v", obs)
+	}
+	// Kubernetes refused the pod (B3): its reason, not just "waiting".
+	dep.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentReplicaFailure, Status: corev1.ConditionTrue, Reason: "FailedCreate",
+		Message: `pods "bz-abc123def456-x" is forbidden: exceeded quota: cdc-quota, requested: requests.cpu=1, used: requests.cpu=3, limited: requests.cpu=3`}}
+	if _, err := cs.AppsV1().Deployments("cdc").UpdateStatus(ctx, dep, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	obs, _ = d.Observe(ctx, "abc123def456")
+	if obs.Phase != runtime.PhasePending || !strings.HasPrefix(obs.Reason, runtime.ReasonRefusedPrefix) || !strings.Contains(obs.Reason, "exceeded quota") {
+		t.Fatalf("observe refused pod %+v", obs)
 	}
 	_, _ = cs.CoreV1().Pods("cdc").Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "bz-abc-1", Labels: map[string]string{runtime.Label: "abc123def456"}, CreationTimestamp: metav1.Now()},

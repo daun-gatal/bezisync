@@ -159,3 +159,28 @@ func TestClusterPackPreview(t *testing.T) {
 	other := e.admin.post("/api/v1/projects", map[string]any{"slug": "other", "name": "Other"}).expect(201).Str("id")
 	e.admin.post("/api/v1/projects/"+other+"/pipelines/"+p.Str("id")+"/cluster:pack", map[string]any{"nonsense": true}).expect(404)
 }
+
+// B3: a pipeline deployed to the same runtime moments ago has no pods yet, so the measured
+// capacity doesn't count it; preflight does, and blocks when both don't fit the quota.
+func TestCapacityCountsPipelinesStillStarting(t *testing.T) {
+	e := newPipelineEnv(t)
+	first := createPipeline(t, e.admin, e.pid, e.ids, "shop.orders")
+	firstURL := "/api/v1/projects/" + e.pid + "/pipelines/" + first.Str("id")
+	e.driver.Cap = map[string]any{"cpu_allocatable": 8, "memory_allocatable": 16 << 30, "quota": true, "quota_cpu_free": 0.75, "quota_memory_free": 8 << 30}
+	e.admin.post(firstURL+"/deploy", map[string]any{}).expect(200) // not reconciled yet: no pods
+	body := map[string]any{"name": "second", "source_id": e.ids.Source, "sink_id": e.ids.Sink, "runtime_id": e.ids.Runtime,
+		"spec": map[string]any{"source": map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}}}
+	second := e.admin.post("/api/v1/projects/"+e.pid+"/pipelines", body).expect(201)
+	pre := e.admin.post("/api/v1/projects/"+e.pid+"/pipelines/"+second.Str("id")+"/preflight", nil).expect(200)
+	c := checkOf(t, pre, "runtime_capacity")
+	if c == nil || at(t, c, "status") != "fail" || at(t, c, "blocking") != true ||
+		!strings.Contains(at(t, c, "message").(string), first.Str("name")+" starts here without pods yet") {
+		t.Fatal(c)
+	}
+	// Once its pods exist (the controller observed them), the measurement counts them instead.
+	e.tick()
+	pre = e.admin.post("/api/v1/projects/"+e.pid+"/pipelines/"+second.Str("id")+"/preflight", nil).expect(200)
+	if c := checkOf(t, pre, "runtime_capacity"); c == nil || strings.Contains(at(t, c, "message").(string), "without pods yet") {
+		t.Fatal(c)
+	}
+}
