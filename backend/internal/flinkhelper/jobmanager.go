@@ -153,6 +153,11 @@ var fatal = []struct {
 		"The Oracle user may not analyze the captured tables, which Flink CDC's first copy does. Grant ANALYZE ANY (preflight shows the statement), then restart."},
 	{regexp.MustCompile(`Failed to flush Oracle LogWriter`), "oracle_flush_table",
 		"The Oracle user's LOG_MINING_FLUSH table is missing from the CDB root. Deploy again (BeziSync creates it) or create it (preflight shows the statement)."},
+	// Flink CDC 3.7.0's Elasticsearch writer misreads the requests it had buffered when the position
+	// was saved (OperationSerializer sizes its reader by the request's size estimate), and runs out of
+	// memory on every restore.
+	{regexp.MustCompile(`(?s)OutOfMemoryError.*elasticsearch.*OperationSerializer\.deserialize`), "elasticsearch_state",
+		"Flink CDC's Elasticsearch writer can't read the requests it held when the position was saved (a Flink CDC 3.7 bug), so the job can't resume. Pause the pipeline and use Positions → Start over, copying the tables again: documents are written by id, so nothing is lost."},
 	{regexp.MustCompile(`Cannot find any table by the option 'tables'`), "tables_missing",
 		"None of the pipeline's tables can be found in the source. Check that they exist and the user can read them, then deploy again."},
 }

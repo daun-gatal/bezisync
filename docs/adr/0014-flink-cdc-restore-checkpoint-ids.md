@@ -48,6 +48,17 @@ committed. The stored position isn't changed.
 
 The rewrite applies to every destination: it only raises numbers.
 
+### Also: an Elasticsearch job that can't read its own state stops and says why
+
+Found while testing this ADR: Flink CDC 3.7.0's Elasticsearch writer saves the requests it has buffered in its
+state, and reads them back with a Kryo `Input` sized by each request's size estimate
+(`OperationSerializer.deserialize`); with requests buffered at the saved position the reader loses its place and
+allocates a buffer of a garbage size, so every restore (BeziSync's, and Flink's own after a failure) ends in
+`OutOfMemoryError` and the job restarts forever. BeziSync can't fix a Flink CDC jar, and dropping the writer's state
+would drop those requests (the source's position in the same state is past them). The helper now recognises the
+failure, cancels the job and reports `elasticsearch_state`: Start over, copying the tables again, loses nothing
+because Elasticsearch documents are written by id.
+
 ### Verification plan
 
 Go tests; `make verify-quick`; `go test -race ./...`; e2e `35-flink-cdc-columns`, whose journeys restore an older
@@ -64,6 +75,7 @@ position of the switched job and check that a row written after the restore arri
 | R4 | Only the 8 bytes of the id change; another format is refused | as stated | `TestCheckpointIDReadAndRewrite` |
 | R5 | A stop savepoint | stored with its own checkpoint id | `TestJobManagerRunsStoresAndStopsWithSavepoint` |
 | R6 | The highest id counts positions set aside by a restore | as stated | `TestStoreRoundTrip` (`MaxFlinkID`) |
+| R7 | Elasticsearch writer runs out of memory reading its state | cancelled, `elasticsearch_state` with the Start over fix | `TestJobManagerStopsOnFailuresThatDontHeal` |
 
 ## Consequences
 
