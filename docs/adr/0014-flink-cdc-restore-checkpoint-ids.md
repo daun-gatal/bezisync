@@ -59,6 +59,16 @@ would drop those requests (the source's position in the same state is past them)
 failure, cancels the job and reports `elasticsearch_state`: Start over, copying the tables again, loses nothing
 because Elasticsearch documents are written by id.
 
+### Also: a replayed source column change stops and says why
+
+Found the same way (e2e cluster: a source `ADD COLUMN` and `RENAME COLUMN`, then Positions → Restore of a
+position from before them, same column generation): the restored job reads the change again, Flink CDC sends the
+destination an `AddColumnEvent` for a column the table already has, Iceberg refuses it (`Cannot add column, name
+already exists`), and the job fails over forever. The same happens after a crash between a source column change
+and the next checkpoint. Flink CDC 3.7.0 tolerates no applier error but an unsupported change (`TRY_EVOLVE`), and
+BeziSync can't make the applier idempotent. The helper now cancels the job and reports `schema_change_replayed`:
+restore a position saved after the change, or Start over.
+
 ### Verification plan
 
 Go tests; `make verify-quick`; `go test -race ./...`; e2e `35-flink-cdc-columns`, whose journeys restore an older
@@ -76,6 +86,7 @@ position of the switched job and check that a row written after the restore arri
 | R5 | A stop savepoint | stored with its own checkpoint id | `TestJobManagerRunsStoresAndStopsWithSavepoint` |
 | R6 | The highest id counts positions set aside by a restore | as stated | `TestStoreRoundTrip` (`MaxFlinkID`) |
 | R7 | Elasticsearch writer runs out of memory reading its state | cancelled, `elasticsearch_state` with the Start over fix | `TestJobManagerStopsOnFailuresThatDontHeal` |
+| R8 | A restore replays a source column change the destination has | cancelled, `schema_change_replayed` | `TestJobManagerStopsOnFailuresThatDontHeal`; reproduced on the e2e cluster |
 
 ## Consequences
 
@@ -83,8 +94,8 @@ position of the switched job and check that a row written after the restore arri
   the changes since that position (upserts on keyed tables, duplicates on tables without a key, as any
   at-least-once replay).
 - Checkpoint ids jump by about 1000 after such a restore. Nothing reads them as a count.
-- Still open (0013): a Postgres job restored from a checkpoint taken while its first copy was finishing stopped
-  reading new changes.
+- The 0013 note on a Postgres job that stopped reading after a restore: that restore crossed a source column change
+  (R8's case); a restore of the first-copy checkpoint without one resumed normally on the e2e cluster.
 
 ## Alternatives considered
 

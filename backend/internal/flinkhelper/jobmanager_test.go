@@ -596,6 +596,8 @@ func TestJobManagerStopsOnFailuresThatDontHeal(t *testing.T) {
 		"java.lang.RuntimeException: Fail to analyze table in chunk splitter.\nCaused by: java.sql.SQLSyntaxErrorException: ORA-01031: insufficient privileges": "oracle_analyze",
 		"io.debezium.DebeziumException: Failed to flush Oracle LogWriter (LGWR) buffers to disk":                                                                "oracle_flush_table",
 		"java.lang.IllegalArgumentException: Cannot find any table by the option 'tables' = SHOP.ORDERS":                                                        "tables_missing",
+		// Replaying a source ADD COLUMN the Iceberg table already has (ADR 0014).
+		"org.apache.flink.cdc.common.exceptions.SchemaEvolveException: SchemaEvolveException{applyingEvent=AddColumnEvent{…}, exceptionMessage='Cannot add column, name already exists: aa'}": "schema_change_replayed",
 		// As the e2e run logged it (ADR 0014).
 		"java.lang.OutOfMemoryError: Java heap space\n\tat com.esotericsoftware.kryo.io.Input.<init>(Input.java:52)\n\tat org.apache.flink.cdc.connectors.elasticsearch.v2.OperationSerializer.deserialize(OperationSerializer.java:67)": "elasticsearch_state",
 	}

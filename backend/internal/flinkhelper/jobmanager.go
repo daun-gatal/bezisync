@@ -158,6 +158,10 @@ var fatal = []struct {
 	// memory on every restore.
 	{regexp.MustCompile(`(?s)OutOfMemoryError.*elasticsearch.*OperationSerializer\.deserialize`), "elasticsearch_state",
 		"Flink CDC's Elasticsearch writer can't read the requests it held when the position was saved (a Flink CDC 3.7 bug), so the job can't resume. Pause the pipeline and use Positions → Start over, copying the tables again: documents are written by id, so nothing is lost."},
+	// Flink CDC applies a source column change again when the job replays it (a restore from before
+	// it, or a crash before the next checkpoint), and the destination refuses a column it has.
+	{regexp.MustCompile(`(?s)SchemaEvolveException.*(?:name already exists|already exists|Duplicate column)`), "schema_change_replayed",
+		"The job resumed from a position saved before a source column change the destination tables already have, and Flink CDC 3.7 applies that change again and fails. Restore a position saved after the change, or Start over (copying the tables again)."},
 	{regexp.MustCompile(`Cannot find any table by the option 'tables'`), "tables_missing",
 		"None of the pipeline's tables can be found in the source. Check that they exist and the user can read them, then deploy again."},
 }
