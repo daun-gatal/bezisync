@@ -1024,6 +1024,19 @@ func DebeziumNeed(policies domain.Policies) Need {
 // measurement. Over the namespace's ResourceQuota blocks: Kubernetes would refuse the pods. Over
 // the free CPU or memory warns: the pods may wait for room.
 func capacityCheck(capacity map[string]any, need, running Need, what string) *checks.Check {
+	return capacityCheckWith(capacity, need, running, what, pending{})
+}
+
+// pending is what other pipelines on the runtime will ask for once their pods exist: deployed to
+// run, but not yet counted in the runtime's measured capacity (B3).
+type pending struct {
+	Need
+	names []string
+}
+
+// capacityCheckWith is capacityCheck counting pipelines still starting on the runtime: two
+// deploys seconds apart both passed while the first one's pods didn't exist yet.
+func capacityCheckWith(capacity map[string]any, need, running Need, what string, others pending) *checks.Check {
 	title := "Runtime capacity"
 	if len(capacity) == 0 || toFloat(capacity["cpu_allocatable"]) == 0 {
 		return &checks.Check{Code: "runtime_capacity", Title: title, Category: checks.CatCapacity, Status: checks.Unknown,
@@ -1033,6 +1046,16 @@ func capacityCheck(capacity map[string]any, need, running Need, what string) *ch
 	asks := fmt.Sprintf("this pipeline asks for %s CPU and %d MiB%s", strconv.FormatFloat(need.CPU, 'g', -1, 64), need.MiB, what)
 	if running != (Need{}) {
 		asks += fmt.Sprintf(", %s CPU and %d MiB more than it runs now", strconv.FormatFloat(extra.CPU, 'g', -1, 64), extra.MiB)
+	}
+	if len(others.names) > 0 {
+		verb := "starts"
+		if len(others.names) > 1 {
+			verb = "start"
+		}
+		asks += fmt.Sprintf(", and %s %s here without pods yet, asking for %s CPU and %d MiB", strings.Join(others.names, ", "), verb,
+			strconv.FormatFloat(others.CPU, 'g', -1, 64), others.MiB)
+		extra.CPU += others.CPU
+		extra.MiB += others.MiB
 	}
 	if q, _ := capacity["quota"].(bool); q {
 		cpuFree, hasCPU := capacity["quota_cpu_free"]
@@ -1048,7 +1071,7 @@ func capacityCheck(capacity map[string]any, need, running Need, what string) *ch
 			}
 			return &checks.Check{Code: "runtime_capacity", Title: title, Category: checks.CatCapacity, Status: checks.Fail, Blocking: true,
 				Message: fmt.Sprintf("The namespace's ResourceQuota leaves %s; %s. Kubernetes would refuse its pods.", strings.Join(left, " and "), asks),
-				Fix:     &checks.Fix{Kind: "text", Who: "you", Code: "Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota."}}
+				Fix:     &checks.Fix{Kind: "text", Who: "you", Code: quotaFix(others)}}
 		}
 	}
 	freeCPU := toFloat(capacity["cpu_allocatable"]) - toFloat(capacity["cpu_requested"])
@@ -1073,6 +1096,54 @@ func capacityCheck(capacity map[string]any, need, running Need, what string) *ch
 		msg += " Within the namespace's ResourceQuota."
 	}
 	return &checks.Check{Code: "runtime_capacity", Title: title, Category: checks.CatCapacity, Status: checks.Pass, Message: msg}
+}
+
+func quotaFix(others pending) string {
+	if len(others.names) > 0 {
+		return "Wait until " + strings.Join(others.names, ", ") + " run (or pause one), choose a smaller size, or ask an admin to raise the namespace's ResourceQuota."
+	}
+	return "Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota."
+}
+
+// pendingNeed sums what the other pipelines on this runtime ask for that should run but have no
+// pods yet (the controller hasn't created them, or Kubernetes refused them): the measured capacity
+// doesn't count them.
+func pendingNeed(ctx context.Context, q db.Querier, p *models.Pipeline, rt *models.Runtime) (pending, error) {
+	others, err := db.Select[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE runtime_id = $1 AND id <> $2 AND deleted_at IS NULL
+		AND desired_state = 'running' AND deployed_version_id IS NOT NULL ORDER BY name`, rt.ID, p.ID)
+	if err != nil {
+		return pending{}, err
+	}
+	var out pending
+	for i := range others {
+		o := &others[i]
+		if !withoutPods(o) {
+			continue
+		}
+		n, err := runningNeed(ctx, q, o, rt)
+		if err != nil {
+			return pending{}, err
+		}
+		out.CPU += n.CPU
+		out.MiB += n.MiB
+		out.names = append(out.names, o.Name)
+	}
+	return out, nil
+}
+
+// withoutPods reports a pipeline whose last observation found no pod: none yet, or one Kubernetes
+// won't create.
+func withoutPods(p *models.Pipeline) bool {
+	w, _ := p.Status["workload"].(map[string]any)
+	phase, _ := w["phase"].(string)
+	reason, _ := w["reason"].(string)
+	switch phase {
+	case "", runtime.PhaseMissing:
+		return true
+	case runtime.PhasePending:
+		return reason == runtime.ReasonNoPod || strings.HasPrefix(reason, runtime.ReasonRefusedPrefix)
+	}
+	return false
 }
 
 // runtimeReport tests the runtime, and returns the capacity it reported just now (nil when the
@@ -1248,12 +1319,16 @@ func Preflight(ctx context.Context, q db.Querier, p *models.Pipeline, spec domai
 	if err != nil {
 		return nil, err
 	}
-	capacity := capacityCheck(rt.Capacity, DebeziumNeed(spec.Policies), running, "")
+	others, err := pendingNeed(ctx, q, p, rt)
+	if err != nil {
+		return nil, err
+	}
+	capacity := capacityCheckWith(rt.Capacity, DebeziumNeed(spec.Policies), running, "", others)
 	var fit *checks.Check
 	if EngineOf(p) == engine.FlinkCDC {
 		placed := RuntimeCapacityFor(p, spec, rt)
 		packed := FlinkSizeOf(p, spec, placed)
-		capacity = capacityCheck(rt.Capacity, FlinkNeed(packed.Size), running, flinkWhat(packed.Size))
+		capacity = capacityCheckWith(rt.Capacity, FlinkNeed(packed.Size), running, flinkWhat(packed.Size), others)
 		fit = flinkClusterFitCheck(spec, packed, placed)
 	}
 	placement := placementCheck(p, spec, rt)

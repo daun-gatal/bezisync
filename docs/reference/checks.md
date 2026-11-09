@@ -2476,11 +2476,18 @@ Ask the runtime's Admin to fix the profile, or label or untaint nodes for it.
 - Why: The connector may stay pending until resources free up.
 - Why: Over the namespace's ResourceQuota, Kubernetes refuses the pods, so the deploy is blocked (even forced). A redeploy counts only what it adds to what the pipeline runs now.
 - Why: Measured when preflight runs; when the runtime doesn't report its CPU and memory, the check is unknown, never passed.
+- Why: Pipelines deployed to the same runtime that have no pods yet (the controller hasn't created them, or Kubernetes refused them) aren't in the measurement, so the check adds what they ask for and names them.
 
 Fix:
 
 ```
 Choose a smaller size, or ask an admin to raise the namespace's ResourceQuota.
+```
+
+Fix:
+
+```
+Wait until the pipelines still starting on this runtime run (or pause one), choose a smaller size, or ask an admin to raise the namespace's ResourceQuota.
 ```
 
 <a id="runtime-disabled"></a>

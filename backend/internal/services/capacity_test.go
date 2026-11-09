@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
+	"github.com/daun-gatal/bezisync/backend/internal/models"
 )
 
 func TestCapacityCheck(t *testing.T) {
@@ -47,6 +48,45 @@ func TestCapacityCheck(t *testing.T) {
 		got := capacityCheck(c.capacity, c.need, c.runs, "")
 		if got == nil || got.Status != c.status || got.Blocking != c.blocking || !strings.Contains(got.Message, c.wantInMessage) {
 			t.Errorf("%s: %+v", name, got)
+		}
+	}
+}
+
+// B3: pipelines deployed to the same runtime whose pods don't exist yet aren't in the measured
+// capacity; preflight counts what they ask for.
+func TestCapacityCheckCountsPipelinesWithoutPods(t *testing.T) {
+	need := Need{CPU: 1.5, MiB: 3072}
+	quota := map[string]any{"cpu_allocatable": 8.0, "cpu_requested": 2.0, "memory_allocatable": float64(16 << 30), "memory_requested": float64(4 << 30),
+		"quota": true, "quota_cpu_free": 2.0, "quota_memory_free": float64(4 << 30)}
+	if c := capacityCheckWith(quota, need, Need{}, "", pending{}); c.Status != checks.Pass {
+		t.Fatal(c)
+	}
+	others := pending{Need: Need{CPU: 1.5, MiB: 3072}, names: []string{"bzprobe-a"}}
+	c := capacityCheckWith(quota, need, Need{}, "", others)
+	if c.Status != checks.Fail || !c.Blocking || !strings.Contains(c.Message, "bzprobe-a starts here without pods yet, asking for 1.5 CPU and 3072 MiB") ||
+		!strings.Contains(c.Fix.Code, "Wait until bzprobe-a run") {
+		t.Fatal(c)
+	}
+	// Without a quota, the nodes' free CPU counts them too.
+	room := map[string]any{"cpu_allocatable": 4.0, "cpu_requested": 1.5}
+	if c := capacityCheckWith(room, need, Need{}, "", others); c.Status != checks.Warn {
+		t.Fatal(c)
+	}
+}
+
+func TestWithoutPods(t *testing.T) {
+	for want, statuses := range map[bool][]map[string]any{
+		true: {nil, {"workload": map[string]any{"phase": "missing"}},
+			{"workload": map[string]any{"phase": "pending", "reason": "Waiting for the pod to be created."}},
+			{"workload": map[string]any{"phase": "pending", "reason": "Kubernetes won't create the pod: exceeded quota"}}},
+		false: {{"workload": map[string]any{"phase": "running"}},
+			{"workload": map[string]any{"phase": "pending", "reason": "ContainerCreating"}},
+			{"workload": map[string]any{"phase": "stopped"}}},
+	} {
+		for _, st := range statuses {
+			if got := withoutPods(&models.Pipeline{Status: st}); got != want {
+				t.Errorf("%v: %v", st, got)
+			}
 		}
 	}
 }

@@ -288,8 +288,10 @@ Preflight measures the runtime when it runs (`runtime_capacity`): it warns when 
 free right now is short (the pods may wait for room), blocks — even forced — when the Kubernetes
 namespace's ResourceQuota leaves less than the pipeline asks for (Kubernetes would refuse its
 pods), and is *unknown*, never passed, when the runtime doesn't report its capacity. A redeploy
-counts only what it adds to what the pipeline runs now. Two deploys checked at the same moment can
-each fit alone; Kubernetes then refuses the pods of the second, and the pipeline shows why.
+counts only what it adds to what the pipeline runs now, and pipelines deployed to the runtime that
+have no pods yet count too (named in the message). Two deploys checked at the very same moment can
+still each fit alone; Kubernetes then refuses the pods of the second, and its status gives
+Kubernetes' reason ("exceeded quota: …").
 
 Review & deploy saves as you change it. When something can't be saved, the badge above the settings
 says which field (**Not saved: fix Memory**, or **Memory and 2 more**; **Fix … before deploying** when

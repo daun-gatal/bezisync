@@ -293,7 +293,7 @@ func (k *KubernetesDriver) observeFlink(ctx context.Context, id string, jm *apps
 	}
 	var obs Observation
 	if len(jmPods) == 0 {
-		obs = Observation{Phase: PhasePending, ConfigHash: hash, Reason: "Waiting for the pod to be created."}
+		obs = Observation{Phase: PhasePending, ConfigHash: hash, Reason: noPodReason(jm)}
 	} else {
 		obs = podObservation(&jmPods[len(jmPods)-1], hash)
 		if obs.Phase == PhasePending {
@@ -305,8 +305,12 @@ func (k *KubernetesDriver) observeFlink(ctx context.Context, id string, jm *apps
 		return Observation{}, err
 	}
 	wanted := 0
+	tmRefused := ""
 	if tm, err := k.cs.AppsV1().Deployments(k.namespace).Get(ctx, flinkTMDeployment(id), metav1.GetOptions{}); err == nil && tm.Spec.Replicas != nil {
 		wanted = int(*tm.Spec.Replicas)
+		if r := noPodReason(tm); r != ReasonNoPod {
+			tmRefused = r
+		}
 	}
 	var components []any
 	readyTMs := 0
@@ -325,6 +329,9 @@ func (k *KubernetesDriver) observeFlink(ctx context.Context, id string, jm *apps
 			"ready": ready, "restarts": restarts, "node": p.Spec.NodeName})
 	}
 	obs.Ready = obs.Ready && readyTMs >= wanted
+	if tmRefused != "" && len(tmPods) < wanted && obs.Reason == "" {
+		obs.Reason = "TaskManagers: " + tmRefused
+	}
 	if obs.Details == nil {
 		obs.Details = map[string]any{}
 	}
