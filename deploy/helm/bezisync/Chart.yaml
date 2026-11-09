@@ -2,8 +2,8 @@ apiVersion: v2
 name: bezisync
 description: BeziSync — self-service control plane for Debezium Server
 type: application
-version: 0.2.3
-appVersion: "0.6.0"
+version: 0.2.4
+appVersion: "0.7.0"
 home: https://github.com/daun-gatal/bezisync
 sources: [https://github.com/daun-gatal/bezisync]
 keywords: [debezium, cdc, kafka, change-data-capture]

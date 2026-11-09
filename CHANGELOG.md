@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.7.0] - 2026-11-09
+
+### Added
+- **Flink CDC switches columns at the saved position** - a version that changes the columns a Flink CDC pipeline writes (a step that adds, computes or removes a column, keeping deleted rows, a rollback) no longer needs a Start over: once the running job has stopped with a savepoint, BeziSync adds the new columns to the destination tables and the job resumes from exactly that position writing them, with nothing copied again and no change lost (ADR 0013). Positions saved before the switch restore with the new columns too. Flink CDC pipelines keep their configuration until their next deploy.
+
+### Fixed
+- **Flink CDC never writes a value into another column** - Iceberg and Paimon write rows into a table by position, and Flink CDC doesn't change a table that already exists: a Start over after a step added a column (or after the source added, renamed or dropped one) filled existing columns with other columns' values while the pipeline stayed Healthy. Before every start without a saved position BeziSync now reads each destination table, writes its columns in the table's order (a column the pipeline no longer writes stays, empty), and adds the columns a table lacks (Iceberg, StarRocks, Doris, OceanBase; Paimon gets the statements to run); a start it can't make safe doesn't happen (ADR 0012).
+- **A column change is no longer dropped silently** - Flink CDC resumes a saved position with the columns it started with, so a version that changed them was half-applied without a word; such a version now switches columns at the saved position (see *Flink CDC switches columns at the saved position*).
+- **No hidden fresh starts** - with nothing to restore, a Flink CDC pipeline starts without a saved position only when BeziSync planned that start; otherwise it stops with `no_position` instead of writing into tables nobody read. Restoring a position saved before the last Start over is refused (`position_before_layout`).
+- **Keep deleted rows on StarRocks** - StarRocks reserves `__op`, so the table was never created; the change type is written to `__bz_op` there. Flink CDC pipelines to StarRocks that keep deleted rows restart on upgrade (they never ran).
+- **MCP `update_pipeline` changes only the fields sent** - it replaced the whole spec, resetting the tables, steps and snapshot mode when one field was sent.
+- **Fix texts** no longer point to a Start over that drops destinations (there is none).
+- **The capacity check counts pipelines still starting** - two pipelines deployed to one runtime seconds apart both passed preflight while the first one's pods didn't exist yet, and one then waited forever on the namespace's ResourceQuota. Preflight now adds what the pipelines on that runtime without pods yet ask for, and names them.
+- **A pod Kubernetes won't create says why** - the status said only "Waiting for the pod to be created" when a ResourceQuota (or an admission webhook) refused the pod; it now gives Kubernetes' reason.
+- **Restoring an older Flink CDC position into Iceberg no longer drops rows** - the restored job numbered its checkpoints from the old position, and Flink CDC's Iceberg committer skipped every commit whose number it had already seen, so what the job wrote until it passed the old numbers was lost. A restore of an older position, or from a checkpoint after a crash (when the job may have committed later ones), now numbers past every checkpoint the pipeline reached (ADR 0014).
+- **A Flink CDC job to Elasticsearch that can't read its own state stops and says why** - Flink CDC 3.7's Elasticsearch writer runs out of memory reading the requests it held when the position was saved, and restarted forever; BeziSync now cancels it and says to Start over, copying the tables again (documents are written by id, so nothing is lost).
+- **A Flink CDC job that replays a source column change stops and says why** - a restore from before a source column change (or a crash right after one) made Flink CDC add the column again, the destination refused it, and the job failed over forever; it now stops with `schema_change_replayed`: restore a later position, or Start over.
+- **A source column added while a Flink CDC pipeline was stopped no longer fails it** - a deploy named the column before the resumed job had read the change that added it, and the job failed with a misleading "transform can't run" (hold mode, the default, and tables written column by column). BeziSync now holds such a column back and resumes; the next deploy writes it (ADR 0015).
+
 ## [v0.6.0] - 2026-11-08
 
 ### Changed
