@@ -470,6 +470,13 @@ func (c *Controller) Reconcile(ctx context.Context, id uuid.UUID) error {
 		if err := c.flinkPhase(ctx, tx, p, spec, seen.flink, verdict.Lifecycle == domain.LifecycleFailed || helperFailed); err != nil {
 			return err
 		}
+		// A restored job named source columns it hasn't read yet: hold them back, so the next tick
+		// compiles without them and the job resumes (ADR 0015).
+		if seen.flink != nil && seen.flink.ErrorCode == "column_not_read" && len(seen.flink.UnreadColumns) > 0 {
+			if _, err := services.HoldUnreadColumns(ctx, tx, p, seen.flink.UnreadColumns); err != nil {
+				return err
+			}
+		}
 		if positionNote != nil {
 			st := statusCopy(p)
 			for k, v := range positionNote {

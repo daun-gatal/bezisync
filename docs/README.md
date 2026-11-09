@@ -1049,6 +1049,10 @@ put values into the wrong columns. BeziSync keeps that from happening:
   (`flink_columns_changed`). To fill the new columns for the old rows too, Start over and copy the
   tables again. A source column added after the last saved position (while the pipeline was stopped)
   isn't written at a switch on a table whose order BeziSync fixed: it waits for the next deploy.
+- **A column added while the pipeline was stopped.** Flink CDC learns a table's new column only when it reads
+  the change that added it, so a deploy that names it before the resumed job got there would fail the job.
+  When that happens BeziSync holds the column back (`column_not_read`, audited `pipeline.columns_held`) and
+  resumes; the next deploy writes it.
 - **A start without a saved position** (the first one, one after Start over) is planned: BeziSync reads
   every destination table that exists, writes its columns in the table's order (a column the pipeline
   no longer writes stays, empty for new rows), and adds the columns a table lacks at its end before the

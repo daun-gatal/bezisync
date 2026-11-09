@@ -598,6 +598,8 @@ func TestJobManagerStopsOnFailuresThatDontHeal(t *testing.T) {
 		"java.lang.IllegalArgumentException: Cannot find any table by the option 'tables' = SHOP.ORDERS":                                                        "tables_missing",
 		// Replaying a source ADD COLUMN the Iceberg table already has (ADR 0014).
 		"org.apache.flink.cdc.common.exceptions.SchemaEvolveException: SchemaEvolveException{applyingEvent=AddColumnEvent{…}, exceptionMessage='Cannot add column, name already exists: aa'}": "schema_change_replayed",
+		// As a hold-mode pipeline logged it after a column was added while paused.
+		"org.apache.flink.cdc.runtime.operators.transform.exceptions.TransformException: Failed to post-transform with\nCaused by: org.apache.calcite.runtime.CalciteContextException: From line 1, column 19 to line 1, column 21: Column 'n' not found in any table": "column_not_read",
 		// As the e2e run logged it (ADR 0014).
 		"java.lang.OutOfMemoryError: Java heap space\n\tat com.esotericsoftware.kryo.io.Input.<init>(Input.java:52)\n\tat org.apache.flink.cdc.connectors.elasticsearch.v2.OperationSerializer.deserialize(OperationSerializer.java:67)": "elasticsearch_state",
 	}
@@ -612,6 +614,9 @@ func TestJobManagerStopsOnFailuresThatDontHeal(t *testing.T) {
 			_, cancels, _, _ := h.f.counts()
 			if st.ErrorCode != code || st.Error == "" || cancels != 1 {
 				t.Fatalf("%+v cancels %d", st, cancels)
+			}
+			if code == "column_not_read" && (len(st.UnreadColumns) != 1 || st.UnreadColumns[0] != "n") {
+				t.Fatalf("unread columns %v", st.UnreadColumns)
 			}
 			rec := httptest.NewRecorder()
 			h.m.Health().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/q/health", nil))

@@ -487,3 +487,58 @@ func TestFlinkColumnSwitchAtTheSavedPosition(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 }
+
+// ADR 0015: a restored job that names a source column it hasn't read yet (column_not_read) has it
+// held back: the controller drops it from the columns the pipeline writes, the compile changes, and
+// the job starts again; the next deploy writes it again.
+func TestFlinkHoldsColumnsTheJobHasntRead(t *testing.T) {
+	e := newPipelineEnv(t)
+	enableFlink(t, e.admin)
+	exec(t, `ALTER TABLE shop.orders REPLICA IDENTITY FULL`)
+	tables := map[string]any{"tables": map[string]any{"include": []string{"shop.orders"}}}
+	body := map[string]any{"name": "held-flink", "source_id": e.ids.Source, "sink_id": e.ids.Sink, "runtime_id": e.ids.Runtime, "engine": "flink-cdc",
+		"spec": map[string]any{"source": tables, "flink_cdc": map[string]any{"new_columns": "hold"}}}
+	pipe := e.admin.post("/api/v1/projects/"+e.pid+"/pipelines", body).expect(201)
+	url := "/api/v1/projects/" + e.pid + "/pipelines/" + pipe.Str("id")
+	short := shortOf(pipe.Str("id"))
+	exec(t, `ALTER TABLE shop.orders ADD COLUMN note text`)
+	t.Cleanup(func() { exec(t, `ALTER TABLE shop.orders DROP COLUMN IF EXISTS note`) })
+	e.admin.post(url+"/deploy", map[string]any{}).expect(200)
+	e.tick()
+	hash := func() string {
+		e.driver.mu.Lock()
+		defer e.driver.mu.Unlock()
+		return e.driver.Workloads[short].ConfigHash
+	}
+	before := hash()
+	e.driver.mu.Lock()
+	e.driver.FlinkStatus = `{"phase": "failed", "error_code": "column_not_read", "error": "names columns", "unread_columns": ["note"]}`
+	e.driver.mu.Unlock()
+	e.tick()
+	ctx := context.Background()
+	q := testdb.Pool(t)
+	p, err := db.Find[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE id = $1`, pipe.Str("id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cols := fmt.Sprint(p.Artifacts[services.ArtifactColumns]); strings.Contains(cols, "note") || !strings.Contains(cols, "total") {
+		t.Fatal(cols)
+	}
+	if held := fmt.Sprint(p.Artifacts[services.ArtifactHeldUnread]); !strings.Contains(held, "note") {
+		t.Fatal(held)
+	}
+	var n int
+	if err := q.QueryRow(ctx, `SELECT count(*) FROM events WHERE kind = 'pipeline.columns_held' AND resource_id = $1`, p.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	e.driver.mu.Lock()
+	e.driver.FlinkStatus = ""
+	e.driver.mu.Unlock()
+	e.tick()
+	if after := hash(); after == before || after == "" {
+		t.Fatalf("config hash %q → %q: the job wasn't started again without the column", before, after)
+	}
+	if cfg := e.admin.get(url + "/config").expect(200).Str("properties"); strings.Contains(cfg, "note") {
+		t.Fatal(cfg)
+	}
+}

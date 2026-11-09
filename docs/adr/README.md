@@ -52,3 +52,4 @@ The other options, and why they lost.
 | [0012](0012-flink-cdc-column-layout.md) | Flink CDC writes the destination's columns in the destination's order, or doesn't start | Accepted (D2 replaced by 0013) |
 | [0013](0013-flink-cdc-column-switch.md) | Flink CDC switches columns at the saved position | Accepted |
 | [0014](0014-flink-cdc-restore-checkpoint-ids.md) | A restored Flink CDC job numbers its checkpoints past every one the pipeline reached | Accepted |
+| [0015](0015-flink-cdc-columns-the-job-hasnt-read.md) | Flink CDC holds back source columns a restored job hasn't read yet | Accepted |

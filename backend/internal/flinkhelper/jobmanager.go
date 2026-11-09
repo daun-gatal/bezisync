@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,9 +40,12 @@ const (
 
 // Status is what the helper knows, served at /bz/status.
 type Status struct {
-	Phase              string     `json:"phase"`
-	Error              string     `json:"error,omitempty"`
-	ErrorCode          string     `json:"error_code,omitempty"`
+	Phase     string `json:"phase"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+	// UnreadColumns: with error_code column_not_read, the source columns the job named before it had
+	// read them (the controller holds them back).
+	UnreadColumns      []string   `json:"unread_columns,omitempty"`
 	JobID              string     `json:"job_id,omitempty"`
 	JobState           string     `json:"job_state,omitempty"`
 	JobStartedAt       *time.Time `json:"job_started_at,omitempty"`
@@ -142,6 +146,10 @@ var fatal = []struct {
 		"A destination table the saved position refers to is gone. Start over to create and copy the tables again."},
 	{regexp.MustCompile(`Before data is null for UPDATE/DELETE event`), "replica_identity",
 		"PostgreSQL sends updates and deletes without the old row: set REPLICA IDENTITY FULL on the captured tables (preflight shows the statement), then Start over."},
+	// Before transform_failed: a restored job's steps name a source column it hasn't read yet (the
+	// source added it after the saved position); the controller holds it back (unreadColumn).
+	{unreadColumn, "column_not_read",
+		"The pipeline names source columns Flink CDC hasn't read yet: the source added them after the position the job resumed from. BeziSync holds them back and resumes; the next deploy writes them."},
 	{regexp.MustCompile(`TransformException|No match found for function signature`), "transform_failed",
 		"A transform can't run on Flink CDC. Change it in the Transform step, then deploy again."},
 	// Flink CDC's Oracle reader (ADR 0006).
@@ -165,6 +173,9 @@ var fatal = []struct {
 	{regexp.MustCompile(`Cannot find any table by the option 'tables'`), "tables_missing",
 		"None of the pipeline's tables can be found in the source. Check that they exist and the user can read them, then deploy again."},
 }
+
+// unreadColumn is Calcite's message for a column the projection names and the schema lacks.
+var unreadColumn = regexp.MustCompile(`Column '([^']+)' not found in any table`)
 
 // The start-up race of Flink CDC's schema registry: a job that hits it before its first
 // checkpoint never recovers on its own, but submitting it again works.
@@ -441,7 +452,7 @@ var jobIDLine = regexp.MustCompile(`Job ID:\s*([0-9a-f]{32})`)
 // submit renders the pipeline with its secrets into a private file, submits it and deletes the
 // file.
 func (m *JobManager) submit(ctx context.Context, restore string) (string, error) {
-	m.update(func(s *Status) { s.Phase, s.Error, s.ErrorCode = PhaseSubmitting, "", "" })
+	m.update(func(s *Status) { s.Phase, s.Error, s.ErrorCode, s.UnreadColumns = PhaseSubmitting, "", "", nil })
 	tmpl, err := os.ReadFile(filepath.Join(m.Layout.ConfigDir, "pipeline.yaml"))
 	if err != nil {
 		return "", err
@@ -506,7 +517,12 @@ func (m *JobManager) watch(ctx context.Context, jobID string) outcome {
 		if code, text, ok := fatalOf(excs); ok {
 			// Cancel before reporting: whoever reads "failed" finds the job already stopped.
 			_ = m.REST.Cancel(ctx, jobID)
+			var unread []string
+			if code == "column_not_read" {
+				unread = unreadColumns(excs)
+			}
 			m.fail(PhaseFailed, code, text)
+			m.update(func(s *Status) { s.UnreadColumns = unread })
 			return outcomeFatal
 		}
 		if job.State == "RESTARTING" || job.State == "FAILING" || job.State == "FAILED" {
@@ -672,6 +688,19 @@ func fatalOf(excs []JobException) (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+// unreadColumns are the columns Calcite couldn't find, in every exception reported.
+func unreadColumns(excs []JobException) []string {
+	var out []string
+	for _, e := range excs {
+		for _, m := range unreadColumn.FindAllStringSubmatch(e.Trace+"\n"+e.Name, -1) {
+			if !slices.Contains(out, m[1]) {
+				out = append(out, m[1])
+			}
+		}
+	}
+	return out
 }
 
 func raceOf(excs []JobException) bool {

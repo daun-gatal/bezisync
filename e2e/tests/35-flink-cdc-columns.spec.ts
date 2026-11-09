@@ -297,3 +297,53 @@ for (const j of JOURNEYS) {
     await journey(j);
   });
 }
+
+// ADR 0015: a column the source adds while the pipeline is stopped is held back when the resumed job
+// hasn't read it yet, instead of failing the job; the next deploy writes it.
+test('Flink CDC → iceberg: a column added while paused is held, then written by the next deploy', async () => {
+  test.setTimeout(2_400_000);
+  const api = await Api.signIn();
+  await registerFlinkImage(api);
+  const project = await defaultProject(api);
+  const base = `/api/v1/projects/${project.id}`;
+  const tag = unique('cl-held');
+  const table = `shop.cl_${tag.replace(/-/g, '_')}`;
+  await ownerSql(`CREATE TABLE ${table} (id bigint PRIMARY KEY, a text); ALTER TABLE ${table} REPLICA IDENTITY FULL; INSERT INTO ${table} VALUES (1, 'a1')`);
+  const { password, ...pg } = SOURCE_PG;
+  const rt = await api.send<{ id: string }>('POST', `${base}/runtimes`, { name: `rt-${tag}`, kind: 'kubernetes', config: { namespace: 'bezisync-e2e-runtime' } }, 201);
+  const src = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'source', type: 'postgresql', name: `pg-${tag}`, config: { ...pg, ssl_mode: 'disable' }, secrets: { password } }, 201);
+  const dst = await api.send<{ id: string }>('POST', `${base}/connections`, { kind: 'sink', type: 'iceberg', name: `d-${tag}`, config: { ...ice.rest, namespace: 'e2e_cols' }, secrets: { secret_access_key: ice.secret } }, 201);
+  const spec = { source: { tables: { include: [table] } }, sink: { naming: `cl_${tag.replace(/-/g, '_')}_{table}` }, snapshot: { mode: 'initial' },
+    flink_cdc: { new_columns: 'hold', freshness_seconds: 5 }, transforms: [{ type: 'unwrap' }] };
+  const p = await api.send<{ id: string }>('POST', `${base}/pipelines`, { name: `p-${tag}`, source_id: src.id, sink_id: dst.id, runtime_id: rt.id, engine: 'flink-cdc', spec }, 201);
+  const url = `${base}/pipelines/${p.id}`;
+  const redeploy = async (freshness: number) => {
+    const cur = await api.get<{ spec: typeof spec; version: number }>(url);
+    await api.patch(url, { spec: { ...cur.spec, flink_cdc: { ...cur.spec.flink_cdc, freshness_seconds: freshness } } }, cur.version);
+    await api.send('POST', `${url}/deploy`, {});
+  };
+  await api.send('POST', `${url}/deploy`, {});
+  await lifecycle(api, url, 'streaming');
+  await waitFor('row 1', async () => !!(await rows(api, url, table)).get(1), 600_000);
+  await waitFor('a saved position', async () => ((await api.get<{ positions?: unknown[] }>(`${url}/positions`)).positions ?? []).length > 0, 600_000, 5_000);
+  await api.send('POST', `${url}/pause`);
+  await lifecycle(api, url, 'paused', 300_000);
+  await ownerSql(`ALTER TABLE ${table} ADD COLUMN n text; INSERT INTO ${table} VALUES (2, 'a2', 'n2')`);
+  await redeploy(30); // refreshes the columns: names n, which the resumed job hasn't read
+  await api.send('POST', `${url}/resume`);
+  await waitFor('row 2, the column held back', async () => {
+    const pipe = await api.get<{ lifecycle: string; artifacts: Record<string, unknown> }>(url);
+    const r = (await rows(api, url, table)).get(2);
+    if (!r || pipe.lifecycle !== 'streaming') return false;
+    expect(JSON.stringify(pipe.artifacts.flink_held_unread ?? {})).toContain('"n"');
+    expect(r.a, JSON.stringify(r)).toBe('a2');
+    return true;
+  }, 900_000, 5_000);
+  // The next deploy writes it: the job has read the change by now.
+  await redeploy(5);
+  await lifecycle(api, url, 'streaming');
+  await ownerSql(`INSERT INTO ${table} VALUES (3, 'a3', 'n3')`);
+  await waitFor('row 3 with the column', async () => (await rows(api, url, table)).get(3)?.n === 'n3', 900_000, 5_000);
+  await api.send('DELETE', `${url}?drop_destinations=true`);
+  await ownerSql(`DROP TABLE IF EXISTS ${table}`);
+});
