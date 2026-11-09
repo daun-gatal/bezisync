@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/daun-gatal/bezisync/backend/internal/compiler"
@@ -164,4 +165,44 @@ func flinkInput(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 		}
 	}
 	return in, nil
+}
+
+// ArtifactHeldUnread: per table, the source columns held back because the restored job hadn't read
+// them yet (ADR 0015). The next deploy's column refresh writes them again, and its planned start
+// switches columns (ADR 0013): the job never wrote them. The plan clears it.
+const ArtifactHeldUnread = "flink_held_unread"
+
+// HoldUnreadColumns removes columns from the source columns a Flink CDC pipeline writes by name
+// (flink_columns, flink_defaults) after its restored job failed on them (column_not_read: the source
+// added them after the saved position, and the job hasn't read that change). The controller's next
+// compile leaves them out, its config hash moves, and the job is started again from the same
+// position. It reports whether it changed anything; the caller saves the pipeline.
+func HoldUnreadColumns(ctx context.Context, q db.Querier, p *models.Pipeline, columns []string) (bool, error) {
+	cols, defaults := storedColumns(p), storedColumns(p, ArtifactDefaults)
+	held := map[string][]string{}
+	for t, list := range cols {
+		keep := slices.DeleteFunc(slices.Clone(list), func(c string) bool { return slices.Contains(columns, c) })
+		if len(keep) != len(list) {
+			for _, c := range list {
+				if slices.Contains(columns, c) {
+					held[t] = append(held[t], c)
+				}
+			}
+			cols[t] = keep
+		}
+	}
+	if len(held) == 0 {
+		return false, nil
+	}
+	for t, list := range defaults {
+		defaults[t] = slices.DeleteFunc(slices.Clone(list), func(c string) bool { return slices.Contains(held[t], c) })
+	}
+	artifacts := cloneArtifacts(p)
+	artifacts[ArtifactColumns] = namesArtifact(cols)
+	artifacts[ArtifactDefaults] = namesArtifact(defaults)
+	artifacts[ArtifactHeldUnread] = namesArtifact(held)
+	p.Artifacts = artifacts
+	_, err := Record(ctx, q, AuditEvent{Kind: "pipeline.columns_held", Summary: fmt.Sprintf("Held back source columns %s hadn't read yet", p.Name),
+		ProjectID: &p.ProjectID, ResourceType: "pipeline", ResourceID: &p.ID, Actor: "controller", Details: map[string]any{"columns": held}})
+	return true, err
 }
