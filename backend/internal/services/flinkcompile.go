@@ -84,7 +84,6 @@ func RefreshFlinkColumns(ctx context.Context, q db.Querier, p *models.Pipeline, 
 	artifacts := cloneArtifacts(p)
 	artifacts[ArtifactColumns] = namesArtifact(cols)
 	artifacts[ArtifactDefaults] = namesArtifact(defaults)
-	delete(artifacts, ArtifactHeldUnread) // written again: the job has had a deploy's time to read them
 	p.Artifacts = artifacts
 	return nil
 }
@@ -169,7 +168,8 @@ func flinkInput(ctx context.Context, q db.Querier, p *models.Pipeline, spec doma
 }
 
 // ArtifactHeldUnread: per table, the source columns held back because the restored job hadn't read
-// them yet (ADR 0015); the next deploy's column refresh writes them again.
+// them yet (ADR 0015). The next deploy's column refresh writes them again, and its planned start
+// switches columns (ADR 0013): the job never wrote them. The plan clears it.
 const ArtifactHeldUnread = "flink_held_unread"
 
 // HoldUnreadColumns removes columns from the source columns a Flink CDC pipeline writes by name

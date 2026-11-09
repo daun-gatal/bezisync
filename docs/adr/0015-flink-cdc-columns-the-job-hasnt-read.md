@@ -33,8 +33,12 @@ React to the job's own answer:
   `flink_defaults`), records them in `flink_held_unread` and audits `pipeline.columns_held`. The next compile
   leaves them out, the config hash moves, and the job starts again from the same saved position, holding them like
   any new column in hold mode.
-- The next deploy's refresh writes them again (and clears `flink_held_unread`): by then the job has read the
-  change. If it still hasn't (no row of that table changed since), the same happens once more.
+- The next deploy's refresh writes them again: by then the job has read the change. That deploy is a column
+  change for the job, which never wrote them, although both versions name them (the comparison of 0013 reads the
+  live columns for both), so its planned start counts the held columns as changes and switches columns at the
+  saved position (0013); `flink_held_unread` is cleared when the start is planned. Without the switch Flink CDC
+  would skip the columns as already applied (found on the e2e cluster: the released column never arrived). If
+  the job still hasn't read the change (no row of that table changed since), the same happens once more.
 
 A switch (0013) already leaves such columns out on positional tables it pins; this covers every table written by
 name.
@@ -45,7 +49,7 @@ name.
 |---|---|---|---|
 | U1 | The job fails on a column it hasn't read | `column_not_read` with the column names; cancelled | `TestJobManagerStopsOnFailuresThatDontHeal` |
 | U2 | The controller sees it | the columns held, `pipeline.columns_held`, the job started again without them | `TestFlinkHoldsColumnsTheJobHasntRead` |
-| U3 | The next deploy | the columns written again, `flink_held_unread` cleared | `RefreshFlinkColumns` |
+| U3 | The next deploy | preflight names them; the columns written again by a column switch (generation + 1), `flink_held_unread` cleared | `TestFlinkHoldsColumnsTheJobHasntRead` |
 | U4 | On the real engine: hold mode, a column added while paused, a deploy, resume | streams; the column held, then written after a deploy | e2e 35 |
 
 ## Consequences

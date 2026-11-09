@@ -541,4 +541,22 @@ func TestFlinkHoldsColumnsTheJobHasntRead(t *testing.T) {
 	if cfg := e.admin.get(url + "/config").expect(200).Str("properties"); strings.Contains(cfg, "note") {
 		t.Fatal(cfg)
 	}
+	// The next deploy writes it again, and switches columns: the job never wrote it (ADR 0013).
+	savePositions(t, short, 1)
+	cur := e.admin.get(url).expect(200)
+	e.admin.patch(url, map[string]any{"spec": map[string]any{"source": tables, "flink_cdc": map[string]any{"new_columns": "hold", "freshness_seconds": 30}}},
+		ifMatch(cur.At("version"))...).expect(200)
+	if c := checkOf(t, e.admin.post(url+"/preflight", nil).expect(200), "flink_columns_changed"); c == nil || !strings.Contains(at(t, c, "message").(string), "writes note, held back") {
+		t.Fatal(c)
+	}
+	e.admin.post(url+"/deploy", map[string]any{}).expect(200)
+	e.tick()
+	p, err = db.Find[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE id = $1`, pipe.Str("id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, _ := p.Artifacts[services.ArtifactLayout].(map[string]any)
+	if fmt.Sprint(layout["generation"]) != "1" || p.Artifacts[services.ArtifactHeldUnread] != nil || !strings.Contains(fmt.Sprint(p.Artifacts[services.ArtifactColumns]), "note") {
+		t.Fatalf("artifacts %v", p.Artifacts)
+	}
 }

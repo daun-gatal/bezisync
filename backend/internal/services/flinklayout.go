@@ -77,6 +77,29 @@ func layoutGeneration(p *models.Pipeline) int {
 	return int(toFloat(m["generation"]))
 }
 
+// heldReleased lists, per table, the columns held back because the restored job hadn't read them
+// (artifacts.flink_held_unread, ADR 0015) that the pipeline writes again (flink_columns has them).
+func heldReleased(p *models.Pipeline) []string {
+	return heldIn(storedColumns(p, ArtifactHeldUnread), storedColumns(p))
+}
+
+// heldIn lists the held columns cols has.
+func heldIn(held, cols map[string][]string) []string {
+	var out []string
+	for _, t := range layoutKeys(held) {
+		var back []string
+		for _, c := range held[t] {
+			if slices.Contains(cols[t], c) {
+				back = append(back, c)
+			}
+		}
+		if len(back) > 0 {
+			out = append(out, t+" writes "+strings.Join(back, ", ")+", held back while the job hadn't read them")
+		}
+	}
+	return out
+}
+
 // writtenVersion is artifacts.flink_written (nil when unrecorded).
 func writtenVersion(p *models.Pipeline) *uuid.UUID {
 	s, _ := p.Artifacts[ArtifactWritten].(string)
@@ -275,12 +298,14 @@ func EnsureFlinkStartPlanned(ctx context.Context, q db.Querier, p *models.Pipeli
 	planned := func() {
 		artifacts[ArtifactPlanned] = key
 		artifacts[ArtifactWritten] = p.DeployedVersionID.String()
+		delete(artifacts, ArtifactHeldUnread)
 		p.Artifacts = artifacts
 	}
 	if latest > restoreFloor(p) {
 		delete(artifacts, ArtifactFreshStart)
+		released := heldReleased(p)
 		from := writtenVersion(p)
-		if from == nil || *from == *p.DeployedVersionID {
+		if len(released) == 0 && (from == nil || *from == *p.DeployedVersionID) {
 			planned() // it resumes writing what it wrote
 			return nil
 		}
@@ -288,10 +313,15 @@ func EnsureFlinkStartPlanned(ctx context.Context, q db.Querier, p *models.Pipeli
 		if err != nil {
 			return err
 		}
-		changes, err := columnChanges(ctx, q, p, from, spec, source, sink)
-		if err != nil {
-			return fmt.Errorf("BeziSync couldn't read the source's columns to see whether this version changes the columns the pipeline writes: %w", err)
+		var changes []string
+		if from != nil && *from != *p.DeployedVersionID {
+			if changes, err = columnChanges(ctx, q, p, from, spec, source, sink); err != nil {
+				return fmt.Errorf("BeziSync couldn't read the source's columns to see whether this version changes the columns the pipeline writes: %w", err)
+			}
 		}
+		// Columns held back because the job hadn't read them (ADR 0015) are a change too: the job
+		// never wrote them, whatever the versions say.
+		changes = append(changes, released...)
 		if len(changes) == 0 {
 			planned()
 			return nil
@@ -469,6 +499,13 @@ func flinkLayoutChecks(ctx context.Context, q db.Querier, p *models.Pipeline, sp
 			from = p.DeployedVersionID
 		}
 		changes, err := columnChanges(ctx, q, p, from, spec, source, sink)
+		// Held columns this version would write again (the refresh comes at the deploy).
+		if held := storedColumns(p, ArtifactHeldUnread); len(held) > 0 && err == nil {
+			var live map[string][]string
+			if live, _, err = liveColumns(ctx, q, p, layoutKeys(held)); err == nil {
+				changes = append(changes, heldIn(held, live)...)
+			}
+		}
 		if err != nil {
 			return []checks.Check{{Code: "flink_columns_changed", Title: "Columns written", Category: checks.CatDestination, Status: checks.Warn,
 				Message: "BeziSync couldn't read the source's columns to compare what this version writes with the running one: " + domain.Truncate(err.Error(), 200)}}, nil
