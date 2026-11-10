@@ -742,6 +742,15 @@ hold the rest.
   snapshot; some changes restart the connector).
 - **Rollback** — deploy any earlier version from History; the confirmation lists the restart, the
   changes and whether approval is needed.
+- **Discard** — a change you saved but don't want to deploy: the "vN is saved but not deployed"
+  notice has **Discard vN**, and closing the wizard asks whether to keep the change or discard it.
+  Settings go back to the deployed version; the connector keeps running and nothing restarts, and
+  no approval is needed. The discarded version stays in History (deploy it from there to bring it
+  back), and the next change gets a new number. Description, owner, labels and the runtime aren't
+  part of a version, so they stay as they are. Editing the settings back to exactly what is deployed
+  does the same. Not offered while a change waits for approval: cancel or decide the request
+  first. Scripts and agents use `bezisync remote pipelines discard NAME` or the MCP tool
+  `discard_pipeline_changes`.
 - **Snapshots** — re-copy selected tables without stopping streaming (sources that can't, Vitess
   and Spanner, say so instead): search and page through the
   captured tables, see their rows and size and a rough duration; large copies (over 10 tables or
