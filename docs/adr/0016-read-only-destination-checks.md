@@ -4,9 +4,10 @@
 - **Date:** 2026-11-10
 - **Amends:** 0009 (D2: the Elasticsearch check no longer writes and deletes a test index)
 - **Scope:** `backend/internal/connectors` (Iceberg, JDBC, StarRocks/Doris/OceanBase, Elasticsearch checks; an OLAP
-  `PrepareSink`; a new Elasticsearch `CheckPipeline`), `backend/internal/services` (`checkWhere`: older agents),
-  `backend/internal/agent` and `runtime` (the `readonly_destination_checks` feature), `backend/internal/checks/catalog.json`,
-  `docs/reference/checks.md` (generated), `docs/README.md`, the connectors contract.
+  `PrepareSink`; a new Elasticsearch `CheckPipeline`; a shared MySQL-format grant reader), `backend/internal/services`
+  (`checkWhere`) and `backend/internal/api` (agent poll: older agents), `backend/internal/agent` and `runtime` (the
+  `readonly_destination_checks` feature), `backend/internal/checks/catalog.json`, `docs/reference/checks.md`
+  (generated), `docs/README.md`, the connectors, agent and runtime contracts.
 
 ## Context
 
@@ -42,10 +43,15 @@ tables until it is upgraded.
 
 ### D1. The rule
 
-A destination check never sends a create: no `CREATE TABLE`/`CREATE DATABASE`, no Iceberg table create (staged or
-not), no index-creating write, no `BEGIN; CREATE …; ROLLBACK`. It only reads: privilege functions and APIs, catalog
-lookups, `SHOW GRANTS`, server and node listings. Whatever the pipeline needs created is created on deploy
-(`PrepareSink`) or by the connector, as before. New connectors follow the same rule (the connectors contract says so).
+A destination check never creates a table, a database, a namespace or an index on the destination, and never sends a
+statement or request that would: no `CREATE TABLE`/`CREATE DATABASE`, no Iceberg table create (staged or not), no
+index-creating write, no `BEGIN; CREATE …; ROLLBACK`. It asks instead: privilege functions and APIs, catalog lookups,
+`SHOW GRANTS`, `HEAD` requests. Whatever the pipeline needs is created on deploy (`PrepareSink`) or by the connector,
+as before. New connectors follow the same rule (the connectors contract says so).
+
+One narrow exception stays: a probe that creates no table, database, namespace or index, is deleted in the same check,
+and fails the check when the delete fails — Paimon's object under the warehouse, Redis's `bezisync:permission-probe`
+key. Those prove a right the connector needs (deleting files, appending to streams) and leave nothing behind.
 
 *Recorded decision:* the stricter wording ("never sends a create") was chosen over "never leaves anything visible" on
 the requester's behalf (an autonomous run). It is the simplest to explain and test; Iceberg's `stage-create` (which
@@ -53,15 +59,16 @@ may answer "may create" without persisting a table) is left for a separate, per-
 
 ### D2. One result rule
 
-- **Pass:** the server confirmed the right (a function, `_has_privileges`, or an exact grant match).
+- **Pass:** the server confirmed the right (a function, `_has_privileges`, or an exact grant match by the rules below).
 - **Fail / Warn:** only on a definite "no" from a server that answers yes or no (PostgreSQL, SQL Server,
-  Elasticsearch), at the level the check already had: the JDBC create check stays a non-blocking Warn,
-  Elasticsearch's index rights block.
+  Elasticsearch). Each check keeps its level: the JDBC create check stays a non-blocking Warn; Elasticsearch's index
+  rights block.
 - **Unknown** (grey, never blocking): everything else — grant text that doesn't show the right (it may come from a
-  role or an external authorizer), a question the login may not ask, an API that's absent. Each Unknown says what
-  wasn't verified, what will show it (the first deploy), and the grant to apply.
+  role or an external authorizer), a question the login may not ask, an API that's absent, any error. Each Unknown says
+  what wasn't verified, what will show it (the first deploy), and the grant to apply.
 
-Grant text (MySQL/MariaDB, StarRocks, Doris, OceanBase) yields Pass or Unknown, never Fail.
+Grant text (MySQL, MariaDB, OceanBase, StarRocks, Doris) yields Pass or Unknown, never Fail. A check that can't sign in
+still fails as today (sign-in is not a privilege question).
 
 ### D3. Apache Iceberg
 
@@ -73,59 +80,84 @@ wrong identity for vended credentials, and RustFS S3 Tables and S3 Tables can't 
 
 ### D4. StarRocks, Doris, OceanBase
 
-- **The database is created on deploy.** A new `olapSink.PrepareSink` runs `CREATE DATABASE IF NOT EXISTS` (outcome
-  `exists` or `created`), like Iceberg's namespace (it runs in the controller, as Iceberg's does). The check no longer
-  creates it; the guide's "created if missing" still holds.
-- **The check reads:** `information_schema.SCHEMATA` for the database, then `SHOW GRANTS`:
-  - database exists, and a grant covers creating tables in it (StarRocks `CREATE TABLE` or `ALL` on the database or
-    all databases; Doris `Create_priv`/`Admin_priv` on `internal.<db>` or globally; OceanBase `CREATE`/`ALL
-    PRIVILEGES` on `` `<db>`.* `` or `*.*`) → Pass;
-  - database missing, and a grant covers creating databases (StarRocks `CREATE DATABASE` on the catalog; Doris global
-    `Create_priv`/`Admin_priv`; OceanBase `CREATE`/`ALL PRIVILEGES` on `*.*`) → Pass, "created on deploy";
-  - otherwise → Unknown with the grant SQL.
-  The code `<olap>_create_table` stays.
-- The probe table also caught a `replication_num` above the live backends. The check now reads `SHOW BACKENDS`
-  (StarRocks, Doris): more replicas than alive backends → Fail (definite); not allowed to ask → Unknown. New codes
-  `starrocks_replicas`, `doris_replicas`.
+**The database is created on deploy.** A new `olapSink.PrepareSink` looks the database up
+(`SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?`): found → `exists`; not found →
+`CREATE DATABASE IF NOT EXISTS` (MySQL error 1007, "database exists", also counts as `exists`) → `created`. It dials
+through `olapConfig.open` (the SSRF guard, ADR 0004) with the check's 10 s timeout, from the controller like Iceberg's
+namespace. When it can't (unreachable, or the login may not create databases) the outcome is `failed` and the deploy
+stops with "create database `<db>` on the destination, or let BeziSync reach `<host>:<port>`".
+
+**The check reads.** It looks the database up the same way, then reads `SHOW GRANTS`:
+
+| Engine | Exists, may create tables (Pass) | Missing or not visible |
+|---|---|---|
+| StarRocks | a row whose `Catalog` is `default_catalog` and whose `Grants` is `GRANT <privs> ON DATABASE <db> …` or `… ON ALL DATABASES …` with `CREATE TABLE` or `ALL` among the comma-separated privileges | Unknown ("created on deploy if the login may") |
+| Doris | `CREATE_PRIV` or `ADMIN_PRIV` in `GlobalPrivs`, in `CatalogPrivs` for `internal`, or in `DatabasePrivs` for `internal.<db>` | Unknown |
+| OceanBase | the MySQL-format rule (D6) on `` `<db>`.* `` or `*.*` | Pass when `CREATE`/`ALL` is on `*.*`, else Unknown |
+
+Anything else is Unknown with the grant SQL (code `<olap>_create_table`, unchanged). Columns are read by name; StarRocks
+2.x and Doris 1.x layouts, inactive roles (`current_role()` = `NONE` with no direct grant) and role-only grants give
+Unknown. StarRocks hides databases a login has no right on, so "not found" is worded "missing or not visible".
+
+The probe table used to catch a `replication_num` above the live backends. That isn't replaced (`SHOW BACKENDS` needs
+operator rights and is empty on shared-data clusters); a too-high replica count shows when the first table is created.
 
 ### D5. Elasticsearch
 
 - The connection check keeps sign-in and version; it no longer writes or deletes an index.
-- A new `CheckPipeline` asks `_has_privileges` (`/_security/user/_has_privileges`; on 6.x
-  `/_xpack/security/user/_has_privileges`) about the pipeline's own indexes (the routed destinations, as the sink
-  names them), for `index`, `create_index`, `auto_configure` and `delete_index`. It never creates them.
-  - No `index`, or neither `create_index` nor `auto_configure` → Fail, blocking (`elasticsearch_create_index`).
-  - No `delete_index` → Warn: deleting the pipeline with "drop destinations" fails (as before).
-  - Security disabled (a recognised `security_exception`/"Security must be explicitly enabled" answer) → Pass, saying
-    there are no privileges to check. Any other error or answer → Unknown.
+- A new `CheckPipeline` asks, for the pipeline's own indexes (the routed destinations as the sink names them: dots as
+  `_`, lower-case), one `HEAD /<index>` each, then one
+  `POST /_security/user/_has_privileges` (6.x: `/_xpack/security/user/_has_privileges`) with
+  `{"index":[{"names":[…],"privileges":["index","delete","create_index","delete_index"(,"auto_configure")]}]}`.
+  The version comes from `GET /`; `auto_configure` is asked from 7.9; below 6.4 there is no API → Unknown.
+  - An index lacking `index` or `delete`, or a missing index lacking both `create_index` and `auto_configure` → Fail,
+    blocking (`elasticsearch_create_index`), naming the indexes.
+  - Lacking `delete_index` → Warn: deleting the pipeline with "drop destinations" would fail (as before).
+  - Any error or unexpected answer (including security disabled, 401, 403) → Unknown. A cluster without security
+    passes nothing here; its Unknown says why.
+- It runs where pipeline checks run (the control plane) and lands in the configuration section, which a forced deploy
+  can't skip: intended, the answer is definite. A cluster only the runtime can reach gets Unknown.
 - Automatic index creation isn't read from cluster settings (needs `monitor`; templates override it); the fix names
   it.
 
 ### D6. JDBC
 
-- **PostgreSQL:** `has_schema_privilege(<schema>, 'CREATE')` for the connection's schema (lower-cased as the sink
-  names it; `current_schema()` when empty). A schema that doesn't exist (`to_regnamespace` is null): the
-  database's `CREATE` right (`has_database_privilege`) decides, since the sink must create the schema.
-- **SQL Server:** `HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'CREATE TABLE')` and `HAS_PERMS_BY_NAME(<schema>, 'SCHEMA',
-  'ALTER')` (the schema defaulting to `SCHEMA_NAME()`).
-- **MySQL, MariaDB:** `SHOW GRANTS`: an exact `CREATE` or `ALL [PRIVILEGES]` token on `*.*` or a pattern matching the
-  database → Pass; anything else → Unknown.
+- **PostgreSQL:** for the connection's schema (lower-cased as the sink names it; `current_schema()` when empty):
+  `to_regnamespace` null → Warn "schema `<s>` doesn't exist: create it" (the sink doesn't); else
+  `has_schema_privilege(<s>, 'USAGE')` and `'CREATE'` both true → Pass, either false → Warn.
+- **SQL Server:** the schema is the login's default (`SCHEMA_NAME()`; the connection has none for SQL Server):
+  `HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'CREATE TABLE')` and `HAS_PERMS_BY_NAME(SCHEMA_NAME(), 'SCHEMA', 'ALTER')`:
+  both 1 → Pass, either 0 → Warn, any NULL (no default schema) → Unknown. The fix names that schema instead of `dbo`.
+- **MySQL, MariaDB (and OceanBase, D4):** one MySQL-format reader over `SHOW GRANTS`: rows `GRANT <privs> ON <scope> TO
+  …`; privileges split on `,` and trimmed; `CREATE` or `ALL [PRIVILEGES]` must be an exact item (`CREATE VIEW`,
+  `CREATE ROUTINE`, `CREATE USER`, `CREATE TEMPORARY TABLES`, `CREATE SYNONYM` don't count); scope `*.*` or `<db>.*`
+  (backticks optional; `_` and `%` are wildcards, `\_` a literal); table-level grants ignored; any `REVOKE … ON` row
+  (partial revokes) → Unknown; nothing matched → Unknown.
 - A definite "no" stays a Warn (`jdbc_create_table`), as before: existing tables still work.
 
 ### D7. Older agents
 
-Agents advertise a new feature, `readonly_destination_checks`. When preflight would send a destination check of one
-of these four types to an agent without it, it runs the (read-only) check from the control plane instead, with the
-existing `checked_from_control_plane` note saying why ("the agent predates read-only checks and would create test
-tables; upgrade it"). No old code runs the creating check; results may differ inside the runtime's network, which the
-note says.
+Agents advertise a new feature, `readonly_destination_checks`. For a sink of these four families (Iceberg, JDBC,
+StarRocks/Doris/OceanBase, Elasticsearch):
+
+- **Preflight** (`checkWhere`): when the runtime's stored agent state lacks the feature (or has none), the check isn't
+  sent to the agent and isn't run from the control plane either; it returns one Unknown, `agent_readonly_checks`:
+  "The agent on `<runtime>` (`<version>`) predates read-only destination checks and would create test tables; upgrade
+  it to check this destination." Running it from the control plane instead would turn destinations only the runtime
+  can reach into blocking network failures.
+- **Dispatch** (agent poll): a pending `check` for one of these families is handed only to an agent whose poll lists
+  the feature; otherwise the request is completed at once with that Unknown report. This covers an agent that polls
+  before its state is stored, a rolling update and a rollback.
+
+Rollout: upgrade the control plane before agents. A new agent under an older control plane creates no OLAP database
+and has no Elasticsearch privilege check (both moved to the control plane); the changelog says so.
 
 ### D8. Codes and titles
 
-All four codes stay. Titles, whys and fixes that described creating are rewritten (old titles stay in `titles`); the
-Elasticsearch `{probe}` fix and Doris's `DROP_PRIV` in the grant go. New codes: `starrocks_replicas`,
-`doris_replicas`. The catalog test only sees literal codes, so the OLAP codes (built from `o.typ`) get a test that
-loops over the three sinks.
+All four codes stay; one is new: `agent_readonly_checks`. Titles, whys and fixes that described creating are rewritten
+(old titles stay in `titles`); the Elasticsearch `{probe}` fix goes; Doris's grant keeps `DROP_PRIV` ("drop
+destinations" needs it). The catalog test only sees literal codes, so the OLAP codes (built from `o.typ`) get a test
+that loops over the three sinks.
 
 ### Implementation plan
 
@@ -133,63 +165,68 @@ One PR, one commit per step:
 
 1. This ADR (index row; 0009's status notes the amendment).
 2. **Iceberg:** `icebergWriteCheck` removed, `iceberg_write` Unknown; catalog text.
-3. **Agent gate:** `runtime.FeatureReadonlyDestinationChecks`, advertised by the agent; `checkWhere` runs the four
-   types from the control plane for agents without it.
-4. **Elasticsearch:** connection check without the test index; `CheckPipeline` with `_has_privileges`; catalog text.
-5. **JDBC:** PostgreSQL and SQL Server privilege queries, MySQL/MariaDB grant parsing; catalog text.
-6. **OLAP:** `PrepareSink` (database), the read-only check (`SCHEMATA`, `SHOW GRANTS`), `<olap>_replicas`; catalog.
-7. **Docs:** regenerated `docs/reference/checks.md`, `docs/README.md`, the connectors contract, the changelog fragment
-   (with how to drop the `bezisync_check_*` objects earlier versions left).
+3. **Agent gate:** `runtime.FeatureReadonlyDestinationChecks`, advertised by the agent; `checkWhere` and the agent poll
+   (`api/agent.go`) skip the four families for agents without it; `agent_readonly_checks`.
+4. **Elasticsearch:** connection check without the test index; `CheckPipeline` with `HEAD` and `_has_privileges`.
+5. **JDBC:** PostgreSQL and SQL Server privilege queries; the MySQL-format grant reader.
+6. **OLAP:** `PrepareSink` (database); the read-only check (`SCHEMATA`, `SHOW GRANTS`); `olap_live_test.go`.
+7. **Docs:** regenerated `docs/reference/checks.md`, `docs/README.md`, the contracts, the threat model's outbound list,
+   the changelog fragment (rollout order, and how to drop the `bezisync_check_*` objects earlier versions left).
 
 ### Verification plan
 
 Grant and answer interpreters are pure functions, tested on outputs captured from real servers (StarRocks 3.4, Doris
-3.0, OceanBase CE 4.3, MySQL 8.4, Elasticsearch 8.15 in the BeziSync lab, 2026-11-10). Checks that talk to a server
-are tested against fakes that fail the test on any create (`httptest` for Iceberg REST and Elasticsearch); the
-PostgreSQL check runs against the test database (`BEZISYNC_TEST_DATABASE_URL`) with a role lacking `CREATE`.
+3.0, OceanBase CE 4.3, MySQL 8.4, Elasticsearch 8.15 in the BeziSync lab, 2026-11-10). Checks that talk to a server are
+tested against fakes that record every request or statement and fail on any create: `httptest` for Iceberg REST and
+Elasticsearch, a recording `database/sql` driver for the OLAP and MySQL-format paths. The PostgreSQL check runs against
+the test database (`BEZISYNC_TEST_DATABASE_URL`) with roles that lack `USAGE` or `CREATE`.
 
 | # | Case | Expected | Test |
 |---|---|---|---|
 | E1 | Iceberg namespace exists | no create request; `iceberg_write` Unknown | `TestIcebergCheckCreatesNothing` |
-| E2 | Iceberg namespace missing | as today ("created on deploy"), no create | `TestIcebergCheckCreatesNothing` |
-| E3 | Agent without the feature, Iceberg/JDBC/OLAP/ES sink | checked from the control plane, note | `TestCheckWhereOlderAgent` |
-| E4 | Agent without the feature, other sink | still checked on the agent | `TestCheckWhereOlderAgent` |
-| E5 | ES all privileges | Pass, no index created | `TestElasticsearchPipelinePrivileges` |
-| E6 | ES no `create_index`, has `auto_configure` | Pass | same |
-| E7 | ES no `index` / no create rights | Fail, blocking | same |
-| E8 | ES no `delete_index` | Warn | same |
-| E9 | ES security disabled | Pass with note | same |
-| E10 | ES 6.x | `_xpack` path | same |
-| E11 | ES other error (403, proxy) | Unknown | same |
-| E12 | ES connection check | no index written or deleted | `TestElasticsearchCheckCreatesNothing` |
-| E13 | PostgreSQL schema with / without `CREATE` | Pass / Warn | `TestJDBCPostgresCreateRight` (test DB) |
-| E14 | PostgreSQL schema missing | database `CREATE` decides | same |
-| E15 | PostgreSQL schema case | lower-cased | same |
-| E16 | MySQL `ALL PRIVILEGES ON *.*`, `CREATE ON db.*`, pattern `db\_%` | Pass | `TestMySQLGrantsAllowCreate` |
-| E17 | MySQL `CREATE VIEW`/`CREATE ROUTINE` only, role-only, other db | Unknown | same |
-| E18 | SQL Server query shape | both permissions asked | `TestSQLServerCreateRightQuery` |
-| E19 | StarRocks grants (captured) | Pass on the database; Pass "created on deploy" with `CREATE DATABASE` | `TestOlapGrants` |
-| E20 | Doris grants (captured), global and role-only | Pass / Unknown | same |
-| E21 | OceanBase grants (captured) | Pass | same |
-| E22 | OLAP replicas > alive backends | Fail; `SHOW BACKENDS` denied → Unknown | `TestOlapReplicas` |
-| E23 | OLAP database created on deploy | `PrepareSink` exists/created | `TestOlapPrepareSink` |
-| E24 | Every OLAP code in the catalog | entries for all three sinks | `TestOlapCodesInCatalog` |
-| E25 | No connector check sends a create | grep-style test over the four check paths | `TestDestinationChecksCreateNothing` |
+| E2 | Iceberg namespace missing | "created on deploy", no create | same |
+| E3 | Agent lacking the feature (or no state), gated sink | one Unknown, nothing sent | `TestReadonlyGate` |
+| E4 | Agent lacking the feature, other sink or a source | sent to the agent as before | same |
+| E5 | Agent with the feature | sent as before | same |
+| E6 | Poll from an agent lacking the feature, gated `check` pending | completed with the Unknown report, not handed out | `TestAgentPollHoldsGatedChecks` |
+| E7 | ES all privileges, indexes missing | Pass, no index created | `TestElasticsearchPipelinePrivileges` |
+| E8 | ES no `create_index`, `auto_configure` (≥7.9) | Pass | same |
+| E9 | ES no `delete` / no `index` | Fail, blocking, names the index | same |
+| E10 | ES no create rights, every index exists | Pass | same |
+| E11 | ES no `delete_index` | Warn | same |
+| E12 | ES 6.x, 7.8, below 6.4 | `_xpack` path; no `auto_configure`; Unknown | same |
+| E13 | ES 401/403/security disabled/other error | Unknown | same |
+| E14 | ES connection check | no index written or deleted | `TestElasticsearchCheckCreatesNothing` |
+| E15 | PostgreSQL USAGE+CREATE / no CREATE / no USAGE / schema missing / mixed-case schema | Pass / Warn / Warn / Warn / lower-cased | `TestJDBCPostgresCreateRight` (test DB) |
+| E16 | SQL Server 1,1 / a 0 / a NULL | Pass / Warn / Unknown | `TestSQLServerCreateRight` |
+| E17 | MySQL `ALL PRIVILEGES ON *.*`, `CREATE ON db.*`, `` `db`.* ``, pattern `d\_b` / `d%` | Pass | `TestMySQLGrantsAllowCreate` |
+| E18 | MySQL `CREATE VIEW` only, `CREATE TEMPORARY TABLES`, other db, table-level, partial revoke, role only | Unknown | same |
+| E19 | StarRocks captured grants; external catalog row; `ALL ON ALL DATABASES`; `NONE` roles only; 2.x layout | Pass / Unknown / Pass / Unknown / Unknown | `TestStarRocksGrants` |
+| E20 | Doris captured row; `CatalogPrivs internal`; global; `N/A` columns; 1.x layout | Pass / Pass / Pass / Unknown / Unknown | `TestDorisGrants` |
+| E21 | OceanBase captured grants; `CREATE SYNONYM` only; database missing with `CREATE ON *.*` | Pass / Unknown / Pass | `TestOceanBaseGrants` |
+| E22 | OLAP database missing (StarRocks, Doris) | Unknown, "created on deploy if the login may" | `TestOlapCheckCreatesNothing` |
+| E23 | OLAP check over a recording driver | no `CREATE` statement sent | same |
+| E24 | `PrepareSink` exists / created / 1007 / unreachable | exists / created / exists / failed with the fix | `TestOlapPrepareSink` |
+| E25 | Every OLAP code in the catalog | entries for all three sinks | `TestOlapCodesInCatalog` |
 
 ## Consequences
 
-- **No check leaves or creates an object on a destination.** Least-privilege logins stop collecting
+- **No check creates a table, database, namespace or index on a destination.** Least-privilege logins stop collecting
   `bezisync_check_*` tables; the objects earlier versions left can be dropped by hand (the changelog says how).
 - **Detection moves later for Iceberg.** A catalog that refuses commits, storage keys that can read but not write, a
   wrong S3 endpoint: these show on the first change written, as a connector error, not before deploy. On a PostgreSQL
   source a failing pipeline holds WAL in its slot until fixed; preflight can no longer prevent that. The check says
   so as an Unknown note.
-- **OLAP checks get weaker where grants are indirect.** A role-only or externally authorized login gets Unknown
-  instead of the old blocking Fail when it can't create; the deploy then fails at table creation.
+- **Grant-based checks get weaker where grants are indirect.** A role-only or externally authorized login gets Unknown
+  instead of the old blocking Fail (OLAP) when it can't create; the deploy then fails at table creation. OLAP replica
+  counts above the live backends are no longer caught before deploy.
+- **OLAP deploys now dial the destination from the control plane** (`PrepareSink`), also for agent-mode runtimes,
+  and stop with a fix when they can't; the database is no longer created by a check.
 - **Elasticsearch privileges are checked against the real index names**, which fixes a login allowed only `cdc_*`
-  failing a test index named `bezisync_check_*`; the connection check alone no longer decides index rights.
-- **Older agents** get their destination checks run from the control plane until upgraded; results may differ
-  inside the runtime's network.
+  failing a test index named `bezisync_check_*`. The connection check alone no longer decides index rights; the
+  pipeline check runs from the control plane and can't be skipped by a forced deploy.
+- **Older agents** skip these destination checks (one Unknown says to upgrade) until upgraded. Upgrade the control
+  plane before agents.
 
 ## Alternatives considered
 
@@ -205,5 +242,11 @@ PostgreSQL check runs against the test database (`BEZISYNC_TEST_DATABASE_URL`) w
   second phase. Left for a separate change that verifies it per catalog.
 - **List the Iceberg storage location.** Proves listing, not writing, with the wrong identity for vended credentials;
   can't run for S3 Tables or RustFS. Dropped.
+- **Older agents: run the check from the control plane** (the existing fallback). Turns destinations only the runtime
+  can reach into blocking network failures for every not-yet-upgraded agent. Rejected for one Unknown.
+- **OLAP: rely on the Flink CDC sink to create the database.** OceanBase's sink URL names the database, so it must
+  exist; StarRocks's and Doris's behaviour would have to be verified per version. Rejected for `PrepareSink`.
+- **OLAP replicas from `SHOW BACKENDS`.** Needs operator rights and is empty on shared-data clusters (a false Fail).
+  Dropped.
 - **Drop rights for the BeziSync login, or a nightly sweeper.** Destination-side workarounds every user would have to
   set up; the requester didn't want the objects created at all.
