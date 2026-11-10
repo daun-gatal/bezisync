@@ -84,8 +84,9 @@ func (r *recRows) Next(dest []driver.Value) error {
 	return nil
 }
 
-// Captured from the BeziSync lab (2026-11-10): StarRocks 3.4, Doris 3.0 and OceanBase CE 4.3
-// grants of the `bz_writer` user that writes database `cdc`.
+// Grants of the `bz_writer` user that writes database `cdc`, as StarRocks 3.4, Doris 3.0 and
+// OceanBase CE 4.3 print them (BeziSync lab, 2026-11-10); the column layouts follow each vendor's
+// SHOW GRANTS reference, and the readers find columns by name.
 var (
 	starrocksCols     = []string{"UserIdentity", "Catalog", "Grants"}
 	starrocksCaptured = [][]string{

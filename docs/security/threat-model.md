@@ -108,10 +108,14 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   (`bz-preview-<topic>`, 15-minute retention, a policy that accepts only that topic) with the
   connection's credentials: change events also rest there for 15 minutes. Deleting the pipeline
   removes them.
-- **Checks write.** The Database (JDBC) connection check creates and drops an empty test table. The Iceberg connection check creates a one-row table in the namespace,
-  reads it and drops it, with the connection's credentials; catalogs that do not purge on drop
-  (RustFS) keep its few bytes of files. BeziSync's catalog, S3 and AWS calls go through the SSRF
-  guard; the connector's own (Java) traffic does not.
+- **Destination checks create nothing (ADR 0016).** The Database (JDBC), Iceberg, StarRocks,
+  Doris, OceanBase and Elasticsearch checks read rights (`has_schema_privilege`,
+  `HAS_PERMS_BY_NAME`, `SHOW GRANTS`, `_has_privileges`) and never create a table, database,
+  namespace or index; versions before 0016 left `bezisync_check_*` tables and indexes behind (the
+  changelog says how to drop them). Paimon and Redis checks still write a short-lived object or key
+  and delete it. Agents that predate this are not sent those checks (`agent_readonly_checks`).
+  BeziSync's catalog, S3 and AWS calls go through the SSRF guard; the connector's own (Java)
+  traffic does not.
 - **Flink CDC starts change destination tables (ADR 0012).** Before a Flink CDC start without a
   saved position the controller reads every destination table and adds the columns the job writes
   that a table lacks (Iceberg through its catalog; StarRocks, Doris and OceanBase with `ALTER TABLE
@@ -146,7 +150,8 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   checked over the MySQL protocol without TLS, OceanBase is written over JDBC and checked over the
   MySQL protocol without TLS, and Fluss documents no TLS for Flink CDC: rows and
   credentials cross the network in plain text. Keep them and the runtime on a private network.
-  Their connection checks create and drop a test table (StarRocks, Doris, OceanBase).
+  Their connection checks read `SHOW GRANTS`; deploy (`PrepareSink`, from the control plane)
+  creates the database if missing.
 - **More Flink CDC destinations (ADR 0009).** Flink CDC's Elasticsearch sink takes no CA: `https`
   works only with a publicly trusted certificate, so a private cluster is written over plain HTTP
   (keep it on a private network). Paimon's S3 keys travel as catalog properties of the job, filled
@@ -154,8 +159,9 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
   web UI or job graph of that pipeline can read them: keep the UI unexposed. OceanBase's JDBC URL (and StarRocks's and Doris's
   URLs) are built from a host that must be a host name or IP address, a port, a checked database
   name and BeziSync's own parameters, so no `/`, `?` or `&` can add driver options. Elasticsearch
-  and Paimon checks create and delete a test index or object, through the SSRF guard (Paimon without
-  a key signs with the control plane's own AWS credentials, as Iceberg's checks do); OceanBase's create and drop a test table. Hudi isn't offered: its S3 keys would sit in table
+  checks read the version, `HEAD` the pipeline's indexes and ask `_has_privileges`, and Paimon checks
+  put and delete a test object, through the SSRF guard (Paimon without a key signs with the control
+  plane's own AWS credentials, as Iceberg's checks do). Hudi isn't offered: its S3 keys would sit in table
   metadata or every TaskManager's environment.
 - **Oracle on Flink CDC writes in the CDB root and refreshes statistics.** On a multitenant
   database BeziSync creates `LOG_MINING_FLUSH` in the connector user's schema of the CDB root (the

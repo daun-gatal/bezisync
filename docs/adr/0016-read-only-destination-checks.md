@@ -181,6 +181,12 @@ tested against fakes that record every request or statement and fail on any crea
 Elasticsearch, a recording `database/sql` driver for the OLAP and MySQL-format paths. The PostgreSQL check runs against
 the test database (`BEZISYNC_TEST_DATABASE_URL`) with roles that lack `USAGE` or `CREATE`.
 
+As implemented: the StarRocks and Doris column layouts (`UserIdentity`/`Catalog`/`Grants`;
+`GlobalPrivs`/`CatalogPrivs`/`DatabasePrivs`) follow the vendors' `SHOW GRANTS` reference, because the lab
+namespace was removed before every header could be re-read. The readers find columns by name, and a missing column reads
+as "nothing shown" (Unknown), so a different layout can't produce a false Pass. No live StarRocks, Doris, OceanBase,
+Elasticsearch or Iceberg server was used for these tests; PostgreSQL ran against a real server.
+
 | # | Case | Expected | Test |
 |---|---|---|---|
 | E1 | Iceberg namespace exists | no create request; `iceberg_write` Unknown | `TestIcebergCheckCreatesNothing` |
@@ -203,7 +209,7 @@ the test database (`BEZISYNC_TEST_DATABASE_URL`) with roles that lack `USAGE` or
 | E18 | MySQL `CREATE VIEW` only, `CREATE TEMPORARY TABLES`, other db, table-level, partial revoke, role only | Unknown | same |
 | E19 | StarRocks captured grants; external catalog row; `ALL ON ALL DATABASES`; `NONE` roles only; 2.x layout | Pass / Unknown / Pass / Unknown / Unknown | `TestStarRocksGrants` |
 | E20 | Doris captured row; `CatalogPrivs internal`; global; `N/A` columns; 1.x layout | Pass / Pass / Pass / Unknown / Unknown | `TestDorisGrants` |
-| E21 | OceanBase captured grants; `CREATE SYNONYM` only; database missing with `CREATE ON *.*` | Pass / Unknown / Pass | `TestOceanBaseGrants` |
+| E21 | OceanBase captured grants; `CREATE SYNONYM` only; database missing with `CREATE ON *.*` | Pass / Unknown / Pass | `TestOlapCheckCreatesNothing` |
 | E22 | OLAP database missing (StarRocks, Doris) | Unknown, "created on deploy if the login may" | `TestOlapCheckCreatesNothing` |
 | E23 | OLAP check over a recording driver | no `CREATE` statement sent | same |
 | E24 | `PrepareSink` exists / created / 1007 / unreachable | exists / created / exists / failed with the fix | `TestOlapPrepareSink` |
