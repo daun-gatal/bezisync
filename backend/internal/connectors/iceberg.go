@@ -373,9 +373,14 @@ func (c icebergConfig) open(ctx context.Context) (catalog.Catalog, context.Conte
 	case "sigv4":
 		opts = append(opts, rest.WithSigV4RegionSvc(c.region(), c.SigningName), rest.WithAwsConfig(awsCfg))
 	}
+	// iceberg-go asks every REST request for vended credentials unless told otherwise; with the
+	// connection's own keys, ask for none: a catalog that can't vend (Polaris over a store without
+	// STS) refuses the request, table creation included, although the connector writes fine.
+	delegation := ""
 	if c.Storage == "vended" {
-		opts = append(opts, rest.WithHeaders(map[string]string{"X-Iceberg-Access-Delegation": "vended-credentials"}))
+		delegation = "vended-credentials"
 	}
+	opts = append(opts, rest.WithHeaders(map[string]string{"X-Iceberg-Access-Delegation": delegation}))
 	cat, err := rest.NewCatalog(ctx, "bezisync", c.URI, opts...)
 	return cat, ctx, err
 }

@@ -42,6 +42,7 @@ the controller and agents call connectors only with already-resolved (decrypted)
 - Oracle `Probe` on Flink CDC reports only the archive's retention window and never a loss: the pipeline's SCN is inside its encrypted saved state (`[oracle.go:oraFlinkImpact]`).
 
 - A Flink CDC destination's table is read only with the connection's own credentials and through the SSRF guard; an unreadable table is an error, never "missing" (`[flinkcolumns.go:paimonColumns]`, `[flinkcolumns.go:olapSink.tableColumns]`); a column is added only with a type BeziSync names exactly (`[flinkcolumns.go:icebergTypeOf]`, `[flinkcolumns.go:olapSink.olapColumnType]`).
+- BeziSync's own Iceberg REST client (`[iceberg.go:icebergConfig.open]`: checks, the write test, tails, column reads) asks the catalog for vended credentials only for `storage: vended`, and for none otherwise: iceberg-go asks on every request by default, and a catalog that can't vend (Polaris without STS) then refuses it with HTTP 400 although the connector itself writes with the connection's keys.
 
 ## Side Effects
 - Oracle on Flink CDC: Prepare creates `<user>.LOG_MINING_FLUSH` (one row) in the CDB root of a multitenant database and Cleanup leaves it (`[oracle_flink.go:prepareFlush]`); its preflight queries `V$VERSION`, `SESSION_PRIVS`, `ALL_TAB_STATISTICS`, `USER_TABLES` and `USER_TS_QUOTAS` (`[oracle_flinkchecks.go:FlinkChecks]`).
