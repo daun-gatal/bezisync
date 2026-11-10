@@ -327,6 +327,16 @@ func buildCatalog() []*Tool {
 			Description: "Runs the final checks and deploys a version (the latest when left out). With approvals on, this asks for approval instead. force_reason deploys past failed checks where the project allows it; policy failures can never be forced.",
 			Params:      []Param{pipelineArg, opt("version", num("Version number to deploy (also rolls back).")), opt("force_reason", str("Why it is safe to deploy despite failed checks (recorded)."))},
 			Call:        send(http.MethodPost, onPipeline("/deploy"), "version", "force_reason")},
+		{Name: "discard_pipeline_changes", Title: "Discard undeployed changes", Kind: Write, Project: true, Perm: auth.PipelineEdit,
+			Description: "Points a deployed pipeline's current version back at the deployed one: the undeployed change is set aside (it stays in the version history and can still be deployed). The connector keeps running and doesn't restart. Refused while a change request is pending.",
+			Params:      []Param{pipelineArg, expectedVersion()},
+			Call: func(cl *call) (any, error) {
+				p, err := cl.pipeline()
+				if err != nil {
+					return nil, err
+				}
+				return cl.withVersionAs(http.MethodPost, p, p+"/changes:discard", nil)
+			}},
 		{Name: "pause_pipeline", Title: "Pause", Kind: Write, Project: true, Perm: auth.PipelineOperate,
 			Description: "Stops the connector; the position is kept and the source keeps its log for it.", Params: []Param{pipelineArg}, Call: send(http.MethodPost, onPipeline("/pause"))},
 		{Name: "resume_pipeline", Title: "Resume", Kind: Write, Project: true, Perm: auth.PipelineOperate,

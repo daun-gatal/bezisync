@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/daun-gatal/bezisync/backend/internal/db"
@@ -204,5 +205,39 @@ func TestEditBackWithPins(t *testing.T) {
 	ev := auditOf(t, "pipeline.changes_discarded")
 	if len(ev) != 1 || ev[0]["reason"] != "edited_back" || fmt.Sprint(ev[0]["discarded_version"]) != "2" {
 		t.Fatal(ev)
+	}
+}
+
+// E16: the CLI and the MCP tool discard by name; a viewer's agent can't.
+func TestDiscardOverCLIAndMCP(t *testing.T) {
+	d := newDiscardEnv(t)
+	admin := d.admin
+	d.edit(t, admin, "shop.orders", "shop.refunds") // v2
+
+	cliToken := admin.post("/api/v1/auth/tokens", map[string]any{"name": "cli"}).expect(201).Str("token")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BEZISYNC_URL", d.srv.URL)
+	t.Setenv("BEZISYNC_TOKEN", cliToken)
+	code, out, stderr := runCLI(t, "", "remote", "pipelines", "discard", "orders-cdc")
+	if code != 0 || !strings.Contains(out, "orders-cdc: discarded v2; v1 stays deployed") {
+		t.Fatal(code, out, stderr)
+	}
+	if code, _, stderr := runCLI(t, "", "remote", "pipelines", "discard", "orders-cdc"); code != 1 || !strings.Contains(stderr, "nothing to discard") {
+		t.Fatal(code, stderr)
+	}
+
+	d.edit(t, admin, "shop.refunds") // v3
+	enableMCP(t, admin, nil)
+	viewerTok := token(t, member(t, d.srv, admin, d.pid, "viewer"), map[string]any{"name": "agent"})
+	if text, isErr := callTool(t, d.srv, viewerTok, "discard_pipeline_changes", map[string]any{"pipeline": "orders-cdc"}); !isErr {
+		t.Fatal("a viewer discarded:", text)
+	}
+	adminTok := token(t, admin, map[string]any{"name": "agent"})
+	text, isErr := callTool(t, d.srv, adminTok, "discard_pipeline_changes", map[string]any{"pipeline": "orders-cdc"})
+	if isErr || !strings.Contains(text, `"current_version": 1`) || !strings.Contains(text, `"has_undeployed_changes": false`) {
+		t.Fatal(text)
+	}
+	if text, isErr := callTool(t, d.srv, adminTok, "discard_pipeline_changes", map[string]any{"pipeline": "orders-cdc", "expected_version": 1}); !isErr || !strings.Contains(text, "changed this pipeline") {
+		t.Fatal(text)
 	}
 }
