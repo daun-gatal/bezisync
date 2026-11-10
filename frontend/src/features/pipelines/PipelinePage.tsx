@@ -18,6 +18,7 @@ import { useDecideChange, useDeletePipeline, useDiff, useLifecycle, usePipeline,
 import { useProject } from '@/lib/session';
 import { HealthBadge, LifecycleBadge, statusOf } from '@/lib/status';
 import { ChangeDebeziumDialog } from './ChangeDebeziumDialog';
+import { canDiscard, DiscardDialog } from './DiscardChanges';
 import { OutputImpact } from './transforms/Impact';
 import { DataTab } from './page/DataTab';
 import { HistoryTab } from './page/HistoryTab';
@@ -45,6 +46,7 @@ export function PipelinePage() {
   const lifecycle = useLifecycle(project.id);
   const [deleting, setDeleting] = useState(false);
   const [changingImage, setChangingImage] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
 
   if (pipeline.isPending) return <Skeleton lines={8} />;
   if (pipeline.error) {
@@ -178,7 +180,17 @@ export function PipelinePage() {
 
       {p.pending_change && !gone ? <ApprovalBanner pipeline={p} /> : null}
       {p.has_undeployed_changes && deployed && !gone && !p.pending_change ? (
-        <Notice tone="info" title={`v${p.current_version} is saved but not deployed`}>
+        <Notice
+          tone="info"
+          title={`v${p.current_version} is saved but not deployed`}
+          action={
+            canDiscard(p, canEdit) ? (
+              <Button size="sm" onClick={() => setDiscarding(true)}>
+                Discard v{p.current_version}
+              </Button>
+            ) : null
+          }
+        >
           The running connector uses v{p.deployed_version}.{primary === 'review' ? ' Review and deploy it when you’re ready.' : ''}
         </Notice>
       ) : null}
@@ -214,6 +226,7 @@ export function PipelinePage() {
       </TabPanel>
 
       <DeleteDialog pipeline={p} open={deleting} onOpenChange={setDeleting} />
+      {canDiscard(p, canEdit) ? <DiscardDialog pipeline={p} open={discarding} onOpenChange={setDiscarding} /> : null}
       <ChangeDebeziumDialog pipelines={[{ id: p.id, name: p.name }]} open={changingImage} onOpenChange={setChangingImage} />
     </Page>
   );

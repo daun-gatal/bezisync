@@ -79,7 +79,15 @@ export function HistoryTab({ pipeline: p }: { pipeline: Pipeline }) {
                             <strong className="font-mono font-medium">v{v.number}</strong>
                             {v.deployed ? <Pill tone="info">deployed</Pill> : null}
                             {v.draft ? (
-                              <Pill title="Saves to this change update this version until it is deployed or sent for approval.">draft</Pill>
+                              <Pill
+                                title={
+                                  v.number === p.current_version
+                                    ? 'Saves to this change update this version until it is deployed or sent for approval.'
+                                    : 'Never deployed, and no longer the current version (discarded, or a later edit took its place). Deploy it to bring it back.'
+                                }
+                              >
+                                draft
+                              </Pill>
                             ) : null}
                           </span>
                           <span className="line-clamp-2 text-xs wrap-anywhere text-muted">
