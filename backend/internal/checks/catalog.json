@@ -3637,14 +3637,14 @@
    "code": "elasticsearch_create_index",
    "section": "Elasticsearch",
    "titles": [
+    "Index rights",
     "Create indexes"
    ],
    "whys": [
-    "Flink CDC's sink writes into indexes created by their first document (it creates no mappings), and drops none: BeziSync writes and deletes a test index."
+    "Flink CDC's sink writes and deletes documents in the pipeline's indexes and creates a missing one with its first document (it creates no mappings). BeziSync asks Elasticsearch (_has_privileges, from 6.4) about the pipeline's own indexes before deploy, without creating any (ADR 0016): no index, delete, or create right on an index that isn't there yet blocks; no delete_index warns, since deleting the pipeline with \"drop destinations\" would fail. When Elasticsearch can't answer (before 6.4, security disabled, or the question refused) the rights aren't checked and the first change written shows a missing one."
    ],
    "fixes": [
-    "Give the user the create_index, index and delete_index privileges on the indexes it writes and on bezisync_check_* (the check's test index), and allow automatic index creation (action.auto_create_index).",
-    "Delete the index {probe}, and give the user the delete_index privilege on the indexes it writes."
+    "Give the user the index, delete and create_index (or, from 7.9, auto_configure) privileges on the pipeline's indexes, and delete_index for \"drop destinations\"; allow automatic index creation (action.auto_create_index) for them."
    ]
   },
   {
