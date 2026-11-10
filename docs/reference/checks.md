@@ -1697,6 +1697,8 @@ Give the credentials the rights to create namespaces and tables, load them and c
 
 **Create tables**
 
+- Why: The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right.
+
 Fix:
 
 ```
@@ -1765,6 +1767,8 @@ GRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';
 ### `doris_create_table`
 
 **Create tables**
+
+- Why: The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right.
 
 Fix:
 
@@ -1990,6 +1994,8 @@ Allow the address in BEZISYNC_SSRF_ALLOW_CIDRS, or use another endpoint.
 ### `oceanbase_create_table`
 
 **Create tables**
+
+- Why: The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right.
 
 Fix:
 

@@ -53,6 +53,11 @@ func olapLive(t *testing.T, typ, create string) {
 	if err != nil || !report.OK {
 		t.Fatalf("%+v %v", report, err)
 	}
+	// The check only reads (ADR 0016); the database is created on deploy, as a pipeline's is.
+	prepared, err := snk.PrepareSink(ctx, conn, connectors.CompileContext{}, nil)
+	if err != nil || len(prepared) != 1 || (prepared[0].Outcome != "created" && prepared[0].Outcome != "exists") {
+		t.Fatalf("%+v %v", prepared, err)
+	}
 	db, err := sql.Open("mysql", "root@tcp("+net.JoinHostPort(host, strconv.Itoa(qp))+")/")
 	if err != nil {
 		t.Fatal(err)

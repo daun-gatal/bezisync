@@ -32,8 +32,6 @@ type olapConfig struct {
 // olapSink is what differs between them.
 type olapSink struct {
 	typ, title string
-	// probe creates a one-column test table (database.table, replicas).
-	probe func(table string, replicas int) string
 	// grant is the SQL that gives a user what pipelines need.
 	grant func(c olapConfig) string
 	// noHTTP: the database loads over its SQL port only (OceanBase): no HTTP port to check.
@@ -137,21 +135,14 @@ func (o olapSink) check(ctx context.Context, conn Resolved) (checks.Report, erro
 		version = "(version unknown)"
 	}
 	run.Passed(o.typ+"_login", "Sign in", checks.CatAuth, "Signed in ("+version+").", "")
-	// The sink creates the database and its tables: prove the rights on a scratch table.
-	fail := func(msg string, err error) checks.Report {
-		run.Add(checks.Check{Code: o.typ + "_create_table", Title: "Create tables", Status: checks.Fail, Category: checks.CatPermissions, Blocking: true,
-			Message: msg, Technical: firstRunes(err.Error(), 300), Fix: &checks.Fix{Kind: "sql", Who: o.title + " admin", Code: o.grant(cfg)}})
-		return checks.Summarize(run.Checks, started)
+	// The pipeline's tables are created by the sink, in a database created on deploy
+	// (PrepareSink): ask whether the login may, without creating anything (ADR 0016 D4).
+	status, msg := o.createRight(ctx, c, cfg.Database)
+	chk := checks.Check{Code: o.typ + "_create_table", Title: "Create tables", Status: status, Category: checks.CatPermissions, Message: msg}
+	if status != checks.Pass {
+		chk.Fix = &checks.Fix{Kind: "sql", Who: o.title + " admin", Code: o.grant(cfg)}
 	}
-	if _, err := c.ExecContext(ctx, "CREATE DATABASE IF NOT EXISTS "+olapQuote(cfg.Database)); err != nil {
-		return fail("BeziSync could not create the database "+cfg.Database+".", err), nil
-	}
-	probe := fmt.Sprintf("%s.bezisync_check_%d", cfg.Database, time.Now().UnixNano()%1e9)
-	if _, err := c.ExecContext(ctx, o.probe(olapTable(probe), cfg.Replicas)); err != nil {
-		return fail("BeziSync could not create a table in "+cfg.Database+": the pipeline creates its tables.", err), nil
-	}
-	_, _ = c.ExecContext(context.WithoutCancel(ctx), o.drop(olapTable(probe)))
-	run.Passed(o.typ+"_create_table", "Create tables", checks.CatPermissions, "Created and dropped a test table in "+cfg.Database+".", "")
+	run.Add(chk)
 	return checks.Summarize(run.Checks, started), nil
 }
 

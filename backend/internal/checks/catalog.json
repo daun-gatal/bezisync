@@ -3421,7 +3421,9 @@
    "titles": [
     "Create tables"
    ],
-   "whys": [],
+   "whys": [
+    "The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right."
+   ],
    "fixes": [
     "GRANT CREATE DATABASE ON CATALOG default_catalog TO USER '{user}';\nGRANT ALL ON DATABASE {database} TO USER '{user}';\nGRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';"
    ]
@@ -3516,7 +3518,9 @@
    "titles": [
     "Create tables"
    ],
-   "whys": [],
+   "whys": [
+    "The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right."
+   ],
    "fixes": [
     "GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{database}.* TO '{user}'@'%';"
    ]
@@ -3743,7 +3747,9 @@
    "titles": [
     "Create tables"
    ],
-   "whys": [],
+   "whys": [
+    "The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right."
+   ],
    "fixes": [
     "GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}';\nGRANT CREATE ON *.* TO '{user}';"
    ]
