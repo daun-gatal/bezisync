@@ -19,6 +19,7 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/pytime"
 	"github.com/daun-gatal/bezisync/backend/internal/runtime"
 	"github.com/daun-gatal/bezisync/backend/internal/security"
+	"github.com/daun-gatal/bezisync/backend/internal/services"
 	"github.com/daun-gatal/bezisync/backend/internal/val"
 )
 
@@ -239,6 +240,19 @@ func agentRoutes(r chi.Router) {
 				}
 				if args == nil {
 					args = map[string]any{}
+				}
+				// ADR 0016 D7: a destination check this agent would run by creating test tables is
+				// answered here instead, whatever the stored state said when it was queued.
+				if req.Op == "check" && services.GatedForAgent(fmt.Sprint(args["kind"]), fmt.Sprint(args["type"]), b.Features) {
+					result, err := services.ReportMap(services.OlderAgentReport(rt.Name, b.Version))
+					if err != nil {
+						return err
+					}
+					if _, err := q.Exec(ctx, `UPDATE agent_requests SET state = 'done', result = $1 WHERE id = $2 AND runtime_id = $3`,
+						result, req.ID, rt.ID); err != nil {
+						return err
+					}
+					continue
 				}
 				pending = append(pending, obj("id", req.ID.String(), "op", req.Op, "args", args))
 			}

@@ -244,31 +244,32 @@ func (s *jdbcSink) Check(ctx context.Context, conn Resolved, _ []string) (checks
 	}
 	defer func() { _ = db.Close() }()
 	run.Passed("jdbc_login", "Sign in", checks.CatAuth, "Signed in to "+cfg.Database+".", "")
-	// Create and drop a table where the connector creates its tables: proves the rights schema
-	// evolution needs.
-	probe := fmt.Sprintf("bezisync_check_%d", time.Now().UnixNano()%1e9)
-	target := probe
-	if cfg.Schema != "" {
-		target = cfg.Schema + "." + probe
+	// Ask whether the login may create tables where the connector creates them (schema evolution
+	// needs it), without creating one (ADR 0016): a definite no warns, as before; a right the
+	// database doesn't show is Unknown.
+	status, msg, schema := jdbcCreateRight(ctx, db, cfg)
+	c := checks.Check{Code: "jdbc_create_table", Title: "Create tables", Status: status, Category: checks.CatPermissions, Message: msg}
+	if status != checks.Pass {
+		c.Fix = &checks.Fix{Kind: "sql", Who: "database admin", Code: jdbcGrantIn(cfg, schema)}
 	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("CREATE TABLE %s (id INT PRIMARY KEY)", cfg.qualified(target))); err != nil {
-		run.Add(checks.Check{Code: "jdbc_create_table", Title: "Create tables", Status: checks.Warn, Category: checks.CatPermissions,
-			Message:   "BeziSync could not create a table: pipelines that create their tables will fail; existing tables still work.",
-			Technical: firstRunes(err.Error(), 300), Fix: &checks.Fix{Kind: "sql", Who: "database admin", Code: jdbcGrant(cfg)}})
-		return checks.Summarize(run.Checks, started), nil
-	}
-	_, _ = db.ExecContext(context.WithoutCancel(ctx), "DROP TABLE "+cfg.qualified(target))
-	run.Passed("jdbc_create_table", "Create tables", checks.CatPermissions, "Created and dropped a test table.", "")
+	run.Add(c)
 	return checks.Summarize(run.Checks, started), nil
 }
 
-func jdbcGrant(c jdbcConfig) string {
+func jdbcGrant(c jdbcConfig) string { return jdbcGrantIn(c, "") }
+
+// jdbcGrantIn is jdbcGrant for the schema the check found (SQL Server: the login's default
+// schema; "" is dbo).
+func jdbcGrantIn(c jdbcConfig, schema string) string {
 	switch c.DBType {
 	case "mysql", "mariadb":
 		return fmt.Sprintf("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP ON `%s`.* TO '%s'@'%%';", c.Database, c.User)
 	case "sqlserver":
-		return fmt.Sprintf("USE [%s];\nCREATE USER [%s] FOR LOGIN [%s] WITH DEFAULT_SCHEMA = [dbo];\nGRANT CREATE TABLE TO [%s];\nGRANT ALTER, SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[dbo] TO [%s];",
-			c.Database, c.User, c.User, c.User, c.User)
+		if schema == "" {
+			schema = "dbo"
+		}
+		return fmt.Sprintf("USE [%s];\nCREATE USER [%s] FOR LOGIN [%s] WITH DEFAULT_SCHEMA = [%s];\nGRANT CREATE TABLE TO [%s];\nGRANT ALTER, SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[%s] TO [%s];",
+			c.Database, c.User, c.User, schema, c.User, schema, c.User)
 	}
 	return fmt.Sprintf("GRANT USAGE, CREATE ON SCHEMA %s TO %s;\nALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %s;",
 		c.Schema, c.User, c.Schema, c.User)
@@ -391,4 +392,92 @@ func (s *jdbcSink) CheckPipeline(_ context.Context, conn Resolved, c CompileCont
 		}
 	}
 	return out
+}
+
+// jdbcCreateRight asks the database whether the login may create tables where the connector
+// creates them; it returns the result, its message and the schema (for the fix).
+func jdbcCreateRight(ctx context.Context, db *sql.DB, cfg jdbcConfig) (status, msg, schema string) {
+	unknown := func(what string, err error) (string, string, string) {
+		m := "BeziSync couldn't ask the database " + what + ": the first table a pipeline creates shows a missing right."
+		if err != nil {
+			m += " (" + firstRunes(err.Error(), 200) + ")"
+		}
+		return checks.Unknown, m, schema
+	}
+	switch cfg.DBType {
+	case "postgresql":
+		// The connector creates its tables in this schema (currentSchema=, lower-cased unquoted)
+		// and never creates the schema itself.
+		var name sql.NullString
+		var exists, usage, create bool
+		err := db.QueryRowContext(ctx, `SELECT s.name, n.oid IS NOT NULL,
+  CASE WHEN n.oid IS NULL THEN false ELSE has_schema_privilege(n.oid, 'USAGE') END,
+  CASE WHEN n.oid IS NULL THEN false ELSE has_schema_privilege(n.oid, 'CREATE') END
+FROM (SELECT coalesce(nullif($1, ''), current_schema()) AS name) s LEFT JOIN pg_namespace n ON n.nspname = s.name`,
+			strings.ToLower(cfg.Schema)).Scan(&name, &exists, &usage, &create)
+		if err != nil {
+			return unknown("which schema rights the user has", err)
+		}
+		if !name.Valid {
+			return unknown("which schema the user creates tables in (no current schema)", nil)
+		}
+		schema = name.String
+		switch {
+		case !exists:
+			return checks.Warn, "The schema " + schema + " doesn't exist: create it (pipelines don't); existing tables elsewhere still work.", schema
+		case usage && create:
+			return checks.Pass, "May create tables in the schema " + schema + ".", schema
+		}
+		return checks.Warn, "The user can't create tables in the schema " + schema + " (needs USAGE and CREATE): pipelines that create their tables will fail; existing tables still work.", schema
+	case "sqlserver":
+		var table, alter sql.NullInt64
+		var name sql.NullString
+		err := db.QueryRowContext(ctx, `SELECT HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'CREATE TABLE'), HAS_PERMS_BY_NAME(SCHEMA_NAME(), 'SCHEMA', 'ALTER'), SCHEMA_NAME()`).
+			Scan(&table, &alter, &name)
+		if err != nil {
+			return unknown("which rights the user has", err)
+		}
+		schema = name.String
+		switch sqlserverCreateVerdict(table, alter) {
+		case checks.Pass:
+			return checks.Pass, "May create tables in the schema " + schema + ".", schema
+		case checks.Warn:
+			return checks.Warn, "The user can't create tables in the schema " + schema + " (needs CREATE TABLE on the database and ALTER on the schema): pipelines that create their tables will fail; existing tables still work.", schema
+		}
+		return unknown("which schema the user creates tables in (the login has no default schema)", nil)
+	}
+	// MySQL, MariaDB: what SHOW GRANTS shows.
+	rows, err := db.QueryContext(ctx, "SHOW GRANTS")
+	if err != nil {
+		return unknown("which grants the user has", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var grants []string
+	for rows.Next() {
+		var g string
+		if err := rows.Scan(&g); err != nil {
+			return unknown("which grants the user has", err)
+		}
+		grants = append(grants, g)
+	}
+	if err := rows.Err(); err != nil {
+		return unknown("which grants the user has", err)
+	}
+	if onDB, _, revoked := mysqlGrantsCreate(grants, cfg.Database); onDB && !revoked {
+		return checks.Pass, "May create tables in " + cfg.Database + ".", schema
+	}
+	return checks.Unknown, "The user's grants don't show the right to create tables in " + cfg.Database +
+		" (it may come from a role, or a partial revoke hides it): the first table a pipeline creates shows whether it's there.", schema
+}
+
+// sqlserverCreateVerdict maps HAS_PERMS_BY_NAME's answers: both 1 Pass, a 0 Warn, a NULL (no
+// default schema, or nothing to ask about) Unknown.
+func sqlserverCreateVerdict(table, alter sql.NullInt64) string {
+	switch {
+	case !table.Valid || !alter.Valid:
+		return checks.Unknown
+	case table.Int64 == 1 && alter.Int64 == 1:
+		return checks.Pass
+	}
+	return checks.Warn
 }

@@ -11,9 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/glue"
@@ -29,7 +27,6 @@ import (
 	"github.com/daun-gatal/bezisync/backend/internal/checks"
 	"github.com/daun-gatal/bezisync/backend/internal/domain"
 	"github.com/daun-gatal/bezisync/backend/internal/problem"
-	"github.com/daun-gatal/bezisync/backend/internal/pytime"
 	"github.com/daun-gatal/bezisync/backend/internal/ssrf"
 )
 
@@ -445,9 +442,12 @@ func (s *icebergSink) Check(ctx context.Context, conn Resolved, _ []string) (che
 	default:
 		run.Passed("iceberg_namespace", "Namespace", checks.CatDestination, fmt.Sprintf("Namespace %s does not exist yet; BeziSync creates it on deploy.", cfg.Namespace), "")
 	}
-	if exists {
-		icebergWriteCheck(ctx, run, cat, cfg)
-	}
+	// ADR 0016: a check never creates a table. Iceberg catalogs (REST, Glue) have no read-only way
+	// to ask whether this login may create and commit one, so say what isn't verified before deploy.
+	run.Add(checks.Check{Code: "iceberg_write", Title: "Table create and commit", Status: checks.Unknown, Category: checks.CatDestination,
+		Message: "Table create and commit aren't checked before deploy: Iceberg catalogs have no read-only way to ask. " +
+			"The first change written shows any error (a missing right, storage keys that can't write, a catalog that refuses commits).",
+		Why: "BeziSync checks destinations without creating anything in them."})
 	return checks.Summarize(run.Checks, started), nil
 }
 
@@ -463,56 +463,6 @@ func icebergAuthFix(provider string) string {
 		return "Grant the token's principal USE CATALOG, USE SCHEMA, CREATE SCHEMA, CREATE TABLE and MODIFY on the catalog; enable external data access on the metastore."
 	}
 	return "Give the credentials permission to list and create namespaces, and to create, load and commit tables."
-}
-
-// icebergWriteCheck proves the connector's write path: it creates a one-row table in the
-// namespace, reads it back and drops it.
-func icebergWriteCheck(ctx context.Context, run *checks.Run, cat catalog.Catalog, cfg icebergConfig) {
-	ident := append(append(table.Identifier{}, cfg.namespace()...), fmt.Sprintf("bezisync_check_%d", time.Now().UnixNano()%1e9))
-	schema := iceberg.NewSchema(0, iceberg.NestedField{ID: 1, Name: "checked_at", Type: iceberg.PrimitiveTypes.String, Required: false})
-	fail := func(msg string, err error) {
-		run.Add(checks.Check{Code: "iceberg_write", Title: "Write a test table", Status: checks.Fail, Category: checks.CatDestination, Blocking: true,
-			Message: msg, Technical: firstRunes(err.Error(), 300),
-			Why: "The connector creates tables and writes Parquet files with these credentials."})
-	}
-	var opts []catalog.CreateTableOpt
-	if cfg.CatalogType == "glue" {
-		opts = append(opts, catalog.WithLocation(strings.TrimRight(cfg.Warehouse, "/")+"/"+strings.Join(ident, "/")))
-	}
-	tbl, err := cat.CreateTable(ctx, ident, schema, opts...)
-	if err != nil {
-		fail("Could not create a table in the namespace.", err)
-		return
-	}
-	defer func() { _, _ = icebergDrop(context.WithoutCancel(ctx), cat, ident) }()
-	arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "checked_at", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
-	b := array.NewStringBuilder(memory.DefaultAllocator)
-	b.Append(pytime.ISOFormat(time.Now()))
-	col := b.NewArray()
-	defer col.Release()
-	at := array.NewTableFromSlice(arrowSchema, [][]arrow.Array{{col}})
-	defer at.Release()
-	tx := tbl.NewTransaction()
-	if err := tx.AppendTable(ctx, at, 1, nil); err != nil {
-		fail("Could not write a data file to the warehouse.", err)
-		return
-	}
-	if tbl, err = tx.Commit(ctx); err != nil {
-		fail("Could not commit to the table.", err)
-		return
-	}
-	got, err := tbl.Scan().ToArrowTable(ctx)
-	if err != nil {
-		fail("Could not read the test table back.", err)
-		return
-	}
-	rows := got.NumRows()
-	got.Release()
-	if rows != 1 {
-		fail("The test table did not return the row written.", fmt.Errorf("%d rows", rows))
-		return
-	}
-	run.Passed("iceberg_write", "Write a test table", checks.CatDestination, "Created a table, wrote and read a row, and dropped it.", "")
 }
 
 // icebergDrop drops a table, purging its files where the catalog allows it.

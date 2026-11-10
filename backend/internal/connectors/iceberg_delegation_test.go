@@ -9,8 +9,6 @@ import (
 	"testing"
 
 	"github.com/apache/iceberg-go/table"
-
-	"github.com/daun-gatal/bezisync/backend/internal/config"
 )
 
 // A connection that brings its own storage keys must not ask the REST catalog for vended
@@ -18,17 +16,7 @@ import (
 // (Polaris over a store without STS) then refuses table creation with HTTP 400 — the
 // iceberg_write check failed although the connector itself (Java Iceberg) writes fine.
 func TestIcebergAccessDelegation(t *testing.T) {
-	s, err := config.Load(func(k string) (string, bool) {
-		if k == "BEZISYNC_SSRF_ALLOW_CIDRS" {
-			return `["127.0.0.0/8"]`, true
-		}
-		return "", false
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	config.Set(s)
-	t.Cleanup(config.Reset)
+	allowLoopback(t)
 
 	for _, c := range []struct {
 		storage string

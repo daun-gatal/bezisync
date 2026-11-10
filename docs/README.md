@@ -506,7 +506,10 @@ Debezium's JDBC sink connector (the official images ship the drivers).
   the "row after change" shape, BeziSync turns deletes into what this setting needs.
 - **Keys**: upserts need a key on every table; preflight blocks tables without one until you pick
   key columns (Transform step) or insert only.
-- **Preflight** reaches the database, signs in, creates and drops a test table, and checks keys and
+- **Preflight** reaches the database, signs in, asks whether the user may create tables in the
+  schema (PostgreSQL: `USAGE` and `CREATE`; SQL Server: `CREATE TABLE` and `ALTER` on the schema;
+  MySQL and MariaDB: the `SHOW GRANTS` text, "not known" when a role may grant it) without creating
+  one, and checks keys and
   name lengths (63 characters in PostgreSQL, 64 in MySQL, 128 in SQL Server). The **Events** tab
   and the delivery canary read rows of the tables.
 - Deleting a pipeline with "drop destinations" drops its tables.
@@ -520,11 +523,11 @@ Debezium's JDBC sink connector (the official images ship the drivers).
 
 One table per source table in a database of a MySQL tenant, created by Flink CDC over
 JDBC with OceanBase Connector/J (in the reference image; no MySQL driver needed). The connection takes the
-host and port (2881, or 2883 through OBProxy), the database (created if missing), the user as
+host and port (2881, or 2883 through OBProxy), the database (created on deploy if missing), the user as
 `user@tenant` (`#cluster` through OBProxy) and its password. The connection is not encrypted (no TLS
 options): keep OceanBase and the runtime on a private network. Times are written in UTC. Only new and renamed
-columns are applied as schema changes; others stop the pipeline. Preflight signs in and creates and drops a
-test table; the Events tab reads rows; "drop destinations" drops the tables.
+columns are applied as schema changes; others stop the pipeline. Preflight signs in and reads the user's
+`SHOW GRANTS` (it creates nothing); the Events tab reads rows; "drop destinations" drops the tables.
 
 ### Apache Iceberg
 
@@ -584,8 +587,9 @@ through the same catalogs.
 - **Event shape**: Iceberg needs the row after change with `__op` and `__source_ts_ms`; BeziSync adds
   that step (or completes yours) and sends timestamps as ISO-8601 text (Kafka Connect types for SQL
   Server). Outbox steps and tombstone deletes are not available.
-- **Preflight** signs in to the catalog, checks the namespace, writes a one-row test table, reads it
-  back and drops it, then checks keys and tables that already exist. The **Events** tab and the
+- **Preflight** signs in to the catalog and checks the namespace, then checks keys and tables that
+  already exist. It creates no table: whether the credentials may create tables and commit is
+  "not checked" (the catalog answers that only by trying), and the first commit shows it. The **Events** tab and the
   delivery canary read the newest rows of each table.
 - **Image**: pipelines run `ghcr.io/memiiso/debezium-server-iceberg` (see [Engine
   versions](#engine-versions)), amd64 only. It serves health on port 9000, which BeziSync probes;
@@ -633,7 +637,7 @@ kept). Fluss documents no TLS for Flink CDC: keep it in a network you trust.
 **Engine:** Flink CDC.
 
 Changes land in one primary-key table per source table in a StarRocks database (`cdc` by default,
-created if missing), written by Flink CDC with Stream Load; schema changes are applied to the
+created on deploy if missing), written by Flink CDC with Stream Load; schema changes are applied to the
 tables. The connection takes the FE host, its query port (9030,
 MySQL protocol) and HTTP port (8030, Stream Load), a user and password, and the replicas of each
 table (1 on a single-node cluster). Flink CDC's StarRocks connector carries its own MySQL JDBC driver
@@ -645,8 +649,9 @@ table (1 on a single-node cluster). Flink CDC's StarRocks connector carries its 
   Such a column arrives as `STRING` if it is text, and a timestamp one with millisecond precision.
   Because of that, new source columns are held back until the next deploy ("Send" is not offered).
 - **Timestamps** arrive to the second: Flink CDC's StarRocks connector writes no fractions.
-- **Preflight** signs in over the MySQL protocol, creates and drops a test table in the database,
-  and shows the `GRANT` statements the user needs when it can't. Every table needs a key
+- **Preflight** signs in over the MySQL protocol and reads the user's `SHOW GRANTS` (it creates
+  nothing): it passes when they show `CREATE TABLE` on the database, and otherwise says "not known"
+  (the right may come from a role) and shows the `GRANT` statements the user needs. Every table needs a key
   (`flink_primary_key`). The **Events** tab reads rows back (Flink CDC pipelines run no delivery canary).
 - **No TLS**: Stream Load and the MySQL protocol connection are plain text upstream. Keep StarRocks
   and the runtime in a network you trust.
@@ -670,9 +675,11 @@ One index per source table (the naming pattern, dots as `_`, lower-cased), one d
 whose id is the primary key: an update replaces it and a delete removes it. Indexes are created by
 their first document with dynamic mappings (decimals arrive as text, NULL fields are left out); create
 an index template beforehand for other mappings. The connection takes the hosts (`http(s)://host:port`),
-the version (6, 7 or 8, matching the server) and an optional user and password. Preflight signs in,
-compares the version, and writes and deletes a test index (the user needs `create_index`, `index` and
-`delete_index`, and automatic index creation must be allowed). The sink takes no CA: use `https` only
+the version (6, 7 or 8, matching the server) and an optional user and password. Preflight signs in and
+compares the version; the pipeline check then asks Elasticsearch (`_has_privileges`, 6.4 and later)
+whether the user may write and delete documents in the pipeline's indexes (`index`, `delete`) and
+create the missing ones (`create_index` or `auto_configure`), and warns without `delete_index`. It
+creates no index, and says "not known" when security is off or the question is refused. The sink takes no CA: use `https` only
 with a certificate from a public CA, otherwise keep the cluster in a network you trust. The Events tab
 reads documents, and deleting a pipeline with "drop destinations" deletes its indexes.
 

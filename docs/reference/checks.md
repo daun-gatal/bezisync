@@ -1673,9 +1673,15 @@ Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Table
 <a id="iceberg-write"></a>
 ### `iceberg_write`
 
-**Write a test table**
+**Table create and commit / Write a test table**
 
-- Why: The connector creates tables and writes Parquet files with these credentials: BeziSync creates a one-row table, reads it back and drops it.
+- Why: Iceberg catalogs (REST, Glue) have no read-only way to ask whether a login may create and commit tables, and BeziSync checks destinations without creating anything in them (ADR 0016). So this isn't verified before deploy: a missing right, storage keys that can't write or a catalog that refuses commits shows on the first change written, as a connector error.
+
+Fix:
+
+```
+Give the credentials the rights to create namespaces and tables, load them and commit to them, and object storage keys that may put, get, list and delete objects under the warehouse.
+```
 
 ## StarRocks
 
@@ -1690,6 +1696,8 @@ Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Table
 ### `starrocks_create_table`
 
 **Create tables**
+
+- Why: The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right.
 
 Fix:
 
@@ -1759,6 +1767,8 @@ GRANT ALL ON ALL TABLES IN DATABASE {database} TO USER '{user}';
 ### `doris_create_table`
 
 **Create tables**
+
+- Why: The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right.
 
 Fix:
 
@@ -1855,20 +1865,14 @@ GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.{da
 <a id="elasticsearch-create-index"></a>
 ### `elasticsearch_create_index`
 
-**Create indexes**
+**Index rights / Create indexes**
 
-- Why: Flink CDC's sink writes into indexes created by their first document (it creates no mappings), and drops none: BeziSync writes and deletes a test index.
-
-Fix:
-
-```
-Give the user the create_index, index and delete_index privileges on the indexes it writes and on bezisync_check_* (the check's test index), and allow automatic index creation (action.auto_create_index).
-```
+- Why: Flink CDC's sink writes and deletes documents in the pipeline's indexes and creates a missing one with its first document (it creates no mappings). BeziSync asks Elasticsearch (_has_privileges, from 6.4) about the pipeline's own indexes before deploy, without creating any (ADR 0016): no index, delete, or create right on an index that isn't there yet blocks; no delete_index warns, since deleting the pipeline with "drop destinations" would fail. When Elasticsearch can't answer (before 6.4, security disabled, or the question refused) the rights aren't checked and the first change written shows a missing one.
 
 Fix:
 
 ```
-Delete the index {probe}, and give the user the delete_index privilege on the indexes it writes.
+Give the user the index, delete and create_index (or, from 7.9, auto_configure) privileges on the pipeline's indexes, and delete_index for "drop destinations"; allow automatic index creation (action.auto_create_index) for them.
 ```
 
 <a id="elasticsearch-login"></a>
@@ -1991,6 +1995,8 @@ Allow the address in BEZISYNC_SSRF_ALLOW_CIDRS, or use another endpoint.
 
 **Create tables**
 
+- Why: The sink creates the pipeline's tables, in a database BeziSync creates on deploy if missing. BeziSync reads the database list and SHOW GRANTS without creating anything (ADR 0016): a grant that covers creating tables in the database passes; anything else (a role, an external authorizer, a database missing or not visible) is Unknown, never a block, and the first table the pipeline creates shows a missing right.
+
 Fix:
 
 ```
@@ -2042,7 +2048,7 @@ GRANT CREATE ON *.* TO '{user}';
 
 **Create tables**
 
-- Why: Pipelines that create their tables (the default) need it; BeziSync creates and drops a test table.
+- Why: Pipelines that create their tables (the default) need it. BeziSync asks the database without creating anything (ADR 0016): PostgreSQL's USAGE and CREATE on the schema (which must exist: pipelines don't create it), SQL Server's CREATE TABLE and ALTER on the login's default schema, MySQL and MariaDB from SHOW GRANTS. A definite no warns; a right the grants don't show (a role, a partial revoke) is Unknown, and the first table a pipeline creates shows it.
 
 Fix:
 
@@ -2342,6 +2348,19 @@ Remove the listed properties under Review → Advanced Debezium properties, or s
 **Advanced properties**
 
 - Why: Advanced properties are passed to Debezium Server as typed. BeziSync can't check what they do, so this check is Unknown, never a pass: review them in Review, and approvers see them listed.
+
+<a id="agent-readonly-checks"></a>
+### `agent_readonly_checks`
+
+**Agent version**
+
+- Why: Since ADR 0016 destination checks only read: the Apache Iceberg, Database (JDBC), StarRocks, Apache Doris, OceanBase and Elasticsearch checks create no test table or index. An older agent would still create them, so it doesn't get these checks, and running them from BeziSync instead would fail destinations only the runtime can reach. The destination isn't checked until the agent is upgraded; nothing blocks.
+
+Fix:
+
+```
+Upgrade the agent to this BeziSync version (Settings → Runtimes shows the install command).
+```
 
 <a id="agent-upgrade-required"></a>
 ### `agent_upgrade_required`

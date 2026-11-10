@@ -20,7 +20,7 @@ import (
 
 // Elasticsearch: one index per source table, written by Flink CDC's Elasticsearch sink (one
 // document per row, its id the primary key; a delete removes the document). Only Flink CDC
-// writes it. BeziSync checks, reads and drops indexes over the HTTP API, through the SSRF guard.
+// writes it. BeziSync checks (read-only, ADR 0016), reads and drops indexes over the HTTP API, through the SSRF guard.
 // The sink signs in with a user and password; it has no CA option, so https works only with a
 // certificate the JVM trusts (a public CA).
 
@@ -181,31 +181,8 @@ func (s *elasticsearchSink) Check(ctx context.Context, conn Resolved, _ []string
 		return checks.Summarize(run.Checks, started), nil
 	}
 	run.Passed("elasticsearch_version", "Version", checks.CatDestination, "Version "+strconv.Itoa(cfg.Version)+" matches the server.", "")
-	// The sink indexes into indexes it doesn't create: prove a document creates one.
-	probe := fmt.Sprintf("bezisync_check_%d", time.Now().UnixNano()%1e9)
-	code, body, err = esCall(ctx, cfg, http.MethodPost, "/"+probe+"/_doc?refresh=true", map[string]any{"id": 1}, 10*time.Second)
-	if err != nil || (code != http.StatusCreated && code != http.StatusOK) {
-		tech := string(body)
-		if err != nil {
-			tech = err.Error()
-		}
-		run.Add(checks.Check{Code: "elasticsearch_create_index", Title: "Create indexes", Status: checks.Fail, Category: checks.CatPermissions, Blocking: true,
-			Message: "Writing a document to a new index failed: Flink CDC's sink writes into indexes created by their first document.", Technical: firstRunes(tech, 300),
-			Fix: &checks.Fix{Kind: "text", Who: "Elasticsearch admin", Code: "Give the user the create_index, index and delete_index privileges on the indexes it writes and on bezisync_check_* (the check's test index), and allow automatic index creation (action.auto_create_index)."}})
-		return checks.Summarize(run.Checks, started), nil
-	}
-	if code, body, err := esCall(context.WithoutCancel(ctx), cfg, http.MethodDelete, "/"+probe, nil, 10*time.Second); err != nil || code != http.StatusOK {
-		tech := string(body)
-		if err != nil {
-			tech = err.Error()
-		}
-		// The sink never deletes indexes; "drop destinations" does, so a missing right shows here.
-		run.Add(checks.Check{Code: "elasticsearch_create_index", Title: "Create indexes", Status: checks.Warn, Category: checks.CatPermissions,
-			Message: "Created a test index, " + probe + ", but couldn't delete it: deleting a pipeline with \"drop destinations\" would fail the same way.", Technical: firstRunes(tech, 300),
-			Fix: &checks.Fix{Kind: "text", Who: "Elasticsearch admin", Code: "Delete the index " + probe + ", and give the user the delete_index privilege on the indexes it writes."}})
-		return checks.Summarize(run.Checks, started), nil
-	}
-	run.Passed("elasticsearch_create_index", "Create indexes", checks.CatPermissions, "Created and deleted a test index.", "")
+	// Index rights are checked per pipeline, on its own indexes and without creating any
+	// (CheckPipeline, ADR 0016): this check doesn't know them.
 	return checks.Summarize(run.Checks, started), nil
 }
 

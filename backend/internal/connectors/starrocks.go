@@ -24,9 +24,6 @@ func (*starrocksSink) Kind() string { return "sink" }
 func (*starrocksSink) Type() string { return "starrocks" }
 
 var starrocks = olapSink{typ: "starrocks", title: "StarRocks",
-	probe: func(table string, replicas int) string {
-		return fmt.Sprintf(`CREATE TABLE %s (id INT NOT NULL) PRIMARY KEY (id) DISTRIBUTED BY HASH (id) PROPERTIES ("replication_num" = "%d")`, table, replicas)
-	},
 	grant: func(c olapConfig) string {
 		return fmt.Sprintf("GRANT CREATE DATABASE ON CATALOG default_catalog TO USER '%s';\nGRANT ALL ON DATABASE %s TO USER '%s';\nGRANT ALL ON ALL TABLES IN DATABASE %s TO USER '%s';",
 			c.User, c.Database, c.User, c.Database, c.User)
@@ -73,6 +70,11 @@ func (s *starrocksSink) Check(ctx context.Context, conn Resolved, _ []string) (c
 
 func (s *starrocksSink) Tail(ctx context.Context, conn Resolved, destination string, limit int, timeout time.Duration) ([]TailRecord, error) {
 	return starrocks.tail(ctx, conn, destination, limit, timeout)
+}
+
+// PrepareSink creates the database if missing (the check only reads, ADR 0016).
+func (s *starrocksSink) PrepareSink(ctx context.Context, conn Resolved, _ CompileContext, _ map[string]string) ([]ArtifactResult, error) {
+	return starrocks.prepare(ctx, conn)
 }
 
 func (s *starrocksSink) CleanupSink(ctx context.Context, conn Resolved, _ CompileContext, destinations map[string]string) ([]ArtifactResult, error) {

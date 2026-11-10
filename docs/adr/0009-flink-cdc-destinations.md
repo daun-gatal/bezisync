@@ -1,6 +1,6 @@
 # 0009 — More Flink CDC destinations: Kafka, Elasticsearch, Apache Paimon and OceanBase
 
-- **Status:** Accepted
+- **Status:** Accepted (D2's Elasticsearch test index amended by [0016](0016-read-only-destination-checks.md))
 - **Date:** 2026-11-08
 - **Scope:** `backend/internal/connectors` (`kafka_flink.go`, `elasticsearch.go`, `paimon.go`, `oceanbase.go`,
   `olap.go`, `kafka.go`, `descriptors.json`), `backend/internal/engine` (which engine writes what),

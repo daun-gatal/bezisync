@@ -23,9 +23,6 @@ func (*dorisSink) Kind() string { return "sink" }
 func (*dorisSink) Type() string { return "doris" }
 
 var doris = olapSink{typ: "doris", title: "Doris",
-	probe: func(table string, replicas int) string {
-		return fmt.Sprintf(`CREATE TABLE %s (id INT NOT NULL) UNIQUE KEY (id) DISTRIBUTED BY HASH (id) BUCKETS 1 PROPERTIES ("replication_num" = "%d")`, table, replicas)
-	},
 	grant: func(c olapConfig) string {
 		return fmt.Sprintf("GRANT SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV ON internal.%s.* TO '%s'@'%%';", c.Database, c.User)
 	}}
@@ -72,6 +69,11 @@ func (s *dorisSink) Check(ctx context.Context, conn Resolved, _ []string) (check
 
 func (s *dorisSink) Tail(ctx context.Context, conn Resolved, destination string, limit int, timeout time.Duration) ([]TailRecord, error) {
 	return doris.tail(ctx, conn, destination, limit, timeout)
+}
+
+// PrepareSink creates the database if missing (the check only reads, ADR 0016).
+func (s *dorisSink) PrepareSink(ctx context.Context, conn Resolved, _ CompileContext, _ map[string]string) ([]ArtifactResult, error) {
+	return doris.prepare(ctx, conn)
 }
 
 func (s *dorisSink) CleanupSink(ctx context.Context, conn Resolved, _ CompileContext, destinations map[string]string) ([]ArtifactResult, error) {

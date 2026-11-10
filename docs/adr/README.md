@@ -46,10 +46,11 @@ The other options, and why they lost.
 | [0006](0006-flink-cdc-oracle-source.md) | Flink CDC reads Oracle; MongoDB, Vitess, TiDB and OceanBase stay on Debezium | Accepted |
 | [0007](0007-partition-by-in-transform.md) | Partition by in the Transform step; no Iceberg change log on Flink CDC | Accepted |
 | [0008](0008-flink-cdc-expressions.md) | Flink CDC expressions: more column functions, and custom expressions BeziSync parses | Accepted |
-| [0009](0009-flink-cdc-destinations.md) | More Flink CDC destinations: Kafka, Elasticsearch, Apache Paimon and OceanBase | Accepted |
+| [0009](0009-flink-cdc-destinations.md) | More Flink CDC destinations: Kafka, Elasticsearch, Apache Paimon and OceanBase | Accepted (D2's Elasticsearch test index amended by 0016) |
 | [0010](0010-flink-cdc-keys-from-steps.md) | Column types in the Destination table, and Flink CDC keys from any written column | Accepted |
 | [0011](0011-wizard-follows-source-and-engine.md) | The wizard follows the source and the engine | Accepted |
 | [0012](0012-flink-cdc-column-layout.md) | Flink CDC writes the destination's columns in the destination's order, or doesn't start | Accepted (D2 replaced by 0013) |
 | [0013](0013-flink-cdc-column-switch.md) | Flink CDC switches columns at the saved position | Accepted |
 | [0014](0014-flink-cdc-restore-checkpoint-ids.md) | A restored Flink CDC job numbers its checkpoints past every one the pipeline reached | Accepted |
 | [0015](0015-flink-cdc-columns-the-job-hasnt-read.md) | Flink CDC holds back source columns a restored job hasn't read yet | Accepted |
+| [0016](0016-read-only-destination-checks.md) | Destination checks only read: no test tables or indexes on the destination | Accepted |

@@ -168,7 +168,7 @@ func (a *Agent) Report(ctx context.Context) *om.Map {
 	if results == nil {
 		results = []map[string]any{}
 	}
-	return om.New().Set("version", version.Version).Set("kind", a.Kind).Set("features", []any{"health_port", runtime.FeatureFlinkCDC, runtime.FeaturePlacement}).Set("capacity", a.Driver.Capacity(ctx)).
+	return om.New().Set("version", version.Version).Set("kind", a.Kind).Set("features", []any{"health_port", runtime.FeatureFlinkCDC, runtime.FeaturePlacement, runtime.FeatureReadonlyDestinationChecks}).Set("capacity", a.Driver.Capacity(ctx)).
 		Set("local_test", localTest(test)).Set("workloads", workloads).Set("results", results)
 }
 

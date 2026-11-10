@@ -190,6 +190,10 @@ type ComponentLogs interface {
 // FeatureFlinkCDC is the agent feature: the agent runs Flink CDC workloads.
 const FeatureFlinkCDC = "flink_cdc"
 
+// FeatureReadonlyDestinationChecks is the agent feature: its destination checks only read
+// (ADR 0016). An agent without it would create test tables, so it gets none of those checks.
+const FeatureReadonlyDestinationChecks = "readonly_destination_checks"
+
 // JVMEnv is the workload environment plus JVM settings.
 func JVMEnv(w Workload) map[string]string {
 	out := make(map[string]string, len(w.Env)+3)

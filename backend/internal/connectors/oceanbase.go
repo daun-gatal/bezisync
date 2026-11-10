@@ -26,9 +26,6 @@ func (*oceanbaseSink) Kind() string { return "sink" }
 func (*oceanbaseSink) Type() string { return "oceanbase" }
 
 var oceanbase = olapSink{typ: "oceanbase", title: "OceanBase", noHTTP: true, mysqlDrop: true,
-	probe: func(table string, _ int) string {
-		return fmt.Sprintf("CREATE TABLE %s (id INT NOT NULL PRIMARY KEY)", table)
-	},
 	grant: func(c olapConfig) string {
 		u := strings.ReplaceAll(userOnly(c.User), "'", "''")
 		return fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO '%s';\nGRANT CREATE ON *.* TO '%s';", olapQuote(c.Database), u, u)
@@ -82,6 +79,11 @@ func (s *oceanbaseSink) Check(ctx context.Context, conn Resolved, _ []string) (c
 
 func (s *oceanbaseSink) Tail(ctx context.Context, conn Resolved, destination string, limit int, timeout time.Duration) ([]TailRecord, error) {
 	return oceanbase.tail(ctx, conn, destination, limit, timeout)
+}
+
+// PrepareSink creates the database if missing (the check only reads, ADR 0016).
+func (s *oceanbaseSink) PrepareSink(ctx context.Context, conn Resolved, _ CompileContext, _ map[string]string) ([]ArtifactResult, error) {
+	return oceanbase.prepare(ctx, conn)
 }
 
 func (s *oceanbaseSink) CleanupSink(ctx context.Context, conn Resolved, _ CompileContext, destinations map[string]string) ([]ArtifactResult, error) {

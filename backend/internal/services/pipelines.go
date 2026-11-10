@@ -1211,6 +1211,11 @@ func runningNeed(ctx context.Context, q db.Querier, p *models.Pipeline, rt *mode
 // checkWhere runs a connection check where the connector will run.
 func checkWhere(ctx context.Context, rt *models.Runtime, conn connectors.Resolved, kind string, tables []string) (checks.Report, bool, error) {
 	if rt.Mode == "agent" {
+		// ADR 0016 D7: an agent that predates read-only destination checks would create test
+		// tables; running the check from here instead would fail destinations only it can reach.
+		if features, _ := rt.AgentState["features"].([]any); GatedForAgent(kind, conn.Type, features) {
+			return OlderAgentReport(rt.Name, rt.AgentState["version"]), false, nil
+		}
 		raw, err := AgentRunCheck(ctx, rt.ID, kind, conn, tables)
 		if err == nil {
 			report, perr := ParseReport(raw)
