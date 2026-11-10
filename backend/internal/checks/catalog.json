@@ -2737,7 +2737,7 @@
     "Create tables"
    ],
    "whys": [
-    "Pipelines that create their tables (the default) need it; BeziSync creates and drops a test table."
+    "Pipelines that create their tables (the default) need it. BeziSync asks the database without creating anything (ADR 0016): PostgreSQL's USAGE and CREATE on the schema (which must exist: pipelines don't create it), SQL Server's CREATE TABLE and ALTER on the login's default schema, MySQL and MariaDB from SHOW GRANTS. A definite no warns; a right the grants don't show (a role, a partial revoke) is Unknown, and the first table a pipeline creates shows it."
    ]
   },
   {
