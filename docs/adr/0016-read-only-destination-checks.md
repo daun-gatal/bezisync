@@ -1,6 +1,6 @@
 # 0016 — Destination checks only read: no test tables or indexes on the destination
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-10
 - **Amends:** 0009 (D2: the Elasticsearch check no longer writes and deletes a test index)
 - **Scope:** `backend/internal/connectors` (Iceberg, JDBC, StarRocks/Doris/OceanBase, Elasticsearch checks; an OLAP
