@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.0] - 2026-11-10
+
+### Added
+- **Discard a deployed pipeline's undeployed changes (ADR 0017)** - a change saved from the wizard but not deployed could only be deployed or rolled back over (which restarts the connector). Closing the wizard now asks "Keep vN?" (keep it, or discard it), and the "vN is saved but not deployed" notice has **Discard vN**. Discarding points the pipeline back at its deployed version: the connector keeps running and doesn't restart, no approval is needed, and the discarded version stays in History, deployable. Also `POST …/pipelines/{id}/changes:discard` (with `If-Match`), `bezisync remote pipelines discard NAME` and the MCP tool `discard_pipeline_changes`. It is refused while a change request is pending.
+
+### Changed
+- **Destination checks create nothing on the destination (ADR 0016)** - the Database (JDBC), Iceberg, StarRocks, Doris, OceanBase and Elasticsearch checks used to create and drop a `bezisync_check_*` table or index, which a least-privilege login could leave behind (and which needed rights the pipeline never uses). They now only read: PostgreSQL asks `has_schema_privilege` (`USAGE` and `CREATE`; a missing schema warns), SQL Server `HAS_PERMS_BY_NAME`, MySQL, MariaDB, StarRocks, Doris and OceanBase read `SHOW GRANTS` (Pass when the grants show the right, "not known" when it may come from a role), and Elasticsearch asks `_has_privileges` for the pipeline's own indexes when the pipeline is checked. Iceberg's "Table create and commit" is "not known": the catalog answers that only by trying, and the first commit shows it. Paimon and Redis still write a short-lived object or key and delete it.
+- **StarRocks, Doris and OceanBase create the database on deploy** - the check used to run `CREATE DATABASE IF NOT EXISTS`; deploy now looks the database up and creates it when missing, and says which grant or manual step is needed when it can't.
+- **Agents that predate this aren't sent those checks** - an agent without the `readonly_destination_checks` feature would still create test objects, so BeziSync answers its Iceberg, Database, StarRocks, Doris, OceanBase and Elasticsearch checks with "not known" (`agent_readonly_checks`) until the agent is upgraded. Upgrade the control plane first, then the agents.
+- **Dropping what earlier versions left** - look for `bezisync_check_<digits>` objects and drop them: tables in the destination schema or database (`DROP TABLE <schema>.bezisync_check_…` on PostgreSQL, MySQL, SQL Server, StarRocks, Doris, OceanBase), tables in the Iceberg namespace (drop them with purge through your catalog), and indexes in Elasticsearch (`DELETE /bezisync_check_*`; allow wildcard deletes with `action.destructive_requires_name: false` only for that call).
+- **Editing back to what is deployed clears the change** - saving a spec equal to the deployed one (with the project's pinned settings) now points the pipeline back at the deployed version instead of keeping a draft that reads "saved but not deployed"; `pipelines:apply` of a manifest that matches what runs does the same.
+
+### Fixed
+- **Iceberg REST catalogs that can't vend credentials pass the write check** - BeziSync's own catalog client (checks, the "Write a test table" check, tails, column reads) asked the catalog for vended credentials on every request, even for a connection with its own object-storage keys (iceberg-go's default). A catalog that can't vend, such as Polaris over storage without STS, refused the request with HTTP 400 ("Credential vending was requested … but no credentials are available"), and the check blocked the deploy although the connector writes with the connection's keys. Only "Credentials vended by the catalog" asks for them now.
+
 ## [v0.7.0] - 2026-11-09
 
 ### Added
