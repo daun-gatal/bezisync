@@ -15457,6 +15457,76 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/changes:discard": {
+      "post": {
+        "description": "Points a deployed pipeline's current version back at the deployed one (ADR 0017). Nothing is deleted: the version set aside stays in History and can still be deployed. The connector keeps running and doesn't restart, so no approval is needed. Send If-Match with the pipeline version you read (428 without it, 412 when stale). 409 never_deployed, nothing_to_discard, or pending_change_request (with change_request_id).",
+        "operationId": "discard_changes_api_v1_projects__project_id__pipelines__pipeline_id__changes_discard_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pipeline Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discard undeployed changes",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack": {
       "post": {
         "description": "How a custom Flink CDC cluster would be packed on the pipeline's runtime now: TaskManagers, slots, CPU and memory, why it splits, what it asks for in all and whether it fits the largest node. Pure: the deploy packs again and keeps that shape.",

@@ -626,6 +626,15 @@ func pipelineRoutes(r chi.Router) {
 			return 0, err
 		})(w, r)
 	})
+	// ADR 0017: back to the deployed version; the connector is not touched.
+	r.Post(base+"/{pipeline_id}/changes:discard", pipelineAction(auth.PipelineEdit, http.StatusOK,
+		func(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, r *http.Request) (int, error) {
+			expected, err := parseIfMatch(r)
+			if err != nil {
+				return 0, err
+			}
+			return 0, services.DiscardChanges(ctx, q, a, p, expected)
+		}))
 	desired := func(state string) http.HandlerFunc {
 		return pipelineAction(auth.PipelineOperate, http.StatusOK, func(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, _ *http.Request) (int, error) {
 			return 0, services.SetDesired(ctx, q, a, p, state)

@@ -43,7 +43,7 @@ const maxResult = 200_000
 const instructions = `BeziSync is a control plane for Debezium Server change-data-capture pipelines.
 Work happens in projects: pass "project" (its slug or id) to project tools; list_projects shows the ones you can open and what you may do in each.
 Pipelines, connections and runtimes can be named by id or by name.
-Changing a pipeline saves it as a version (your undeployed draft is updated, so one change is one version); deploy_pipeline runs the final checks (preflight) first and may wait for approval.
+Changing a pipeline saves it as a version (your undeployed draft is updated, so one change is one version); deploy_pipeline runs the final checks (preflight) first and may wait for approval, and discard_pipeline_changes goes back to the deployed version without restarting anything.
 Secrets are never accepted or returned: people enter passwords and keys in the BeziSync UI, and connections may point at a secret store with ref+<store>://<path>#<key>.`
 
 // Handler serves MCP; api is BeziSync's REST router, which tools call in process.

@@ -72,6 +72,11 @@ func (c *Client) fail(msg string) error {
 
 // Call sends a request and decodes the JSON answer; HTTP errors print the problem.
 func (c *Client) Call(method, path string, query url.Values, body any) (any, error) {
+	return c.CallWith(method, path, query, body, nil)
+}
+
+// CallWith is Call with extra request headers (If-Match for versioned actions).
+func (c *Client) CallWith(method, path string, query url.Values, body any, headers map[string]string) (any, error) {
 	var rd io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -89,6 +94,9 @@ func (c *Client) Call(method, path string, query url.Values, body any) (any, err
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -422,7 +430,8 @@ func remoteCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		addProject(cmd)
 		pipelines.AddCommand(cmd)
 	}
-	pipelines.AddCommand(positionsCmd(&project, stdout, stderr), restoreCmd(&project, stdout, stderr), startOverCmd(&project, stdout, stderr))
+	pipelines.AddCommand(positionsCmd(&project, stdout, stderr), restoreCmd(&project, stdout, stderr), startOverCmd(&project, stdout, stderr),
+		discardCmd(&project, stdout, stderr))
 	remote.AddCommand(login, get, export, apply, diff, pipelines)
 	return remote
 }
@@ -505,4 +514,30 @@ func breaking(out any) bool {
 		}
 	}
 	return false
+}
+
+// discardCmd goes back to the deployed version (ADR 0017): the undeployed change stays in the
+// history, and nothing that runs changes, so it needs no --yes.
+func discardCmd(project *string, stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{Use: "discard NAME", Short: "Discard a deployed pipeline's undeployed changes (the connector keeps running).", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			c, path, err := pipelinePath(*project, args[0], stderr)
+			if err != nil {
+				return err
+			}
+			cur, err := c.Call(http.MethodGet, path, nil, nil)
+			if err != nil {
+				return err
+			}
+			before, _ := cur.(map[string]any)
+			out, err := c.CallWith(http.MethodPost, path+"/changes:discard", nil, nil, map[string]string{"If-Match": fmt.Sprintf(`"%v"`, before["version"])})
+			if err != nil {
+				return err
+			}
+			p, _ := out.(map[string]any)
+			fmt.Fprintf(stdout, "%s: discarded v%v; v%v stays deployed and the connector wasn't restarted.\n", str(p["name"]), before["current_version"], p["deployed_version"])
+			return nil
+		}}
+	projectFlag(cmd, project)
+	return cmd
 }

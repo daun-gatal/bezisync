@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { InlineError, Notice, Skeleton } from '@/components/ui/feedback';
 import { Page, PageHeader } from '@/components/ui/layout';
 import { Confirm, Modal } from '@/components/ui/overlays';
-import { useDeletePipeline, usePipeline } from '@/lib/pipelines';
+import { useDeletePipeline, useDiscardChanges, usePipeline } from '@/lib/pipelines';
 import { useProject } from '@/lib/session';
+import { canDiscard, discardedToast } from './DiscardChanges';
 import { TransformStep } from './transforms/TransformStep';
 import type { StepHandle } from './useSaveSpec';
 import { ReviewStep } from './wizard/ReviewStep';
@@ -20,17 +21,21 @@ import { createdHere, StepNav, stepState, type Step } from './wizard/shared';
  * The pipeline wizard: Source → Tables → Destination → Transform → Review. A step unlocks
  * when the ones before it are done. Leaving a step by any route (Back, Continue, the step list)
  * saves it first; leaving the page with unsaved changes asks. Closing a draft made here asks
- * whether to keep it. For a deployed pipeline it edits one part, then Review shows the change.
+ * whether to keep it. For a deployed pipeline it edits one part, then Review shows the change;
+ * closing with a change that isn't deployed asks whether to keep it or discard it (ADR 0017).
  */
 export function NewPipelinePage() {
-  const { project, expert } = useProject();
+  const { project, expert, can } = useProject();
   const search = useSearch({ from: '/p/$projectSlug/pipelines/new' });
   const navigate = useNavigate({ from: '/p/$projectSlug/pipelines/new' });
   const pipeline = usePipeline(project.id, search.draft);
   const remove = useDeletePipeline(project.id);
+  const discard = useDiscardChanges(project.id);
   const handle = useRef<StepHandle | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [closing, setClosing] = useState(false);
+  // Closing a deployed pipeline whose change isn't deployed: keep it, or discard it.
+  const [keeping, setKeeping] = useState(false);
   // The step on screen reports when its unsaved choices are complete (see stepState).
   const [ready, setReady] = useState(false);
   const p = pipeline.data;
@@ -58,11 +63,15 @@ export function NewPipelinePage() {
     void navigate({ search: { step: next, draft: draft ?? search.draft }, replace: false });
   };
 
+  const toPipeline = (ignoreBlocker = false) =>
+    p
+      ? navigate({ to: '/p/$projectSlug/pipelines/$pipelineId', params: { projectSlug: project.slug, pipelineId: p.id }, ignoreBlocker })
+      : navigate({ to: '/p/$projectSlug/pipelines', params: { projectSlug: project.slug } });
+
   const close = () => {
     if (p && !deployed && createdHere.has(p.id)) return setClosing(true);
-    void (p
-      ? navigate({ to: '/p/$projectSlug/pipelines/$pipelineId', params: { projectSlug: project.slug, pipelineId: p.id } })
-      : navigate({ to: '/p/$projectSlug/pipelines', params: { projectSlug: project.slug } }));
+    if (canDiscard(p, can('pipeline.edit'))) return setKeeping(true);
+    void toPipeline();
   };
 
   const body =
@@ -206,6 +215,49 @@ export function NewPipelinePage() {
           </Button>
         </div>
       </Confirm>
+
+      {canDiscard(p, can('pipeline.edit')) ? (
+        <Confirm
+          open={keeping}
+          onOpenChange={(o) => {
+            if (!o) discard.reset();
+            setKeeping(o);
+          }}
+          tone="primary"
+          title={`Keep v${p.current_version}?`}
+          effects={[
+            `Keep it: v${p.current_version} stays saved but not deployed, and the connector keeps running v${p.deployed_version}. Review and deploy it any time.`,
+            `Discard it: settings go back to v${p.deployed_version} and nothing restarts. v${p.current_version} stays in History; description, owner, labels and the runtime stay as they are.`,
+          ]}
+          confirmLabel={`Keep v${p.current_version}`}
+          onConfirm={() => {
+            setKeeping(false);
+            void toPipeline();
+          }}
+          pending={discard.isPending}
+          error={discard.error}
+          doing="Couldn’t discard the change"
+        >
+          <div>
+            <Button
+              variant="danger"
+              loading={discard.isPending}
+              onClick={() =>
+                discard.mutate(p, {
+                  onSuccess: () => {
+                    discardedToast(p);
+                    setKeeping(false);
+                    // The step's unsaved edits belong to the discarded change: no "Leave without saving?".
+                    void toPipeline(true);
+                  },
+                })
+              }
+            >
+              Discard v{p.current_version}
+            </Button>
+          </div>
+        </Confirm>
+      ) : null}
     </Page>
   );
 }

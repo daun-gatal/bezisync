@@ -82,6 +82,20 @@ export function useDeploy(projectId: string) {
   });
 }
 
+/** Back to the deployed version (ADR 0017): the change stays in History; nothing restarts. */
+export function useDiscardChanges(projectId: string) {
+  const done = useInvalidate(projectId);
+  return useMutation({
+    mutationFn: (pipeline: Pipeline) =>
+      unwrap(
+        client.POST('/api/v1/projects/{project_id}/pipelines/{pipeline_id}/changes:discard', {
+          params: { path: { project_id: projectId, pipeline_id: pipeline.id }, header: { 'if-match': `"${pipeline.version}"` } },
+        }),
+      ),
+    onSuccess: done,
+  });
+}
+
 export function useLifecycle(projectId: string) {
   const done = useInvalidate(projectId);
   return useMutation({

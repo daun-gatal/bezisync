@@ -304,6 +304,12 @@ func (cl *call) sub(arg, collection string) (string, error) {
 
 // withVersion calls PATCH with If-Match: the expected version, or the current one.
 func (cl *call) withVersion(path string, body any) (any, error) {
+	return cl.withVersionAs(http.MethodPatch, path, path, body)
+}
+
+// withVersionAs calls method on target with If-Match: the expected version, or the current
+// version of the resource at path.
+func (cl *call) withVersionAs(method, path, target string, body any) (any, error) {
 	version := cl.intArg("expected_version")
 	if version == "" {
 		cur, err := cl.do(http.MethodGet, path, nil)
@@ -313,7 +319,7 @@ func (cl *call) withVersion(path string, body any) (any, error) {
 		m, _ := cur.(map[string]any)
 		version = fmt.Sprint(m["version"])
 	}
-	status, raw := invokeWith(cl.ctx, cl.api, cl.c.auth, http.MethodPatch, path, body, "If-Match", `"`+version+`"`)
+	status, raw := invokeWith(cl.ctx, cl.api, cl.c.auth, method, target, body, "If-Match", `"`+version+`"`)
 	return decode(status, raw)
 }
 
