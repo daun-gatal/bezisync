@@ -538,7 +538,8 @@ credentials), **Databricks Unity Catalog** (token, vended credentials) and **Rus
 (preview: SigV4 service `s3`, warehouse = the table bucket, path-style S3; change logs only, as it
 refuses the first upsert commit of a new table). Data files are written
 with the object-storage keys of the connection, the runtime's IAM role, or credentials the catalog
-vends. Snowflake, BigQuery (BigLake), Databricks, Trino, StarRocks and ClickHouse read the tables
+vends. With the connection's keys or the role, BeziSync asks the catalog for no credentials, so a
+catalog that can't vend them (Polaris over storage without STS, for example) works too. Snowflake, BigQuery (BigLake), Databricks, Trino, StarRocks and ClickHouse read the tables
 through the same catalogs.
 
 - **Tables** are created by their first change in the connection's namespace (BeziSync creates the
