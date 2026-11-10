@@ -1173,6 +1173,26 @@ export interface paths {
         patch: operations["update_pipeline_api_v1_projects__project_id__pipelines__pipeline_id__patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/changes:discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard undeployed changes
+         * @description Points a deployed pipeline's current version back at the deployed one (ADR 0017). Nothing is deleted: the version set aside stays in History and can still be deployed. The connector keeps running and doesn't restart, so no approval is needed. Send If-Match with the pipeline version you read (428 without it, 412 when stale). 409 never_deployed, nothing_to_discard, or pending_change_request (with change_request_id).
+         */
+        post: operations["discard_changes_api_v1_projects__project_id__pipelines__pipeline_id__changes_discard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/pipelines/{pipeline_id}/cluster:pack": {
         parameters: {
             query?: never;
@@ -9496,6 +9516,40 @@ export interface operations {
                 "application/json": components["schemas"]["PipelineUpdate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_changes_api_v1_projects__project_id__pipelines__pipeline_id__changes_discard_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                pipeline_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

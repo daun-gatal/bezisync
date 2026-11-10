@@ -53,8 +53,9 @@ func TestOneVersionPerChange(t *testing.T) {
 	if res = save(admin, tables("shop.orders")); res.At("current_version") != float64(2) {
 		t.Fatal(string(res.Raw))
 	}
-	// Going back to exactly what is deployed is still a change of that draft, not a new version.
-	if res = save(admin, tables("shop.orders", "shop.refunds")); res.At("current_version") != float64(2) {
+	// Going back to exactly what is deployed points current at the deployed version again (ADR
+	// 0017): nothing is left to deploy, and v2 stays in History.
+	if res = save(admin, tables("shop.orders", "shop.refunds")); res.At("current_version") != float64(1) || res.At("has_undeployed_changes") != false {
 		t.Fatal(string(res.Raw))
 	}
 	if vs = versions(); len(vs) != 2 || at(t, vs[0], "draft") != true || at(t, vs[1], "deployed") != true {
@@ -73,7 +74,7 @@ func TestOneVersionPerChange(t *testing.T) {
 	if cr.At("pending_change", "version") != float64(3) {
 		t.Fatal(string(cr.Raw))
 	}
-	if res = save(editor, tables("shop.orders", "shop.refunds")); res.At("current_version") != float64(4) {
+	if res = save(editor, tables("shop.refunds")); res.At("current_version") != float64(4) {
 		t.Fatal(string(res.Raw))
 	}
 	if vs = versions(); len(vs) != 4 {

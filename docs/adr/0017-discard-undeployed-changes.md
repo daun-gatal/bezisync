@@ -49,7 +49,7 @@ no change to offsets, Flink saved positions or `flink_written`. Undo is "Deploy 
 |---|---|
 | `never_deployed` | The pipeline has no deployed version (a draft is deleted instead). |
 | `nothing_to_discard` | `current_version_id` already equals `deployed_version_id`. |
-| `pending_change_request` | A change request is pending; the message names its version and who sent it, and `extra.change_request_id` its id. Cancel or decide it first. |
+| `pending_change_request` | A change request is pending; the message names its version, and the response carries `change_request_id` and `version`. Cancel or decide it first. |
 
 Deleted or deleting pipelines are 404/409 as for every action (`GetPipeline` hides deleted ones).
 

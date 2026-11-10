@@ -266,6 +266,98 @@ func SealVersion(ctx context.Context, q db.Querier, v *models.PipelineVersion) e
 	return nil
 }
 
+// DiscardChanges points a deployed pipeline's current version back at the deployed one (ADR
+// 0017). It deletes nothing: the version set aside stays in History, deployable, and numbers never
+// repeat. Nothing runs differently, so it needs no approval and queues no job. The row is re-read
+// under a lock so a deploy or decision that committed first is seen; expected is the pipeline
+// version the caller read (412 when stale), and the bump makes saves read before it refuse.
+func DiscardChanges(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, expected int) error {
+	locked, err := db.Find[models.Pipeline](ctx, q, `SELECT * FROM pipelines WHERE id = $1 FOR UPDATE`, p.ID)
+	if err != nil {
+		return err
+	}
+	if locked == nil || locked.DeletedAt != nil {
+		return problem.NotFound("Pipeline")
+	}
+	*p = *locked
+	if expected != p.Version {
+		return problem.New(412, "version_conflict", "Someone else changed this pipeline. Reload and try again.").
+			WithExtra(map[string]any{"current_version": p.Version})
+	}
+	if p.DeployedVersionID == nil {
+		return problem.Conflict("never_deployed", "This pipeline was never deployed, so there is nothing to go back to. Delete the draft instead.", nil)
+	}
+	if p.CurrentVersionID != nil && *p.CurrentVersionID == *p.DeployedVersionID {
+		return problem.Conflict("nothing_to_discard", "The current version is the deployed one: there is nothing to discard.", nil)
+	}
+	current, err := VersionOf(ctx, q, p.CurrentVersionID)
+	if err != nil {
+		return err
+	}
+	deployed, err := VersionOf(ctx, q, p.DeployedVersionID)
+	if err != nil {
+		return err
+	}
+	if deployed == nil {
+		return problem.Conflict("never_deployed", "The deployed version is missing.", nil)
+	}
+	pending, err := PendingFor(ctx, q, p.ID)
+	if err != nil {
+		return err
+	}
+	if pending != nil {
+		number := 0
+		if v, err := VersionOf(ctx, q, &pending.VersionID); err == nil && v != nil {
+			number = v.Number
+		}
+		return problem.Conflict("pending_change_request", fmt.Sprintf("v%d is waiting for approval. Cancel the request, or have it approved or rejected, first.", number),
+			map[string]any{"change_request_id": pending.ID.String(), "version": number})
+	}
+	p.CurrentVersionID = p.DeployedVersionID
+	p.Version++
+	if err := SavePipeline(ctx, q, p); err != nil {
+		return err
+	}
+	return recordDiscard(ctx, q, a, p, current, deployed, "discarded")
+}
+
+// recordDiscard audits a current version set aside for the deployed one: by DiscardChanges, or
+// by an edit back to the deployed spec (UpdatePipeline).
+func recordDiscard(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p *models.Pipeline, current, deployed *models.PipelineVersion, reason string) error {
+	details := map[string]any{"deployed_version": deployed.Number, "deployed_version_id": deployed.ID.String(), "reason": reason}
+	summary := fmt.Sprintf("Discarded the undeployed changes of %s; v%d stays deployed", p.Name, deployed.Number)
+	if current != nil {
+		details["discarded_version"], details["discarded_version_id"] = current.Number, current.ID.String()
+		details["discarded_spec_hash"], details["discarded_by_author"] = current.SpecHash, current.CreatedByLabel
+		summary = fmt.Sprintf("Discarded v%d of %s; v%d stays deployed", current.Number, p.Name, deployed.Number)
+	}
+	_, err := Record(ctx, q, AuditEvent{Kind: "pipeline.changes_discarded", Summary: summary, ProjectID: &a.Project.ID, Principal: a.Principal,
+		ResourceType: "pipeline", ResourceID: &p.ID, Details: details})
+	return err
+}
+
+// matchesDeployed says whether spec is what the deployed version runs: as sent, or with the
+// project's pinned settings written in, as a deploy writes them (writePins).
+func matchesDeployed(ctx context.Context, q db.Querier, p *models.Pipeline, eng engine.ID, deployed *models.PipelineVersion, spec domain.PipelineSpec) (bool, error) {
+	if domain.SpecHash(spec) == deployed.SpecHash {
+		return true, nil
+	}
+	rules, err := PoliciesOf(ctx, q, p.ProjectID)
+	if err != nil {
+		return false, err
+	}
+	src, err := GetConnection(ctx, q, p.SourceID)
+	if err != nil || src == nil {
+		return false, err
+	}
+	sinkType, err := SinkTypeOf(ctx, q, p)
+	if err != nil {
+		return false, err
+	}
+	pins := Pins(rules, eng, src.Type, sinkType, spec)
+	return len(pins) > 0 && domain.SpecHash(withPins(spec, pins)) == deployed.SpecHash, nil
+}
+
 // PoliciesOf loads a project's policies.
 func PoliciesOf(ctx context.Context, q db.Querier, projectID uuid.UUID) (domain.ProjectPolicies, error) {
 	proj, err := db.Find[models.Project](ctx, q, `SELECT * FROM projects WHERE id = $1`, projectID)
@@ -558,7 +650,7 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 	if err != nil {
 		return nil, err
 	}
-	var created *models.PipelineVersion
+	var created, editedBack, restored *models.PipelineVersion
 	if e.Spec != nil {
 		sinkID := p.SinkID
 		if e.SinkID != nil {
@@ -613,7 +705,27 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 				return nil, err
 			}
 		}
+		// Editing back to what is deployed is a discard (ADR 0017): current points at the deployed
+		// version again, so "undeployed changes" keeps meaning only "the ids differ".
+		var deployed *models.PipelineVersion
+		if current != nil && p.DeployedVersionID != nil && current.ID != *p.DeployedVersionID {
+			if deployed, err = VersionOf(ctx, q, p.DeployedVersionID); err != nil {
+				return nil, err
+			}
+			if deployed != nil {
+				same, err := matchesDeployed(ctx, q, p, eng, deployed, *e.Spec)
+				if err != nil {
+					return nil, err
+				}
+				if !same {
+					deployed = nil
+				}
+			}
+		}
 		switch {
+		case deployed != nil:
+			p.CurrentVersionID = &deployed.ID
+			editedBack, restored = current, deployed
 		case current != nil && current.SpecHash == domain.SpecHash(*e.Spec):
 		case current != nil && !e.Separate && isDraftOf(current, a):
 			amended, err := amendVersion(ctx, q, current, *e.Spec, e.Note)
@@ -699,9 +811,14 @@ func UpdatePipeline(ctx context.Context, q db.Querier, a *auth.ProjectAccess, p 
 	if created != nil {
 		summary += fmt.Sprintf(" → v%d", created.Number)
 	}
-	_, err = Record(ctx, q, AuditEvent{Kind: "pipeline.updated", Summary: summary, ProjectID: &a.Project.ID, Principal: a.Principal,
-		ResourceType: "pipeline", ResourceID: &p.ID})
-	return created, err
+	if _, err = Record(ctx, q, AuditEvent{Kind: "pipeline.updated", Summary: summary, ProjectID: &a.Project.ID, Principal: a.Principal,
+		ResourceType: "pipeline", ResourceID: &p.ID}); err != nil {
+		return nil, err
+	}
+	if editedBack != nil {
+		return nil, recordDiscard(ctx, q, a, p, editedBack, restored, "edited_back")
+	}
+	return created, nil
 }
 
 // RefuseNewAdvanced refuses advanced properties a save adds or changes that BeziSync can't pass
