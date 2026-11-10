@@ -1673,9 +1673,15 @@ Flink CDC can only upsert into Iceberg: use a catalog other than RustFS S3 Table
 <a id="iceberg-write"></a>
 ### `iceberg_write`
 
-**Write a test table**
+**Table create and commit / Write a test table**
 
-- Why: The connector creates tables and writes Parquet files with these credentials: BeziSync creates a one-row table, reads it back and drops it.
+- Why: Iceberg catalogs (REST, Glue) have no read-only way to ask whether a login may create and commit tables, and BeziSync checks destinations without creating anything in them (ADR 0016). So this isn't verified before deploy: a missing right, storage keys that can't write or a catalog that refuses commits shows on the first change written, as a connector error.
+
+Fix:
+
+```
+Give the credentials the rights to create namespaces and tables, load them and commit to them, and object storage keys that may put, get, list and delete objects under the warehouse.
+```
 
 ## StarRocks
 
