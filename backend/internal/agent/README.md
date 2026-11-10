@@ -9,7 +9,7 @@
 - `[agent.go:Agent]` — state: last desired workloads, pending results, owner runtime id, `synced` flag.
 - `[agent.go:Run]` — starts `convergeLoop` and polls until the context is cancelled.
 - `[agent.go:Poll]` — one `POST /api/v1/agent/poll`; returns the delay before the next poll.
-- `[agent.go:Report]` — the poll body: `version`, `kind`, `features` (`health_port`, `runtime.FeatureFlinkCDC`, `runtime.FeaturePlacement`), `capacity`, `local_test`, `workloads`, `results`.
+- `[agent.go:Report]` — the poll body: `version`, `kind`, `features` (`health_port`, `runtime.FeatureFlinkCDC`, `runtime.FeaturePlacement`, `runtime.FeatureReadonlyDestinationChecks`: its destination checks only read, ADR 0016), `capacity`, `local_test`, `workloads`, `results`.
 - `[agent.go:Converge]`, `[agent.go:ApplyDesired]` — apply desired workloads now and delete managed ones no longer desired.
 - `[agent.go:Answer]` — runs requests `logs` (tail default 300, optionally per `component` via `runtime.ComponentLogs`), `check` (`services.RunCheck`, provider default `self_hosted`), `http_get` (4 s timeout); anything else errors `unknown op`.
 - `[agent.go:Owner]`, `[agent.go:PendingResults]` — accessors.

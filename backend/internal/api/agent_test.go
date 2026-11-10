@@ -451,3 +451,83 @@ func TestAgentRunsFlinkCDCOnlyWhenItCan(t *testing.T) {
 		t.Fatal("the upgraded agent did not get it", got)
 	}
 }
+
+// ADR 0016 D7, E6: a destination check queued for an agent is handed out only to an agent whose
+// poll says its destination checks only read; an older one would create test tables, so the poll
+// answers the check itself. Other checks are handed out as before.
+func TestAgentPollHoldsGatedChecks(t *testing.T) {
+	srv := server(t)
+	admin := adminClient(t, srv)
+	pid := defaultProject(t, admin)
+	e := enroll(t, srv, admin, pid)
+	agentPoll(t, e.agent)
+	rid := uuid.MustParse(e.body.Str("id"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	poll := func(features string) []any {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/api/v1/agent/poll",
+			strings.NewReader(`{"version": "0.7.0", "kind": "docker", "features": `+features+`, "workloads": {}, "results": []}`))
+		req.Header.Set("Authorization", "Bearer "+e.body.Str("agent_token"))
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		var out struct{ Requests []any }
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil || res.StatusCode != http.StatusOK {
+			t.Fatal(res.StatusCode, err)
+		}
+		return out.Requests
+	}
+	queued := func(n int) {
+		t.Helper()
+		for range 50 {
+			pending, err := db.Select[models.AgentRequest](ctx, testdb.Pool(t), `SELECT * FROM agent_requests WHERE state = 'pending'`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pending) == n {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatalf("want %d pending requests", n)
+	}
+
+	var out map[string]any
+	var checkErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out, checkErr = services.AgentRunCheck(ctx, rid, "sink", connectors.Resolved{Type: "iceberg", Provider: "self_hosted",
+			Config: map[string]any{"catalog_type": "rest", "uri": "http://catalog:8181", "warehouse": "w"}, Secrets: map[string]any{}}, nil)
+	}()
+	queued(1)
+	if got := poll(`["health_port", "flink_cdc", "placement"]`); len(got) != 0 {
+		t.Fatal("an agent without readonly_destination_checks got an Iceberg check", got)
+	}
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the gated check never returned")
+	}
+	if checkErr != nil {
+		t.Fatal(checkErr)
+	}
+	list, _ := out["checks"].([]any)
+	if len(list) != 1 || at(t, list[0], "code") != "agent_readonly_checks" || at(t, list[0], "status") != "unknown" {
+		t.Fatal(out)
+	}
+
+	// A Kafka check is not gated: the same older agent gets it.
+	go func() {
+		_, _ = services.AgentRunCheck(ctx, rid, "sink", connectors.Resolved{Type: "kafka", Provider: "self_hosted",
+			Config: map[string]any{"bootstrap_servers": "kafka:9092"}, Secrets: map[string]any{}}, nil)
+	}()
+	queued(1)
+	if got := poll(`["health_port", "flink_cdc", "placement"]`); len(got) != 1 {
+		t.Fatal("an older agent no longer gets checks the gate doesn't cover", got)
+	}
+}

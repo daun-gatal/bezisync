@@ -2349,6 +2349,19 @@ Remove the listed properties under Review → Advanced Debezium properties, or s
 
 - Why: Advanced properties are passed to Debezium Server as typed. BeziSync can't check what they do, so this check is Unknown, never a pass: review them in Review, and approvers see them listed.
 
+<a id="agent-readonly-checks"></a>
+### `agent_readonly_checks`
+
+**Agent version**
+
+- Why: Since ADR 0016 destination checks only read: the Apache Iceberg, Database (JDBC), StarRocks, Apache Doris, OceanBase and Elasticsearch checks create no test table or index. An older agent would still create them, so it doesn't get these checks, and running them from BeziSync instead would fail destinations only the runtime can reach. The destination isn't checked until the agent is upgraded; nothing blocks.
+
+Fix:
+
+```
+Upgrade the agent to this BeziSync version (Settings → Runtimes shows the install command).
+```
+
 <a id="agent-upgrade-required"></a>
 ### `agent_upgrade_required`
 
