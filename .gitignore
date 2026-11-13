@@ -24,3 +24,6 @@ e2e/playwright-report/
 # EGM working files (concept briefs, design drafts, review and drift reports).
 # Only finished designs are committed, as ADRs in docs/adr/. See .rules/egm.md.
 .egm/
+
+# The Codespaces lab: generated sign-in files (its .env is ignored above)
+.devcontainer/lab/.state/

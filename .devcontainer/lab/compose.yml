@@ -1,0 +1,160 @@
+# The BeziSync lab (ADR 0018): the demo stack (deploy/compose/docker-compose.yml) plus a MySQL
+# shop, a PostgreSQL that isn't ready for change data capture, a PostgreSQL warehouse and an HTTP
+# endpoint, which the Sandbox registers through BEZISYNC_SANDBOX_*. Apply it on top of the demo:
+#
+#   bash .devcontainer/lab/up.sh     # what the codespace runs: secrets, start, sign-in banner
+#
+# Secrets come from .env, which up.sh writes with random values on the first start; there are no
+# defaults here. As in the demo, every init script is written by its container, so the stack also
+# runs against a remote Docker daemon, and the sample databases' own passwords are fixed: they are
+# reachable only on this stack's network (only the web port is published).
+
+x-lab-env: &lab-env
+  BEZISYNC_MASTER_KEY: ${BEZISYNC_MASTER_KEY:?run .devcontainer/lab/up.sh}
+  BEZISYNC_BOOTSTRAP_ADMIN_PASSWORD: ${BEZISYNC_ADMIN_PASSWORD:?run .devcontainer/lab/up.sh}
+  BEZISYNC_PUBLIC_URL: ${LAB_PUBLIC_URL:?run .devcontainer/lab/up.sh}
+  BEZISYNC_SANDBOX_MYSQL_HOST: lab-mysql
+  BEZISYNC_SANDBOX_MYSQL_PASSWORD: cdc-reader-pw
+  BEZISYNC_SANDBOX_LEGACY_HOST: lab-legacy
+  BEZISYNC_SANDBOX_LEGACY_PASSWORD: legacy-app-pw
+  BEZISYNC_SANDBOX_WAREHOUSE_HOST: lab-warehouse
+  BEZISYNC_SANDBOX_WAREHOUSE_PASSWORD: warehouse-writer-pw
+  BEZISYNC_SANDBOX_HTTP_URL: http://lab-http-echo:8080/events
+  BEZISYNC_SANDBOX_TEAM_PASSWORD: ${LAB_TEAM_PASSWORD:?run .devcontainer/lab/up.sh}
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  migrate:
+    environment: *lab-env
+    # The Sandbox is created on the first migrate: the lab's sources must be up by then.
+    depends_on:
+      lab-mysql: { condition: service_healthy }
+      lab-legacy: { condition: service_healthy }
+      lab-warehouse: { condition: service_healthy }
+      lab-http-echo: { condition: service_started }
+  api:
+    environment: *lab-env
+    logging: *logging
+  controller:
+    environment: *lab-env
+    logging: *logging
+  kafka:
+    logging: *logging
+
+  lab-mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment: { MYSQL_ROOT_PASSWORD: mysql-root-pw }
+    entrypoint:
+      - bash
+      - -c
+      - |
+        cat > /docker-entrypoint-initdb.d/shop.sql <<'SQL'
+        CREATE DATABASE shop;
+        CREATE TABLE shop.customers (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(200), phone VARCHAR(40), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE shop.orders (id INT AUTO_INCREMENT PRIMARY KEY, customer_id INT, status VARCHAR(40) NOT NULL, total DECIMAL(10,2), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (customer_id) REFERENCES shop.customers(id));
+        INSERT INTO shop.customers (name, email, phone) WITH RECURSIVE g(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM g WHERE n < 50) SELECT CONCAT('Customer ', n), CONCAT('c', n, '@example.com'), CONCAT('+1555', LPAD(n, 4, '0')) FROM g;
+        INSERT INTO shop.orders (customer_id, status, total) WITH RECURSIVE g(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM g WHERE n < 200) SELECT 1 + (n % 50), 'NEW', n FROM g;
+        CREATE USER 'cdc_reader'@'%' IDENTIFIED BY 'cdc-reader-pw';
+        GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'cdc_reader'@'%';
+        GRANT ALL ON bezisync.* TO 'cdc_reader'@'%';
+        CREATE USER 'shop_app'@'%' IDENTIFIED BY 'shop-app-pw';
+        GRANT SELECT, INSERT, UPDATE, DELETE ON shop.* TO 'shop_app'@'%';
+        SQL
+        exec docker-entrypoint.sh mysqld --gtid-mode=ON --enforce-gtid-consistency=ON --binlog-expire-logs-seconds=259200 \
+          --innodb-buffer-pool-size=128M --performance-schema=OFF
+    volumes: [lab-mysql:/var/lib/mysql]
+    mem_limit: 768m
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'mysql -ushop_app -pshop-app-pw -e "SELECT 1 FROM shop.orders LIMIT 1" >/dev/null 2>&1']
+      interval: 3s
+      retries: 60
+
+  # Keeps the MySQL shop busy, like the demo's shop-traffic does for PostgreSQL.
+  lab-mysql-traffic:
+    image: mysql:8.4
+    restart: unless-stopped
+    depends_on: { lab-mysql: { condition: service_healthy } }
+    environment: { MYSQL_PWD: shop-app-pw }
+    entrypoint:
+      - bash
+      - -c
+      - |
+        while true; do
+          mysql -h lab-mysql -u shop_app shop -e "
+            INSERT INTO orders (customer_id, status, total) VALUES (1 + FLOOR(RAND() * 50), 'NEW', ROUND(RAND() * 200, 2));
+            UPDATE orders SET status = IF(status = 'NEW', 'PAID', 'SHIPPED') WHERE status IN ('NEW', 'PAID') ORDER BY RAND() LIMIT 1;
+            DELETE FROM orders WHERE id < (SELECT m FROM (SELECT MAX(id) - 5000 AS m FROM orders) t);" || sleep 5
+          sleep 3
+        done
+    mem_limit: 128m
+    logging: *logging
+
+  # Not ready for change data capture on purpose (wal_level=replica): preflight shows the fix.
+  lab-legacy:
+    image: postgres:17
+    restart: unless-stopped
+    environment: { POSTGRES_USER: app_user, POSTGRES_PASSWORD: legacy-app-pw, POSTGRES_DB: legacy }
+    entrypoint:
+      - bash
+      - -c
+      - |
+        cat > /docker-entrypoint-initdb.d/legacy.sql <<'SQL'
+        CREATE SCHEMA billing;
+        CREATE TABLE billing.invoices (id serial PRIMARY KEY, customer text NOT NULL, amount numeric(10,2), issued_at timestamptz DEFAULT now());
+        INSERT INTO billing.invoices (customer, amount) SELECT 'Customer ' || g, g * 10 FROM generate_series(1, 20) g;
+        SQL
+        exec docker-entrypoint.sh postgres -c wal_level=replica -c shared_buffers=32MB
+    volumes: [lab-legacy:/var/lib/postgresql/data]
+    mem_limit: 256m
+    logging: *logging
+    healthcheck: { test: [CMD, pg_isready, -U, app_user, -d, legacy], interval: 3s, retries: 30 }
+
+  lab-warehouse:
+    image: postgres:17
+    restart: unless-stopped
+    environment: { POSTGRES_USER: bz_writer, POSTGRES_PASSWORD: warehouse-writer-pw, POSTGRES_DB: warehouse }
+    command: [postgres, -c, shared_buffers=32MB]
+    volumes: [lab-warehouse:/var/lib/postgresql/data]
+    mem_limit: 256m
+    logging: *logging
+    healthcheck: { test: [CMD, pg_isready, -U, bz_writer, -d, warehouse], interval: 3s, retries: 30 }
+
+  # Accepts every POST and keeps the last 2,000; GET /requests lists them.
+  lab-http-echo:
+    image: node:24-alpine
+    restart: unless-stopped
+    entrypoint:
+      - node
+      - -e
+      - |
+        const http = require("node:http");
+        let requests = [];
+        http.createServer((req, res) => {
+          if (req.method === "POST") {
+            const chunks = [];
+            req.on("data", (c) => chunks.push(c));
+            req.on("end", () => {
+              requests.push({ path: req.url, body: Buffer.concat(chunks).toString("utf8") });
+              if (requests.length > 2000) requests = requests.slice(-2000);
+              res.writeHead(200).end();
+            });
+          } else if (req.method === "GET") {
+            res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(requests));
+          } else if (req.method === "OPTIONS") {
+            res.writeHead(204, { allow: "GET, POST, OPTIONS" }).end();
+          } else {
+            res.writeHead(405).end();
+          }
+        }).listen(8080, "0.0.0.0");
+    mem_limit: 128m
+    logging: *logging
+
+volumes:
+  lab-mysql: {}
+  lab-legacy: {}
+  lab-warehouse: {}
