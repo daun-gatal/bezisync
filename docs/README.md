@@ -1570,5 +1570,7 @@ All settings are environment variables prefixed with `BEZISYNC_`.
 | `METRICS_TOKEN`, `METRICS_RETENTION_DAYS` | —, `30` | Prometheus endpoint and chart history |
 | `SMTP_*` | — | Email alert channel |
 | `TELEMETRY_ENABLED`, `TELEMETRY_URL` | `false`, — | Opt-in anonymous statistics |
-| `SANDBOX_*` | — | Demo stack: create the Sandbox project |
+| `SANDBOX_*` | — | Demo stack: create the Sandbox project (`SANDBOX_SOURCE_*` and `SANDBOX_KAFKA_BOOTSTRAP`), once, on its first start |
+| `SANDBOX_MYSQL_*`, `SANDBOX_LEGACY_*`, `SANDBOX_WAREHOUSE_*`, `SANDBOX_HTTP_URL` | — | Optional Sandbox extras, created with it: a MySQL source `demo-mysql`; a PostgreSQL source `legacy-postgres` that isn't ready for change data capture (preflight shows the fixes); a JDBC destination `demo-warehouse` and an HTTP destination `demo-http`, each with a template. Each needs its `_HOST` (or the URL); `_PORT`, `_USER` and `_DATABASE` have the lab's defaults |
+| `SANDBOX_TEAM_PASSWORD` | — | Also add Sandbox teammates `editor@`, `operator@` and `viewer@bezisync.local`, one per project role, signing in with this password (12 characters or more; an email already in use is skipped) |
 | `CONTROLLER_TICK_SECONDS`, `LOG_LEVEL`, `LOG_JSON` | `5`, `INFO`, `true` | Operations |

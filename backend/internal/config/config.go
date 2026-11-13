@@ -74,6 +74,24 @@ type Settings struct {
 	SandboxSourcePassword string
 	SandboxKafkaBootstrap string
 	SandboxDockerNetwork  string
+	// Optional extras of the Sandbox (the Codespaces lab, ADR 0018): each adds one connection
+	// (and, for a sink, a template) when its host or URL is set; the team password adds teammates.
+	SandboxMySQLHost         string
+	SandboxMySQLPort         int
+	SandboxMySQLUser         string
+	SandboxMySQLPassword     string
+	SandboxLegacyHost        string
+	SandboxLegacyPort        int
+	SandboxLegacyDatabase    string
+	SandboxLegacyUser        string
+	SandboxLegacyPassword    string
+	SandboxWarehouseHost     string
+	SandboxWarehousePort     int
+	SandboxWarehouseDatabase string
+	SandboxWarehouseUser     string
+	SandboxWarehousePassword string
+	SandboxHTTPURL           string
+	SandboxTeamPassword      string
 	// Retired names settings still present that this release no longer reads.
 	Retired []string
 }
@@ -225,6 +243,22 @@ func Load(lookup func(string) (string, bool)) (*Settings, error) {
 		SandboxSourcePassword:             l.str("SANDBOX_SOURCE_PASSWORD", ""),
 		SandboxKafkaBootstrap:             l.str("SANDBOX_KAFKA_BOOTSTRAP", ""),
 		SandboxDockerNetwork:              l.str("SANDBOX_DOCKER_NETWORK", ""),
+		SandboxMySQLHost:                  l.str("SANDBOX_MYSQL_HOST", ""),
+		SandboxMySQLPort:                  l.integer("SANDBOX_MYSQL_PORT", 3306),
+		SandboxMySQLUser:                  l.str("SANDBOX_MYSQL_USER", "cdc_reader"),
+		SandboxMySQLPassword:              l.str("SANDBOX_MYSQL_PASSWORD", ""),
+		SandboxLegacyHost:                 l.str("SANDBOX_LEGACY_HOST", ""),
+		SandboxLegacyPort:                 l.integer("SANDBOX_LEGACY_PORT", 5432),
+		SandboxLegacyDatabase:             l.str("SANDBOX_LEGACY_DATABASE", "legacy"),
+		SandboxLegacyUser:                 l.str("SANDBOX_LEGACY_USER", "app_user"),
+		SandboxLegacyPassword:             l.str("SANDBOX_LEGACY_PASSWORD", ""),
+		SandboxWarehouseHost:              l.str("SANDBOX_WAREHOUSE_HOST", ""),
+		SandboxWarehousePort:              l.integer("SANDBOX_WAREHOUSE_PORT", 5432),
+		SandboxWarehouseDatabase:          l.str("SANDBOX_WAREHOUSE_DATABASE", "warehouse"),
+		SandboxWarehouseUser:              l.str("SANDBOX_WAREHOUSE_USER", "bz_writer"),
+		SandboxWarehousePassword:          l.str("SANDBOX_WAREHOUSE_PASSWORD", ""),
+		SandboxHTTPURL:                    l.str("SANDBOX_HTTP_URL", ""),
+		SandboxTeamPassword:               l.str("SANDBOX_TEAM_PASSWORD", ""),
 	}
 	for _, name := range retired {
 		if _, ok := get(name); ok {
