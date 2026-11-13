@@ -1,6 +1,6 @@
 module github.com/daun-gatal/bezisync/backend
 
-go 1.27.3
+go 1.27.4
 
 require (
 	cloud.google.com/go/iam v1.12.0
@@ -75,7 +75,7 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.26.0 // indirect
 	github.com/andybalholm/brotli v1.2.8 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
-	github.com/apache/thrift v0.24.0 // indirect
+	github.com/apache/thrift v0.25.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.25 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.5 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.4.1 // indirect
