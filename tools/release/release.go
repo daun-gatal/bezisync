@@ -36,10 +36,10 @@ var (
 	AppFiles     = []string{GoVersion, PackageJSON, OpenAPI}
 	VersionFiles = append(append([]string{}, AppFiles...), Charts...)
 	// Each image is built from its directory (Dockerfile, .dockerignore and every file the
-	// .dockerignore keeps). The demo smoke test also builds both images, and runs when the
-	// compose stack or its tool changes.
+	// .dockerignore keeps). The demo smoke tests (the demo and the Codespaces lab built on it)
+	// also build both images, and run when the compose stacks or their tools change.
 	ImageContexts = []string{"backend", "frontend"}
-	DemoPaths     = []string{"deploy/compose/", "scripts/demo-smoke.sh", "tools/cmd/demo-smoke/"}
+	DemoPaths     = []string{"deploy/compose/", "scripts/demo-smoke.sh", "tools/cmd/demo-smoke/", ".devcontainer/lab/", "scripts/lab-smoke.sh"}
 
 	skipFiles     = map[string]bool{"README.md": true, ".gitkeep": true}
 	categories    = []string{"Added", "Changed", "Fixed", "Removed"}

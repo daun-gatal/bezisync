@@ -15,7 +15,7 @@
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, the licence files (current, every licence allowed), scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the demo smoke test (when the demo or an image changes). Read-only token, no secrets |
+| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, the licence files (current, every licence allowed), scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the demo and Codespaces lab smoke tests (when the demo, the lab or an image changes). Read-only token, no secrets |
 | `helm.yml` | pull requests touching `deploy/helm/`, `backend/` or `frontend/` | `helm lint --strict` with every `ci/*-values.yaml`, helm-unittest (`unittests/`), kubeconform on three Kubernetes versions, the chart READMEs current (helm-docs), and installs on kind with the change's own images: bundled and external PostgreSQL, `helm test`, an agent that must report in, an in-place upgrade |
 | `build-branch.yml` | manual: branch (not `main`), include charts, version override | Pre-release images `X.Y.Z-pre` (and charts `<chart version>-pre`) of the version the branch would release (`release.sh --plan`), replacing the previous `-pre`. Commits, tags and releases nothing |
 | `release.yml` | manual, from `preview`: version override | The release: see below |
