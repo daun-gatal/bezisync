@@ -83,7 +83,8 @@ make e2e      # builds images, deploys into a disposable k3s-in-Docker cluster, 
   wizard. Keep them passing when touching the controller, drivers or list/wizard queries.
 - `docs/reference/checks.md` is generated (`bezisync check-docs`); a test fails when it is stale, and
   another when a check code is emitted without an entry in `internal/checks/catalog.json`.
-- `make demo-smoke` (also in CI) proves the compose demo stack end to end.
+- `make demo-smoke` (also in CI) proves the compose demo stack end to end, and `make lab-smoke`
+  (also in CI, in the same job) the Codespaces lab built on it (ADR 0018).
 - What to test: pure logic first (checks, compiler, health derivation, policies) with table tests;
   endpoints for authz (404 concealment, 403 permissions), validation and secret non-disclosure;
   every user journey end-to-end in `e2e/tests/` against real Postgres, Kafka and Debezium Server.
@@ -110,7 +111,7 @@ BeziSync is open source (Apache 2.0), and not every contributor can run the whol
 CI runs on pull requests to `preview` (see `releases.md`): `ci.yml` runs the same gates plus the
 version and changelog-fragment checks (a fragment exactly when an image changes, a new version for
 a changed chart), the manual-edit guard, the source scan, the images built and scanned (when an
-image changes), the e2e type check and the demo smoke test; `helm.yml` runs the chart gates below.
+image changes), the e2e type check and the demo and lab smoke tests; `helm.yml` runs the chart gates below.
 
 ## Helm charts
 

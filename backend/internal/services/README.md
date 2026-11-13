@@ -57,7 +57,7 @@ The business logic behind the API handlers, the MCP tools, the CLI and the contr
 - MCP is off by default; tools without an entry keep their default (destructive off) (`[mcp.go:MCPSettings]`).
 - Pagination is keyset over (time, id), limit clamped to 1…200, cursor `base64url(json([isoformat, id]))` (`[pagination.go:EncodeCursor]`).
 - Metrics retention: raw samples older than 24 h roll into 1-minute rows, data past `MetricsRetentionDays` is deleted (`[metrics.go:EnforceMetricRetention]`).
-- `[bootstrap.go:Bootstrap]` runs only when no users exist and `BEZISYNC_BOOTSTRAP_ADMIN_PASSWORD` is set; `[bootstrap.go:EnsureSandbox]` only once, when the sandbox settings are present.
+- `[bootstrap.go:Bootstrap]` runs only when no users exist and `BEZISYNC_BOOTSTRAP_ADMIN_PASSWORD` is set; `[bootstrap.go:EnsureSandbox]` only once, when the sandbox settings are present. Its optional extras (connections, templates and teammates from `BEZISYNC_SANDBOX_MYSQL_*`, `_LEGACY_*`, `_WAREHOUSE_*`, `_HTTP_URL`, `_TEAM_PASSWORD`; ADR 0018) are created in the same transaction and never after, so a deleted piece stays deleted; an invalid extra or a team password `[bootstrap.go:SandboxTeamPasswordProblem]` refuses fails the whole run. A teammate (`[bootstrap.go:SandboxTeam]`) whose email is already taken is skipped and gets no membership.
 - `[keys.go:RotateKeys]` re-encrypts every encrypted column not under the current master key (connections, runtimes, secret stores, alert channels, agent workloads, SSO providers, pipeline engine secrets) plus SAML keys.
 
 ## Side Effects

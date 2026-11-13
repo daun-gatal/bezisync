@@ -366,6 +366,9 @@ func TestAFragmentExactlyWhenAnImageChanges(t *testing.T) {
 	if len(quiet.Images) != 0 || quiet.Demo || len(quiet.Problems()) != 0 {
 		t.Fatalf("%+v", quiet)
 	}
+	if !classify(".devcontainer/lab/compose.yml").Demo || !classify("scripts/lab-smoke.sh").Demo {
+		t.Fatal("a lab change must run the demo smoke tests")
+	}
 	if !classify("deploy/compose/docker-compose.yml").Demo {
 		t.Fatal("compose change does not run the demo")
 	}

@@ -1,4 +1,4 @@
-.PHONY: help verify verify-quick verify-backend verify-backend-quick verify-tools verify-frontend e2e e2e-quick e2e-down openapi openapi-check licenses licenses-check contracts-check dev-db migration demo demo-down demo-smoke chart-test chart-docs
+.PHONY: help verify verify-quick verify-backend verify-backend-quick verify-tools verify-frontend e2e e2e-quick e2e-down openapi openapi-check licenses licenses-check contracts-check dev-db migration demo demo-down demo-smoke lab lab-down lab-smoke chart-test chart-docs
 
 export PATH := $(HOME)/.local/bin:$(HOME)/.local/go/bin:$(HOME)/.local/node/bin:$(PATH)
 TEST_DB = $${BEZISYNC_TEST_DATABASE_URL:-$$(../scripts/dev-db.sh)}
@@ -16,6 +16,8 @@ help:
 	@echo "make dev-db         start the disposable test Postgres and print its URL"
 	@echo "make demo           start the demo stack (deploy/compose) on http://localhost:8080"
 	@echo "make demo-smoke     bring the demo stack up, stream through the sandbox, tear it down"
+	@echo "make lab            start the Codespaces lab locally (make lab-down removes it)"
+	@echo "make lab-smoke      start the lab as a codespace does, check every Sandbox extra, tear it down"
 	@echo "make chart-test     Helm charts: lint (every ci/*-values.yaml), unit tests, helm-docs drift (in Docker)"
 	@echo "make chart-docs     regenerate deploy/helm/*/README.md from README.md.gotmpl and values.yaml (in Docker)"
 
@@ -88,6 +90,15 @@ demo-down:
 
 demo-smoke:
 	scripts/demo-smoke.sh
+
+lab:
+	bash .devcontainer/lab/up.sh
+
+lab-down:
+	bash .devcontainer/lab/down.sh
+
+lab-smoke:
+	scripts/lab-smoke.sh
 
 # Helm charts, in containers so no local helm is needed (CI runs the same checks in helm.yml).
 HELM_UNITTEST_IMAGE = helmunittest/helm-unittest:4.3.0-1.2.1

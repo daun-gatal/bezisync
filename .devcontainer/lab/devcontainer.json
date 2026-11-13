@@ -1,0 +1,42 @@
+{
+  // BeziSync lab (ADR 0018): a private BeziSync with sample databases and live change data, in
+  // the visitor's own GitHub Codespace. Opened from the README's Codespaces badge:
+  // https://codespaces.new/daun-gatal/bezisync?devcontainer_path=.devcontainer/lab/devcontainer.json&quickstart=1
+  // The editor is only the host: everything runs in Docker inside it (up.sh).
+  "name": "BeziSync lab",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": true,
+      "installDockerBuildx": false
+    }
+  },
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "BeziSync",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
+  // Runs on the first start and every restart; up.sh is safe to run again.
+  "postStartCommand": "bash .devcontainer/lab/up.sh",
+  "postAttachCommand": "cat .devcontainer/lab/.state/banner.txt 2>/dev/null || echo 'The lab is still starting: see the creation log (F1 > Codespaces: View Creation Log).'",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [".devcontainer/lab/WELCOME.md"]
+    },
+    "vscode": {
+      "settings": {
+        "workbench.startupEditor": "none"
+      }
+    }
+  }
+}

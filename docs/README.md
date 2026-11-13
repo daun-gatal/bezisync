@@ -20,6 +20,27 @@ engine](#choose-an-engine)). This guide covers installing, using and operating i
 open http://localhost:8080, sign in as `admin@bezisync.local` / `bezisync-demo`. The **Sandbox**
 project is wired to a sample shop database with live orders, Kafka and a local Docker runtime.
 
+### Run your own lab in GitHub Codespaces
+
+The README's **Open in GitHub Codespaces** badge starts a private BeziSync in *your* codespace:
+the demo above plus a MySQL shop (`demo-mysql`), a PostgreSQL that isn't ready for change data
+capture (`legacy-postgres`: preflight refuses it and shows the fix), a PostgreSQL warehouse
+(`demo-warehouse`) and an HTTP endpoint (`demo-http`), a template per destination, and teammates
+`editor@`, `operator@` and `viewer@bezisync.local`. Nobody else can open it, and nothing is
+hosted for you:
+
+- It needs a GitHub account and runs on the 2-core machine, which uses your free Codespaces
+  quota (2 core-hours per hour). The first start takes a few minutes.
+- The admin and team passwords are random, made for that lab. The terminal prints them; they are
+  also in `.devcontainer/lab/.state/login.txt`.
+- A codespace stops after 30 minutes without activity and is deleted after your retention period;
+  delete it yourself at [github.com/codespaces](https://github.com/codespaces). Those are your
+  GitHub settings, not the lab's.
+
+The same lab runs on any Docker: `make lab` (or `bash .devcontainer/lab/up.sh`), then
+`make lab-down`. The extras come from `BEZISYNC_SANDBOX_*` settings ([configuration
+reference](#configuration-reference)), so the demo stack can use them too.
+
 **Kubernetes (production):** the charts are published as OCI artifacts:
 
 ```bash
@@ -1570,5 +1591,7 @@ All settings are environment variables prefixed with `BEZISYNC_`.
 | `METRICS_TOKEN`, `METRICS_RETENTION_DAYS` | —, `30` | Prometheus endpoint and chart history |
 | `SMTP_*` | — | Email alert channel |
 | `TELEMETRY_ENABLED`, `TELEMETRY_URL` | `false`, — | Opt-in anonymous statistics |
-| `SANDBOX_*` | — | Demo stack: create the Sandbox project |
+| `SANDBOX_*` | — | Demo stack: create the Sandbox project (`SANDBOX_SOURCE_*` and `SANDBOX_KAFKA_BOOTSTRAP`), once, on its first start |
+| `SANDBOX_MYSQL_*`, `SANDBOX_LEGACY_*`, `SANDBOX_WAREHOUSE_*`, `SANDBOX_HTTP_URL` | — | Optional Sandbox extras, created with it: a MySQL source `demo-mysql`; a PostgreSQL source `legacy-postgres` that isn't ready for change data capture (preflight shows the fixes); a JDBC destination `demo-warehouse` and an HTTP destination `demo-http`, each with a template. Each needs its `_HOST` (or the URL); `_PORT`, `_USER` and `_DATABASE` have the lab's defaults |
+| `SANDBOX_TEAM_PASSWORD` | — | Also add Sandbox teammates `editor@`, `operator@` and `viewer@bezisync.local`, one per project role, signing in with this password (12 characters or more; an email already in use is skipped) |
 | `CONTROLLER_TICK_SECONDS`, `LOG_LEVEL`, `LOG_JSON` | `5`, `INFO`, `true` | Operations |

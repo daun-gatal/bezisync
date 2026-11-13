@@ -51,7 +51,8 @@ make verify          # includes licenses-check and contracts-check
 make e2e             # disposable k3s-in-Docker; maintainers run it on the head commit before merge
 ```
 
-Add these when they apply: `make chart-test` (charts) and `make demo-smoke` (the compose demo).
+Add these when they apply: `make chart-test` (charts), `make demo-smoke` (the compose demo) and
+`make lab-smoke` (the Codespaces lab, or the Sandbox it relies on).
 For a docs-only PR (`docs/`, `*.md`, `.github/ISSUE_TEMPLATE/`), `make contracts-check` and the
 link checks are enough. [testing.md](testing.md#who-runs-what) says who runs what.
 

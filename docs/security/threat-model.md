@@ -92,6 +92,10 @@ operators must handle themselves. Report vulnerabilities privately (see `SECURIT
 - **Docker socket = root.** The Docker runtime in direct mode (and the demo stack) gives
   BeziSync root-equivalent access to that host. Prefer the agent, rootless Docker, or
   Kubernetes in production.
+- **Sandbox teammates share one password.** `BEZISYNC_SANDBOX_TEAM_PASSWORD` gives three
+  accounts the same password, set by whoever runs the stack. It is for the demo stack and the
+  Codespaces lab, whose start script generates a random one per lab; never set it on an
+  install people rely on. Weak values and anything under 12 characters are refused.
 - **Master key custody.** Anyone with the master key and a database dump can decrypt stored
   secrets. Keep it in a secret manager, rotate it with `BEZISYNC_PREVIOUS_MASTER_KEYS`, or
   keep credentials in an external secret store so BeziSync stores only references.

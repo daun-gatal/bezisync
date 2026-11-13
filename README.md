@@ -8,6 +8,8 @@
 [![Release](https://img.shields.io/github/v/release/daun-gatal/bezisync?sort=semver&filter=v*)](https://github.com/daun-gatal/bezisync/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/daun-gatal/bezisync?devcontainer_path=.devcontainer%2Flab%2Fdevcontainer.json&quickstart=1)
+
 [Quick start](#quick-start) · [Guide](docs/README.md) · [Preflight checks](docs/reference/checks.md) · [Threat model](docs/security/threat-model.md)
 
 </div>
@@ -36,6 +38,13 @@ to Kafka, Iceberg or a dozen other destinations — with the mistakes caught bef
 **Runtimes:** Docker or Kubernetes, in your cluster or remote through an outbound-only agent.
 
 ## Quick start
+
+**Run your own lab, nothing to install:** [open it in GitHub Codespaces](https://codespaces.new/daun-gatal/bezisync?devcontainer_path=.devcontainer%2Flab%2Fdevcontainer.json&quickstart=1). You get a
+private BeziSync in your own codespace, where you are the admin: PostgreSQL and MySQL shops with
+live orders, a database that isn't ready for change data capture (see preflight's fixes), Kafka, a
+warehouse and an HTTP endpoint, plus teammates in each role. It takes a few minutes to start and
+runs on your free Codespaces quota. The sign-in is printed in the terminal; see
+[the guide](docs/README.md#run-your-own-lab-in-github-codespaces).
 
 **Try it in two minutes** with Docker: a sample shop database with live orders, Kafka and a
 ready-made pipeline.

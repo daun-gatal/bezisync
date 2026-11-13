@@ -67,8 +67,9 @@ Design decisions are recorded as ADRs in [docs/adr/](docs/adr/README.md).
 | `backend/` | The Go module behind the `bezisync` image | [backend](backend/README.md) → [internal](backend/internal/README.md) |
 | `frontend/` | The React SPA and the nginx config of the `bezisync-web` image | [frontend](frontend/README.md) → [src](frontend/src/README.md) |
 | `tools/` | Dependency-free Go module: release tool, licence files, demo smoke test, contract checker | [tools](tools/README.md) |
-| `scripts/` | Bash entry points: dev DB, migrations, e2e cluster, demo smoke, CLI build, release | [scripts](scripts/README.md) |
+| `scripts/` | Bash entry points: dev DB, migrations, e2e cluster, demo and lab smoke, CLI build, release | [scripts](scripts/README.md) |
 | `deploy/` | Helm charts (control plane, agent), the compose demo, e2e fixtures, the AppArmor profile and its loader | — (charts: `make chart-test`) |
+| `.devcontainer/lab/` | The Codespaces lab (ADR 0018): the compose demo plus the Sandbox extras, its start and remove scripts, the visitor guide | [lab](.devcontainer/lab/README.md) (`make lab-smoke`) |
 | `e2e/` | Playwright suite run against a disposable k3s-in-Docker cluster | — ([testing.md](.rules/testing.md)) |
 | `docs/` | The user guide, the generated check reference, the threat model and the ADRs | [guide](docs/README.md), [ADRs](docs/adr/README.md) |
 | `changelogs/` | Release-note fragments; never edit `CHANGELOG.md` | [fragments](changelogs/unreleased/README.md) |

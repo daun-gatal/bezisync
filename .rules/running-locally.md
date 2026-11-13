@@ -20,6 +20,12 @@ Kafka; first start creates the Sandbox project via `BEZISYNC_SANDBOX_*`). `make 
 brings it up, streams through the sandbox template and removes it — run it after changing the
 compose file, bootstrap or the Docker runtime.
 
+The Codespaces lab (`.devcontainer/lab/`, ADR 0018) is that demo plus the Sandbox extras (MySQL, a
+PostgreSQL not ready for CDC, a warehouse, an HTTP endpoint, teammates) with random secrets:
+`make lab` starts it (published images; `LAB_BUILD=1` builds this checkout), `make lab-down`
+removes it. `make lab-smoke` starts it as a codespace does, checks every extra and removes it — run
+it after changing the lab, bootstrap's Sandbox or the demo stack it builds on.
+
 The full stack (API, controller, web, Postgres, data plane, connectors) runs in the e2e cluster:
 `make e2e` leaves it running; `make e2e-down` deletes it. With a remote Docker daemon set
 `BZ_DOCKER_HOST_IP` to the address where its published ports are reachable.

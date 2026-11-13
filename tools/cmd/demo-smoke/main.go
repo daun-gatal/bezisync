@@ -1,14 +1,18 @@
 // Command demo-smoke drives the demo stack's sandbox through the API (used by
 // scripts/demo-smoke.sh): create a pipeline from the sandbox template, wait until it streams,
-// read live orders back from Kafka, then delete it.
+// read live orders back from Kafka, then delete it. With -lab it checks the Codespaces lab
+// instead (scripts/lab-smoke.sh, ADR 0018): the Sandbox extras, the teammates' roles,
+// preflight on the source that isn't ready, and streams into Kafka and the warehouse.
 //
 //	go run ./cmd/demo-smoke http://localhost:28080
+//	BEZISYNC_SMOKE_ADMIN_PASSWORD=… BEZISYNC_SMOKE_TEAM_PASSWORD=… go run ./cmd/demo-smoke -lab http://localhost:28080
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -25,11 +29,19 @@ type pipeline struct {
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: demo-smoke URL")
+	lab := flag.Bool("lab", false, "check the Codespaces lab instead of the demo")
+	flag.Parse()
+	if flag.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: demo-smoke [-lab] URL")
 		os.Exit(2)
 	}
-	if err := run(context.Background(), os.Args[1]); err != nil {
+	var err error
+	if *lab {
+		err = runLab(context.Background(), flag.Arg(0), os.Getenv("BEZISYNC_SMOKE_ADMIN_PASSWORD"), os.Getenv("BEZISYNC_SMOKE_TEAM_PASSWORD"))
+	} else {
+		err = run(context.Background(), flag.Arg(0))
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "[demo] %v\n", err)
 		os.Exit(1)
 	}
