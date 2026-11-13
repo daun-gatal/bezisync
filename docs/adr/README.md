@@ -55,3 +55,4 @@ The other options, and why they lost.
 | [0015](0015-flink-cdc-columns-the-job-hasnt-read.md) | Flink CDC holds back source columns a restored job hasn't read yet | Accepted |
 | [0016](0016-read-only-destination-checks.md) | Destination checks only read: no test tables or indexes on the destination | Accepted |
 | [0017](0017-discard-undeployed-changes.md) | Discard a deployed pipeline's undeployed changes | Accepted |
+| [0018](0018-codespaces-lab.md) | A private lab in the visitor's own GitHub Codespace, provisioned by the Sandbox | Accepted |
