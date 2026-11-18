@@ -1,0 +1,22 @@
+{
+  "name": "bezisync-website",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "bun src/build.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "dev": "bun src/build.ts && bunx serve dist"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.6",
+    "@fontsource/ibm-plex-sans": "^5.2.6",
+    "highlight.js": "^11.11.1",
+    "marked": "^16.4.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "5.9"
+  }
+}
