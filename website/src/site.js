@@ -32,13 +32,16 @@
   const input = document.querySelector('.search input');
   const list = document.querySelector('.results');
   let index;
+  let loading;
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-  input?.addEventListener('focus', async () => {
-    index ??= await fetch('/docs/search.json').then((r) => r.json()).catch(() => []);
-  });
-  input?.addEventListener('input', () => {
+  // The index loads on first focus. What is typed (or pasted) before it arrives is searched as
+  // soon as it does, so the first query never comes back empty.
+  const load = () => (loading ??= fetch('/docs/search.json').then((r) => r.json()).catch(() => []).then((i) => (index = i)));
+  input?.addEventListener('focus', load);
+  input?.addEventListener('input', () => (index ? search() : load().then(search)));
+  const search = () => {
     const q = input.value.trim().toLowerCase();
-    if (!q || !index) { list.hidden = true; return; }
+    if (!q) { list.hidden = true; return; }
     const hits = [];
     for (const page of index) {
       if (page.title.toLowerCase().includes(q)) hits.push({ score: 3, url: page.url, title: page.title, where: 'Page' });
@@ -51,7 +54,7 @@
     list.innerHTML = hits.slice(0, 12).map((h) => `<li><a href="${h.url}">${esc(h.title)}<span>${esc(h.where)}</span></a></li>`).join('')
       || '<li><a>No results</a></li>';
     list.hidden = false;
-  });
+  };
   input?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') list.querySelector('a[href]')?.click();
     if (e.key === 'Escape') { input.value = ''; list.hidden = true; }
