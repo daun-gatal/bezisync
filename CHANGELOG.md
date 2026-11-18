@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.9.1] - 2026-11-18
+
+### Changed
+- **Agent sign-in errors** - when an AI agent's sign-in request is refused after BeziSync recognised the agent, the error goes back to the redirect address the agent registered, taken from that registration rather than from the request. Behaviour is unchanged; the rule no longer depends on an implicit convention in the code.
+
+### Fixed
+- **Sign-in redirect** - the address to continue to after signing in could leave BeziSync: a tab or newline after the first `/` passed the check, and browsers drop those characters (`/<tab>/evil.example` became `//evil.example`). A backslash, whitespace or control character anywhere now sends you to the home page, in the server and the web app.
+- **Redis checks over TLS** - the check accepted any certificate a trusted authority issued, for any name, before sending the password. It now also requires the certificate to name the host you entered, and says why it refused a certificate instead of "Redis did not answer". Connect by a name the certificate lists, not an IP address (Debezium Server itself still checks only the chain).
+- **Sign-out cookies** - signing out and finishing an SSO sign-in now clear the session, CSRF and SSO cookies with the same `HttpOnly`, `Secure` and `SameSite` attributes they were set with.
+- **Integer settings** - a whole number past the platform's range (`1e19`) was turned into an arbitrary value instead of being refused; MySQL size estimates past 64 bits showed as negative numbers.
+
 ## [v0.9.0] - 2026-11-13
 
 ### Added
