@@ -680,10 +680,10 @@ func oauthProtocolRoutes(r chi.Router) {
 		})
 		var oe *services.OAuthError
 		switch {
-		case errors.As(err, &oe) && oe.Status == 0:
+		case errors.As(err, &oe) && oe.RedirectURI == "":
 			redirect(w, "/oauth/consent?error="+quote(oe.Description))
 		case errors.As(err, &oe):
-			fake := &models.OAuthRequest{RedirectURI: a.RedirectURI}
+			fake := &models.OAuthRequest{RedirectURI: oe.RedirectURI}
 			if a.State != "" {
 				fake.State = &a.State
 			}
