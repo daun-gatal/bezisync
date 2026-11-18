@@ -17,7 +17,7 @@ import { copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'nod
 import path from 'node:path';
 import { landing } from './landing';
 import { SITE, REPO, layout, esc, type NavGroup } from './layout';
-import { OVERRIDES, autoDescription, breadcrumbs, docTitle, jsonLdScript, overrideProblem, DESCRIPTION_MAX, DESCRIPTION_MIN } from './seo';
+import { OVERRIDES, autoDescription, breadcrumbs, docTitle, escapeRegExp, jsonLdScript, overrideProblem, stripTags, DESCRIPTION_MAX, DESCRIPTION_MIN } from './seo';
 
 const argv = process.argv.slice(2);
 const args = Object.fromEntries(argv.reduce<[string, string][]>((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1] ?? '']] : acc), []));
@@ -41,27 +41,24 @@ const version = RELEASE ? tag : `${tag} + unreleased changes`;
 const changelogText = await readFile(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
 const latest = changelogText.match(/^## \[(v\d+\.\d+\.\d+)\]/m)?.[1];
 // When the docs were released: the sitemap's lastmod (none for unreleased docs).
-const released = RELEASE ? changelogText.match(new RegExp(`^## \\[${tag.replace(/\./g, '\\.')}\\] - (\\d{4}-\\d{2}-\\d{2})`, 'm'))?.[1] : undefined;
+const released = RELEASE ? changelogText.match(new RegExp(`^## \\[${escapeRegExp(tag)}\\] - (\\d{4}-\\d{2}-\\d{2})`, 'm'))?.[1] : undefined;
 if (RELEASE && latest !== tag) fail(`--release: CHANGELOG.md's latest release is ${latest}, the app version is ${tag}`);
 
 // --- headings and links -------------------------------------------------------------------
 
 /** GitHub's heading anchors: lower case, punctuation dropped (not - or _), spaces to hyphens. */
 function slugify(text: string): string {
-  return text
+  return stripTags(text)
     .toLowerCase()
     .trim()
-    .replace(/<[^>]+>/g, '')
     .replace(/[^\p{L}\p{N}\s_-]/gu, '')
     .replace(/\s/g, '-');
 }
 
 /** A heading's text without markdown: links keep their text, code and emphasis lose their marks. */
 function plain(md: string): string {
-  return md
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+  return stripTags(md.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1'))
     .replace(/[`*~]/g, '')
-    .replace(/<[^>]+>/g, '')
     .trim();
 }
 

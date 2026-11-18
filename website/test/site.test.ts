@@ -7,7 +7,7 @@ import { mkdtemp, readFile, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Marked } from 'marked';
-import { DESCRIPTION_MAX, DESCRIPTION_MIN, TITLE_MAX, autoDescription, clip, jsonLdScript } from '../src/seo';
+import { DESCRIPTION_MAX, DESCRIPTION_MIN, TITLE_MAX, autoDescription, clip, escapeRegExp, jsonLdScript, stripTags } from '../src/seo';
 import { SITE } from '../src/layout';
 
 const SITE_DIR = path.join(import.meta.dir, '..');
@@ -299,6 +299,17 @@ describe('the preflight check pages', () => {
 });
 
 describe('seo helpers', () => {
+  test('stripTags leaves no tag, even one hidden inside another', () => {
+    expect(stripTags('a <b>bold</b> word')).toBe('a bold word');
+    expect(stripTags('<scr<b>ipt>alert(1)</script>')).toBe('alert(1)');
+    expect(stripTags('<SCRIPT>x</SCRIPT> 1 < 2')).toBe('x 1  2');
+  });
+
+  test('escapeRegExp matches the text literally', () => {
+    expect(new RegExp(`^${escapeRegExp('v1.2.3')}$`).test('v1x2x3')).toBe(false);
+    expect(new RegExp(escapeRegExp('a\\b(c)[d]')).test('a\\b(c)[d]')).toBe(true);
+  });
+
   test('clip keeps whole sentences and never splits a version number', () => {
     const s = 'BeziSync 1.0 runs Debezium Server. '.repeat(3) + 'A'.repeat(200);
     const c = clip(s);
@@ -326,6 +337,6 @@ describe('seo helpers', () => {
   test('jsonLdScript escapes "<" so no text closes the script element', () => {
     const s = jsonLdScript([{ name: '</script><script>alert(1)</script>' }]);
     expect(s.match(/<\/script>/g)?.length).toBe(1);
-    expect(JSON.parse(s.replace(/^<script[^>]*>|<\/script>$/g, '')).name).toBe('</script><script>alert(1)</script>');
+    expect(JSON.parse(s.replace(/^<script[^>]*>|<\/script>$/gi, '')).name).toBe('</script><script>alert(1)</script>');
   });
 });

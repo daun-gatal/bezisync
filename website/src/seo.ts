@@ -118,13 +118,31 @@ export function overrideProblem(o: Override, markdown: string): string | undefin
   return undefined;
 }
 
+/**
+ * Text without HTML tags. Tags are removed until none is left (a nested "<scr<b>ipt>" cannot
+ * reassemble into one), then any "<" or ">" still there is dropped.
+ */
+export function stripTags(s: string): string {
+  let out = s;
+  for (let prev = ''; out !== prev; ) {
+    prev = out;
+    out = out.replace(/<[^<>]*>/g, '');
+  }
+  return out.replace(/[<>]/g, '');
+}
+
+/** Regular-expression text matching s literally. */
+export function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** Text a reader sees: no markdown, links or URLs (code keeps its text, without the marks). */
 export function prose(md: string): string {
-  return md
+  const text = md
     .replace(/`([^`]*)`/g, '$1')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/<[^>]+>/g, '')
+    .replace(/https?:\/\/\S+/g, '');
+  return stripTags(text)
     .replace(/[*_~]/g, '')
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.;:])/g, '$1')
