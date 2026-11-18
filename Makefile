@@ -1,4 +1,4 @@
-.PHONY: help verify verify-quick verify-backend verify-backend-quick verify-tools verify-frontend e2e e2e-quick e2e-down openapi openapi-check licenses licenses-check contracts-check dev-db migration demo demo-down demo-smoke lab lab-down lab-smoke chart-test chart-docs
+.PHONY: help verify verify-quick verify-backend verify-backend-quick verify-tools verify-frontend e2e e2e-quick e2e-down openapi openapi-check licenses licenses-check contracts-check dev-db migration demo demo-down demo-smoke lab lab-down lab-smoke chart-test chart-docs verify-website website docs-screenshots
 
 export PATH := $(HOME)/.local/bin:$(HOME)/.local/go/bin:$(HOME)/.local/node/bin:$(PATH)
 TEST_DB = $${BEZISYNC_TEST_DATABASE_URL:-$$(../scripts/dev-db.sh)}
@@ -20,16 +20,19 @@ help:
 	@echo "make lab-smoke      start the lab as a codespace does, check every Sandbox extra, tear it down"
 	@echo "make chart-test     Helm charts: lint (every ci/*-values.yaml), unit tests, helm-docs drift (in Docker)"
 	@echo "make chart-docs     regenerate deploy/helm/*/README.md from README.md.gotmpl and values.yaml (in Docker)"
+	@echo "make website        build the website (landing page + docs/) into website/dist and check every page"
+	@echo "make docs-screenshots  recapture docs/images/ from the lab stack built from this checkout (Docker)"
 
 dev-db:
 	@scripts/dev-db.sh
 
-verify: verify-backend verify-tools verify-frontend licenses-check contracts-check
+verify: verify-backend verify-tools verify-frontend verify-website licenses-check contracts-check
 
 # While iterating: everything but the race detector and the production build.
 verify-quick: openapi-check verify-backend-quick verify-tools licenses-check contracts-check
 	cd frontend && bun run typecheck && bun run test
 	cd e2e && npx tsc --noEmit
+	cd website && bun install --frozen-lockfile >/dev/null && bun test
 
 # Go tests need the test database; GO_PKGS=… limits them while iterating.
 GO_PKGS ?= ./...
@@ -48,6 +51,16 @@ verify-tools:
 verify-frontend: openapi-check
 	cd frontend && bun run typecheck && bun run test && bun run build
 	cd e2e && npx tsc --noEmit
+
+# website/: types, the build and its page checks (broken links, images, SEO, old URLs).
+verify-website:
+	cd website && bun install --frozen-lockfile && bun run typecheck && bun test
+
+website:
+	cd website && bun install --frozen-lockfile && bun src/build.ts
+
+docs-screenshots:
+	scripts/docs-screenshots.sh
 
 openapi:
 	cd backend && go run ./cmd/bezisync openapi --output ../frontend/openapi.json

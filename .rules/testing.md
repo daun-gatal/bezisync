@@ -111,7 +111,9 @@ BeziSync is open source (Apache 2.0), and not every contributor can run the whol
 CI runs on pull requests to `preview` (see `releases.md`): `ci.yml` runs the same gates plus the
 version and changelog-fragment checks (a fragment exactly when an image changes, a new version for
 a changed chart), the manual-edit guard, the source scan, the images built and scanned (when an
-image changes), the e2e type check and the demo and lab smoke tests; `helm.yml` runs the chart gates below.
+image changes), the e2e type check, the website (`make verify-website`: every docs link, anchor and screenshot, the
+pages' titles and descriptions, and the URLs the site has always had) and the demo and lab smoke
+tests; `helm.yml` runs the chart gates below.
 
 ## Helm charts
 

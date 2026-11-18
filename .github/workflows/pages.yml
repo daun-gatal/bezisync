@@ -1,0 +1,91 @@
+# Website: builds website/ (the landing page and docs/) and publishes it with GitHub Pages at
+# https://bezisync.dglabs-ai.dev (the custom domain is a Pages setting, see .rules/releases.md).
+#
+#   called by release.yml   after a release: the released commit, "Docs for vX.Y.Z"
+#   manual (from preview)   a docs fix between releases: preview's docs, only when preview holds no
+#                           unreleased app change (no changelog fragment), so the docs still
+#                           describe the latest release; `unreleased: true` publishes them anyway
+#
+# Both run from preview (the github-pages environment lets only the default branch deploy).
+name: Website
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The released commit
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      unreleased:
+        description: Publish preview's docs even though they describe unreleased changes
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build the website
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: "${{ inputs.ref || github.sha }}" }
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: "1.4" }
+      - name: Which docs
+        id: docs
+        env:
+          CALLED: ${{ inputs.ref != '' }}
+          UNRELEASED: ${{ inputs.unreleased }}
+        run: |
+          set -euo pipefail
+          pending=$(find changelogs/unreleased -name '*.md' ! -name README.md | wc -l)
+          if [ "$CALLED" = true ] || [ "$pending" -eq 0 ]; then
+            echo "args=--release" >> "$GITHUB_OUTPUT"
+          elif [ "$UNRELEASED" = true ]; then
+            echo "args=--ref $GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::$pending changelog fragment(s) pending: preview's docs may describe unreleased changes. Release, or run again with 'unreleased'."
+            exit 1
+          fi
+      - working-directory: website
+        run: bun install --frozen-lockfile
+      - name: Build
+        working-directory: website
+        env: { ARGS: "${{ steps.docs.outputs.args }}" }
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086 # ARGS is two words on purpose
+          bun src/build.ts $ARGS --out dist | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-pages-artifact@v4
+        with: { path: website/dist }
+
+  deploy:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions: { pages: write, id-token: write }
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      # The deployment is live once Pages serves the new build: check the docs home answers.
+      - name: Smoke test
+        env: { URL: "${{ steps.deployment.outputs.page_url }}" }
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            if curl -fsS "${URL%/}/docs/" | grep -q '<h1>Documentation</h1>'; then echo "Serving ${URL}"; exit 0; fi
+            sleep 10
+          done
+          echo "::warning::${URL%/}/docs/ did not answer with the docs home yet"

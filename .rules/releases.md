@@ -15,10 +15,11 @@
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, the licence files (current, every licence allowed), scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the demo and Codespaces lab smoke tests (when the demo, the lab or an image changes). Read-only token, no secrets |
+| `ci.yml` | pull requests to `preview` | Every check: backend lint and tests, tools, the website (build and page checks), the licence files (current, every licence allowed), scripts, frontend, versions and fragments (`release.sh --changes`), the manual-edit guard (CHANGELOG.md and the app version), the source scan, the images built and scanned (when an image changes), the demo and Codespaces lab smoke tests (when the demo, the lab or an image changes). Read-only token, no secrets |
 | `helm.yml` | pull requests touching `deploy/helm/`, `backend/` or `frontend/` | `helm lint --strict` with every `ci/*-values.yaml`, helm-unittest (`unittests/`), kubeconform on three Kubernetes versions, the chart READMEs current (helm-docs), and installs on kind with the change's own images: bundled and external PostgreSQL, `helm test`, an agent that must report in, an in-place upgrade |
 | `build-branch.yml` | manual: branch (not `main`), include charts, version override | Pre-release images `X.Y.Z-pre` (and charts `<chart version>-pre`) of the version the branch would release (`release.sh --plan`), replacing the previous `-pre`. Commits, tags and releases nothing |
 | `release.yml` | manual, from `preview`: version override | The release: see below |
+| `pages.yml` | called by `release.yml`; manual, from `preview` | The website (`website/`: landing page + `docs/`) on GitHub Pages. After a release: the released commit, "Docs for vX.Y.Z". By hand: preview's docs, only when no changelog fragment is pending (else only with `unreleased: true`, labelled "+ unreleased changes") |
 
 Shared steps: `.github/actions/build-images` (both images, linux/amd64 + linux/arm64, push,
 attest) and `.github/actions/helm-publish` (package one chart, push unless that version exists,
@@ -51,7 +52,7 @@ attest, pull and render).
 - **A new chart version when a chart changes** (anything under `deploy/helm/<chart>/`): unpublished
   and newer than every published one (several changes before a release share one bump). No
   fragment for chart-only changes. Regenerate the chart READMEs (`make chart-docs`).
-- Everything else — `docs/`, `e2e/`, `deploy/compose/`, `deploy/e2e/`, `deploy/apparmor/`,
+- Everything else — `docs/`, `website/`, `e2e/`, `deploy/compose/`, `deploy/e2e/`, `deploy/apparmor/`,
   `scripts/`, `tools/`, `.github/`, `.rules/`, the guides — ships with neither.
 - Never edit `CHANGELOG.md` or the app version by hand: CI refuses both.
 
@@ -94,6 +95,7 @@ Valid types: `major`, `minor`, `patch`; sections: `Added`, `Changed`, `Fixed`, `
      gets a GitHub Release per chart (not marked latest), its notes the pull requests that changed
      the chart since its previous release (`release.sh --chart-notes`);
    - every `-pre` image and chart is deleted.
+   - the website is published with the released docs (`pages.yml`), for app and chart-only releases.
 
 Locally: `scripts/release.sh --plan` shows what a release would publish, `--dry-run` the app
 version, `--notes X.Y.Z` a release's notes.
@@ -127,7 +129,7 @@ reproducible installs.
     (stale approvals dismissed, conversations resolved; squash merges only) and these checks:
     Backend lint, Backend tests, Tools, Frontend, Versions and changelog, Demo compose file,
     Vulnerability scan (source), Build and scan images, Demo stack smoke test,
-    Helm charts result. Not "up to date with the base".
+    Helm charts result, Website. Not "up to date with the base".
     A job skipped by its `if` counts as passed; `helm.yml` starts on every pull request and its
     `Helm charts result` job is the one chart check to require (skipped matrix jobs report under
     an unexpanded name). Renaming a required job means updating the ruleset.
@@ -137,6 +139,11 @@ reproducible installs.
     account cannot name GitHub Actions as a bypass actor.
 - Merging: squash only (the PR title becomes the commit subject, with `(#N)`), head branches
   deleted after merge.
+- GitHub Pages: source **GitHub Actions**, custom domain `bezisync.dglabs-ai.dev` (a `CNAME` file
+  is ignored when deploying from Actions), **Enforce HTTPS** once the certificate is issued. DNS: a
+  `CNAME` record `bezisync` → `daun-gatal.github.io`, **DNS only** (a proxied record blocks the
+  certificate). The `github-pages` environment deploys from `preview` (the default branch), which
+  is where `release.yml` and a manual `pages.yml` run.
 - GHCR packages public and linked to the repository (the images' `org.opencontainers.image.source`
   label links them); Discussions with an *Announcements* category; Actions approval required for
   outside contributors.

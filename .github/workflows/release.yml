@@ -10,6 +10,7 @@
 #   publish   images X.Y.Z + latest; charts at their versions; git tags vX.Y.Z and
 #             chart-<name>-vX.Y.Z; the GitHub Release (with the CLI); a Discussions post.
 #   cleanup   every -pre image and chart is deleted.
+#   website   the site with the released docs (pages.yml), on GitHub Pages.
 #
 # Preview must not move between the plan and the promotion (that would ship untested commits):
 # the promotion refuses, and a new -pre and run are needed.
@@ -334,3 +335,14 @@ jobs:
           packages: ${{ matrix.package }}
           delete-tags: "*-pre"
           delete-untagged: true
+
+  # The website, with the released docs (pages.yml). It runs on app and chart-only releases alike:
+  # a chart-only release has no pending app change, so the docs describe the released app.
+  website:
+    name: Website
+    needs: [plan, promote, charts, github-release]
+    if: ${{ !cancelled() && needs.charts.result == 'success' && (needs.plan.outputs.kind == 'charts' || needs.github-release.result == 'success') }}
+    permissions: { contents: read, pages: write, id-token: write }
+    uses: ./.github/workflows/pages.yml
+    with:
+      ref: ${{ needs.promote.outputs.sha }}

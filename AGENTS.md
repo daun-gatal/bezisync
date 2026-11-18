@@ -59,10 +59,11 @@ Browser / CLI ──▶ api (Go)       ─┐
 - Frontend (`frontend/`) is a React SPA served by nginx, talking only to `/api/v1`.
 - `bezisync remote …` is the CLI for users and CI (API tokens); `deploy/` holds the Helm charts
   (control plane, agent), the compose demo stack, the e2e fixtures and an optional AppArmor profile
-  (`deploy/apparmor/`). Pull requests target `preview`; `main` only moves by releases. Four
+  (`deploy/apparmor/`). Pull requests target `preview`; `main` only moves by releases. Five
   workflows: `ci.yml` and `helm.yml` (every check on pull requests; the e2e suite runs locally), `build-branch.yml`
-  (pre-release images and charts `-pre` from a branch) and `release.yml` (from preview, after an
-  approval: images, charts, CLI and the GitHub Release) — see `.rules/releases.md`.
+  (pre-release images and charts `-pre` from a branch), `release.yml` (from preview, after an
+  approval: images, charts, CLI, the GitHub Release, then the website) and `pages.yml` (the website
+  on GitHub Pages) — see `.rules/releases.md`.
 - `tools/` is a small Go module (no dependencies, outside the image build contexts) with the
   release tool (`scripts/release.sh`), the licence-file generator (`make licenses`), the
   directory-contract checker (`make contracts-check`) and the demo smoke test. There is
@@ -71,9 +72,12 @@ Browser / CLI ──▶ api (Go)       ─┐
   Invariants, Side Effects, Verification) rolled up in [`ARCHITECTURE.md`](ARCHITECTURE.md).
   Read the contract before changing a directory and update it in the same change; `make
   contracts-check` keeps them true. Design decisions live in [`docs/adr/`](docs/adr/README.md).
-- User-facing docs live in [`docs/`](docs/README.md): the guide, the generated preflight-check
-  reference (`bezisync check-docs`) and the [threat model](docs/security/threat-model.md) — a
-  user-visible or security-relevant change updates them in the same change.
+- User-facing docs live in [`docs/`](docs/README.md): the index (`docs/README.md`), the guide's
+  pages (`docs/guide/`, with screenshots in `docs/images/` from `make docs-screenshots`), the
+  generated preflight-check reference (`bezisync check-docs`) and the
+  [threat model](docs/security/threat-model.md) — a user-visible or security-relevant change
+  updates them in the same change. [`website/`](website/README.md) builds them, with the landing
+  page, into <https://bezisync.dglabs-ai.dev> (GitHub Pages, ADR 0019).
 
 ## 3. Golden rules
 
