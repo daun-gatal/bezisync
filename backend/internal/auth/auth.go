@@ -153,13 +153,22 @@ func StartSession(ctx context.Context, q db.Querier, w http.ResponseWriter, user
 		return nil, err
 	}
 	maxAge := s.SessionTTLHours * 3600
-	//nolint:gosec // Secure follows BEZISYNC_COOKIE_SECURE (production requires it)
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: token, MaxAge: maxAge, Path: "/", HttpOnly: true, Secure: s.CookieSecure, SameSite: http.SameSiteLaxMode,
-		Expires: time.Now().Add(time.Duration(maxAge) * time.Second)})
-	//nolint:gosec // the CSRF cookie is read by the SPA by design (double-submit token)
-	http.SetCookie(w, &http.Cookie{Name: CSRFCookie, Value: csrf, MaxAge: maxAge, Path: "/", HttpOnly: false, Secure: s.CookieSecure, SameSite: http.SameSiteLaxMode,
-		Expires: time.Now().Add(time.Duration(maxAge) * time.Second)})
+	http.SetCookie(w, sessionCookie(SessionCookie, token, maxAge))
+	http.SetCookie(w, sessionCookie(CSRFCookie, csrf, maxAge))
 	return sess, nil
+}
+
+// sessionCookie is a session or CSRF cookie; a negative maxAge deletes it. Deleting sends the
+// same attributes as setting, so a browser always replaces the cookie it holds. The CSRF
+// cookie is the one the SPA reads (double-submit token), so only it is not HttpOnly.
+func sessionCookie(name, value string, maxAge int) *http.Cookie {
+	expires := time.Now().Add(time.Duration(maxAge) * time.Second)
+	if maxAge < 0 {
+		expires = time.Unix(0, 0)
+	}
+	//nolint:gosec // Secure follows BEZISYNC_COOKIE_SECURE (production requires it)
+	return &http.Cookie{Name: name, Value: value, MaxAge: maxAge, Expires: expires, Path: "/", HttpOnly: name != CSRFCookie,
+		Secure: config.Get().CookieSecure, SameSite: http.SameSiteLaxMode}
 }
 
 // EndSession deletes the session and clears its cookies.
@@ -170,7 +179,7 @@ func EndSession(ctx context.Context, q db.Querier, w http.ResponseWriter, p *Pri
 		}
 	}
 	for _, name := range []string{SessionCookie, CSRFCookie} {
-		http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, Expires: time.Unix(0, 0)}) //nolint:gosec // deleting the cookie
+		http.SetCookie(w, sessionCookie(name, "", -1))
 	}
 	return nil
 }
