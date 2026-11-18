@@ -43,6 +43,10 @@ type OAuthError struct {
 	Status      int
 	Code        string
 	Description string
+	// RedirectURI is where an authorization error goes back to the agent: the client's
+	// registered URI, set only once the request was matched against it. Empty, the error
+	// stays on BeziSync (the request's own redirect_uri is never trusted).
+	RedirectURI string
 }
 
 func (e *OAuthError) Error() string { return e.Code + ": " + e.Description }
@@ -138,9 +142,9 @@ type AuthorizeParams struct {
 	ClientID, RedirectURI, ResponseType, CodeChallenge, Method, State, Resource string
 }
 
-// StartAuthorization validates an authorization request. A *OAuthError with Status 0 must be
-// shown to the person (the redirect URI is not trusted); any other error is sent back to the
-// agent's redirect URI.
+// StartAuthorization validates an authorization request. A *OAuthError without a RedirectURI
+// must be shown to the person (the client or its redirect URI is unknown); one with it goes
+// back to that registered URI.
 func StartAuthorization(ctx context.Context, q db.Querier, a AuthorizeParams, resourceURL string) (*models.OAuthRequest, error) {
 	client, err := db.Find[models.OAuthClient](ctx, q, `SELECT * FROM oauth_clients WHERE id = $1`, a.ClientID)
 	if err != nil {
@@ -149,32 +153,38 @@ func StartAuthorization(ctx context.Context, q db.Querier, a AuthorizeParams, re
 	if client == nil {
 		return nil, oauthErr(0, "invalid_client", "This agent is not registered with BeziSync. Connect it again.")
 	}
-	registered := false
+	back := ""
 	for _, r := range client.RedirectURIs {
-		if r == a.RedirectURI {
-			registered = true
+		if s, ok := r.(string); ok && s == a.RedirectURI {
+			back = s
 		}
 	}
-	if !registered {
+	if back == "" {
 		return nil, oauthErr(0, "invalid_request", "The agent asked to return to an address it did not register.")
 	}
+	// From here on errors go back to the agent, at the address it registered.
+	toAgent := func(code, desc string) *OAuthError {
+		e := oauthErr(400, code, desc)
+		e.RedirectURI = back
+		return e
+	}
 	if client.Status == ClientBlocked {
-		return nil, oauthErr(400, "access_denied", "An Admin blocked this agent.")
+		return nil, toAgent("access_denied", "An Admin blocked this agent.")
 	}
 	if a.ResponseType != "code" {
-		return nil, oauthErr(400, "unsupported_response_type", "Only the authorization code flow is supported.")
+		return nil, toAgent("unsupported_response_type", "Only the authorization code flow is supported.")
 	}
 	if a.Method != "S256" || len(a.CodeChallenge) < 43 || len(a.CodeChallenge) > 128 {
-		return nil, oauthErr(400, "invalid_request", "PKCE with S256 is required.")
+		return nil, toAgent("invalid_request", "PKCE with S256 is required.")
 	}
 	if a.Resource != "" && strings.TrimRight(a.Resource, "/") != resourceURL {
-		return nil, oauthErr(400, "invalid_target", "BeziSync issues tokens for its MCP endpoint only ("+resourceURL+").")
+		return nil, toAgent("invalid_target", "BeziSync issues tokens for its MCP endpoint only ("+resourceURL+").")
 	}
 	if len(a.State) > 500 {
-		return nil, oauthErr(400, "invalid_request", "The state is too long.")
+		return nil, toAgent("invalid_request", "The state is too long.")
 	}
 	now := db.Now()
-	r := &models.OAuthRequest{ID: db.NewID(), ClientID: client.ID, RedirectURI: a.RedirectURI, CodeChallenge: a.CodeChallenge, Status: "pending",
+	r := &models.OAuthRequest{ID: db.NewID(), ClientID: client.ID, RedirectURI: back, CodeChallenge: a.CodeChallenge, Status: "pending",
 		ExpiresAt: now.Add(OAuthRequestTTL), CreatedAt: now}
 	if a.State != "" {
 		r.State = &a.State

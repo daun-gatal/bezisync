@@ -269,6 +269,16 @@ func TestMCPAgentsSignInWithOAuth(t *testing.T) {
 	if loc := authorize(admin, "redirect_uri", "https://evil.example/cb").expect(302).Header.Get("location"); !strings.HasPrefix(loc, "/oauth/consent?error=") {
 		t.Fatal(loc)
 	}
+	// So is any request from a client BeziSync doesn't know.
+	if loc := authorize(admin, "client_id", "bzc_unknown", "redirect_uri", "https://evil.example/cb").expect(302).Header.Get("location"); !strings.HasPrefix(loc, "/oauth/consent?error=") {
+		t.Fatal(loc)
+	}
+	// Once the client and its redirect URI match, errors go back to that registered URI.
+	refused, _ := url.Parse(authorize(admin, "code_challenge_method", "plain").expect(302).Header.Get("location"))
+	if refused.Scheme+"://"+refused.Host+refused.Path != "http://127.0.0.1:33418/callback" || refused.Query().Get("error") != "invalid_request" ||
+		refused.Query().Get("state") != "xyz" || refused.Query().Get("iss") == "" {
+		t.Fatal(refused)
+	}
 	start := authorize(admin).expect(302).Header.Get("location")
 	if !strings.HasPrefix(start, "/oauth/consent?request=") {
 		t.Fatal(start)
