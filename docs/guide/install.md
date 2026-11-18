@@ -88,7 +88,7 @@ available and back it up.
 
 - [Concepts](concepts.md): projects, runtimes, connections and pipelines.
 - [Your first pipeline](your-first-pipeline.md).
-- [Configuration reference](configuration-reference.md): every setting the server reads.
+- [Configuration reference](configuration-reference.md): the server's main settings.
 
 ---
 

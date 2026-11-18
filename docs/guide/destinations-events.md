@@ -78,7 +78,7 @@ One Kinesis data stream per table in the connection's region.
 | What you get | One stream per table, created at deploy (one shard, more in Expert mode) unless turned off. Records are keyed by the row key |
 | Connection | An access key or the runtime's IAM role. A custom endpoint (Expert) points at a VPC endpoint or an emulator |
 | Pipeline settings and formats | Formats as for Kafka |
-| Preflight checks | Reaches the endpoint, signs in and says which permission is missing |
+| Preflight checks | Reaches the endpoint, signs in and says what is missing |
 | Reading it back | The Events tab and the delivery canary read the newest records |
 | Deleting a pipeline | "Drop destinations" deletes the streams |
 

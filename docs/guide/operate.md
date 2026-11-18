@@ -35,8 +35,9 @@ everything else.
 ### Source protection
 
 Source protection shows how much room the pipeline has before the source drops changes it hasn't
-read yet. Each measure is set against how far the stored position is behind, with a bar of the
-window used.
+read yet, in the source's own terms. Where the source keeps changes for a time (SQL Server,
+Oracle, CockroachDB, Spanner), each measure is set against how far the stored position is behind,
+with a bar of the window used.
 
 | Source | What it shows |
 |---|---|

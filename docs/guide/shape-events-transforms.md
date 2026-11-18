@@ -177,7 +177,7 @@ Other Flink CDC key rules:
   example a computed column since removed) and one that can't key rows
   (`transform_key_column_unfit`).
 
-On either engine, a key made of a column an update can change moves the row: the old one stays
+On Flink CDC, a key made of a column an update can change moves the row: the old one stays
 behind.
 
 ## Preview the result

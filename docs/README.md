@@ -25,7 +25,7 @@ installing, using and operating it.
 - [Lakehouse tables](guide/destinations-lakehouse.md) — Apache Iceberg, Apache Paimon and Apache Fluss tables kept in sync with the source.
 - [Analytics and search](guide/destinations-analytics.md) — StarRocks and Apache Doris tables for real-time analytics, and Elasticsearch indexes, kept in sync on Flink CDC.
 - <a id="shape-events-transforms"></a>[Shape events (transforms)](guide/shape-events-transforms.md) — Filters, renames, routes, keys and computed columns, previewed before deploy.
-- <a id="personal-data"></a>[Personal data](guide/personal-data.md) — Find personal columns when you pick a table, then mask, remove or keep each one, per pipeline and audited.
+- <a id="personal-data"></a>[Personal data](guide/personal-data.md) — Find personal columns when you pick a table, then mask, remove or keep each one, per pipeline.
 - <a id="databases-behind-a-bastion-ssh"></a>[Databases behind a bastion (SSH)](guide/databases-behind-a-bastion-ssh.md) — Reach a source database through an SSH jump host, with the key stored encrypted and the host key pinned.
 
 ## Run and operate
@@ -47,7 +47,7 @@ installing, using and operating it.
 - <a id="guardrails-policies-approvals-templates"></a>[Guardrails: policies, approvals, templates](guide/guardrails-policies-approvals-templates.md) — What each project may run, which changes need someone to approve them, and the templates people start from.
 - <a id="secrets-and-secret-stores"></a>[Secrets and secret stores](guide/secrets-and-secret-stores.md) — Encrypted, write-only secrets, or references to Vault, AWS, Google and Kubernetes stores.
 - <a id="single-sign-on"></a>[Single sign-on](guide/single-sign-on.md) — Sign in with OpenID Connect, OAuth2 or SAML providers set up in Settings, with groups mapped to project roles.
-- <a id="configuration-reference"></a>[Configuration reference](guide/configuration-reference.md) — Every environment variable the BeziSync server reads, with its default and what it does.
+- <a id="configuration-reference"></a>[Configuration reference](guide/configuration-reference.md) — The environment variables that configure the BeziSync server, with their defaults and what they do.
 
 ## Automate
 

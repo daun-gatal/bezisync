@@ -12,10 +12,10 @@ runtimes](manage-runtimes.md).
 
 ## 2. Add the source and the destination
 
-**Connections → Add a connection:** pick the source type and fill in its address and credentials.
+**Connections → Add source:** pick the source type and fill in its address and credentials.
 BeziSync runs readiness checks (logical replication, privileges, retention, keys…) and shows each
 failure with the exact fix for your provider (self-hosted, RDS, Cloud SQL, Azure…) and a "send to
-my DBA" message. Add the destination the same way.
+my DBA" message. Add the destination the same way, from the **Destinations** tab.
 
 ![A source that fails its readiness checks, each with the fix](../images/connection-checks.jpg)
 

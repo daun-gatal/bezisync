@@ -1,7 +1,7 @@
 # Adopt an existing Debezium Server
 
-Bring a Debezium Server you already run under BeziSync: it becomes a pipeline that starts where
-the old server stopped.
+Bring a Debezium Server you already run under BeziSync: its `application.properties` becomes a
+pipeline, with its own slot and offsets.
 
 ## Adopt a server
 

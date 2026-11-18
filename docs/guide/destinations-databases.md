@@ -1,7 +1,7 @@
 # Databases
 
 These destinations keep a live copy of the source tables in another database. The tables are
-created from the source and rows are upserted (inserted or updated) by key. See
+created from the source and rows are usually upserted (inserted or updated) by key. See
 [Destinations](destinations.md) for what every destination shares.
 
 Each section below has the same rows, so you can compare destinations. "Reading it back" means

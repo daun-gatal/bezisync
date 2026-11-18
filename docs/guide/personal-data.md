@@ -1,7 +1,7 @@
 # Personal data
 
 Each pipeline decides what happens to personal data: mask it, remove it or keep it, column by
-column. Nothing that looks personal is sent silently.
+column. Columns that look personal are protected as soon as you pick their table.
 
 ![Personal columns found in the Tables step](../images/wizard-tables.jpg)
 
