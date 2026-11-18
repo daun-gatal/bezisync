@@ -10,7 +10,7 @@
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/daun-gatal/bezisync?devcontainer_path=.devcontainer%2Flab%2Fdevcontainer.json&quickstart=1)
 
-[Quick start](#quick-start) · [Guide](docs/README.md) · [Preflight checks](docs/reference/checks.md) · [Threat model](docs/security/threat-model.md)
+[Quick start](#quick-start) · [Docs](docs/README.md) · [Preflight checks](docs/reference/checks.md) · [Threat model](docs/security/threat-model.md)
 
 </div>
 
@@ -32,7 +32,7 @@ to Kafka, Iceberg or a dozen other destinations — with the mistakes caught bef
 | 🙈 **Personal data, chosen per pipeline** | Mask, remove or keep each column — never a silent leak. |
 | 🤖 **AI agents over MCP** | Agents get exactly their person's permissions, and never a credential. |
 
-**Engines:** each pipeline runs on **Debezium Server** or **[Flink CDC](docs/README.md#flink-cdc-engine)**, chosen per pipeline ([which to choose](docs/README.md#choose-an-engine)).<br>
+**Engines:** each pipeline runs on **Debezium Server** or **[Flink CDC](docs/guide/flink-cdc-engine.md)**, chosen per pipeline ([which to choose](docs/guide/choose-an-engine.md)).<br>
 **Sources:** PostgreSQL, MySQL, MariaDB, SQL Server, Oracle (both engines); MongoDB, CockroachDB, Vitess, Google Cloud Spanner (Debezium).<br>
 **Destinations:** Kafka and Apache Iceberg (both engines); PostgreSQL / MySQL / MariaDB / SQL Server, Pub/Sub, Kinesis, SQS, SNS, Azure Event Hubs, Pulsar, Redis Streams, NATS, HTTP (Debezium); StarRocks, Apache Doris, Apache Fluss, Apache Paimon, OceanBase, Elasticsearch (Flink CDC).<br>
 **Runtimes:** Docker or Kubernetes, in your cluster or remote through an outbound-only agent.
@@ -44,7 +44,7 @@ private BeziSync in your own codespace, where you are the admin: PostgreSQL and 
 live orders, a database that isn't ready for change data capture (see preflight's fixes), Kafka, a
 warehouse and an HTTP endpoint, plus teammates in each role. It takes a few minutes to start and
 runs on your free Codespaces quota. The sign-in is printed in the terminal; see
-[the guide](docs/README.md#run-your-own-lab-in-github-codespaces).
+[the guide](docs/guide/codespaces-lab.md).
 
 **Try it in two minutes** with Docker: a sample shop database with live orders, Kafka and a
 ready-made pipeline.
@@ -69,7 +69,7 @@ helm install bezisync oci://ghcr.io/daun-gatal/charts/bezisync \
 kubectl -n bezisync port-forward svc/bezisync 8080:80
 ```
 
-For production (external PostgreSQL, HTTPS, SSO), follow the [guide](docs/README.md#install).
+For production (external PostgreSQL, HTTPS, SSO), follow the [install guide](docs/guide/install.md).
 
 ## How it works
 

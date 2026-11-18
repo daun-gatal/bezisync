@@ -25,7 +25,7 @@ Each step names the rule file that owns the detail. This page fixes the order an
 | A dependency | Run `make licenses` (and stay inside the allow-list) | [testing.md](testing.md#licence-files) |
 | The compiler or connector properties | Prove existing specs still compile to the same `config_hash`, because the controller replaces drifted pipelines | [backend.md](backend.md#pipelines-compiler-runtimes-controller) |
 | Secrets, auth/RBAC, SSRF, agents, MCP or outbound calls | Review against the threat model and update it | [threat model](../docs/security/threat-model.md) |
-| User-visible behaviour, or how BeziSync is built, run or tested | Update the guide (`docs/README.md`) and the matching `.rules/*.md` / `AGENTS.md` (the self-updating mandate) | [AGENTS.md](../AGENTS.md) |
+| User-visible behaviour, or how BeziSync is built, run or tested | Update the docs (the page in `docs/guide/`, its screenshot in `docs/images/` when a screen changed, and the index `docs/README.md` for a new page) and the matching `.rules/*.md` / `AGENTS.md` (the self-updating mandate) | [AGENTS.md](../AGENTS.md) |
 | A big, multi-component decision | Include its `Accepted` ADR (and its index row) in this PR (the default), or reference the merged ADR | [adr.md](adr.md#the-flow), [egm.md](egm.md#from-idea-to-pr) |
 | Code in a directory with a `README.md` contract | Update the contract where exports, invariants, side effects or verification changed, and add a contract for every new code directory | [egm.md](egm.md#directory-contracts) |
 

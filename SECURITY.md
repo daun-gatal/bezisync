@@ -27,6 +27,6 @@ Only the latest release receives security fixes. BeziSync is below 1.0: upgrade 
 ## For operators
 
 The [threat model](docs/security/threat-model.md) lists the controls, the trust boundaries and the
-risks an operator must handle. Production hardening is in the [guide](docs/README.md). Instances
+risks an operator must handle. Production hardening is in the [install guide](docs/guide/install.md). Instances
 run with `BEZISYNC_LAB=true` show testers the in-app testing policy (`/testing-policy`) and take
 their reports through **Feedback**; admins read them under **Settings → Feedback**.
