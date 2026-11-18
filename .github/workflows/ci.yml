@@ -113,6 +113,26 @@ jobs:
         working-directory: e2e
         run: npm ci && npx tsc --noEmit
 
+  # The website (landing page + docs/): builds from this checkout and checks every page (broken
+  # links or anchors, missing or unused screenshots, titles, descriptions, sitemap); see website/.
+  website:
+    name: Website
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: "1.4" }
+      - name: Install
+        working-directory: website
+        run: bun install --frozen-lockfile
+      - name: Type check
+        working-directory: website
+        run: bun run typecheck
+      - name: Build and check every page
+        working-directory: website
+        run: bun test
+
   versions:
     name: Versions and changelog
     runs-on: ubuntu-latest

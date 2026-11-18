@@ -1,7 +1,7 @@
 # Architecture
 
 How BeziSync is put together, for contributors and coding agents. For what it does and how to run
-it, see the [README](README.md) and the [guide](docs/README.md). The engineering rules are in
+it, see the [README](README.md) and the [docs](docs/README.md). The engineering rules are in
 [AGENTS.md](AGENTS.md) and [`.rules/`](.rules/).
 
 This file is the root of the **directory contracts**. Every code directory has a `README.md` with
@@ -71,7 +71,8 @@ Design decisions are recorded as ADRs in [docs/adr/](docs/adr/README.md).
 | `deploy/` | Helm charts (control plane, agent), the compose demo, e2e fixtures, the AppArmor profile and its loader | — (charts: `make chart-test`) |
 | `.devcontainer/lab/` | The Codespaces lab (ADR 0018): the compose demo plus the Sandbox extras, its start and remove scripts, the visitor guide | [lab](.devcontainer/lab/README.md) (`make lab-smoke`) |
 | `e2e/` | Playwright suite run against a disposable k3s-in-Docker cluster | — ([testing.md](.rules/testing.md)) |
-| `docs/` | The user guide, the generated check reference, the threat model and the ADRs | [guide](docs/README.md), [ADRs](docs/adr/README.md) |
+| `docs/` | The user docs (index `README.md`, pages `guide/`, screenshots `images/`), the generated check reference, the threat model and the ADRs | [docs](docs/README.md), [ADRs](docs/adr/README.md) |
+| `website/` | The website (landing page + the docs) built from this checkout, served by GitHub Pages (ADR 0019) | [website](website/README.md) → [src](website/src/README.md) |
 | `changelogs/` | Release-note fragments; never edit `CHANGELOG.md` | [fragments](changelogs/unreleased/README.md) |
 
 ## Cross-cutting invariants

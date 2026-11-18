@@ -49,7 +49,7 @@ HTTP**), and three teammates: `editor@`, `operator@` and `viewer@bezisync.local`
    `operator@bezisync.local`, with the team password from the terminal. Compare what each can
    do.
 
-The guide covers everything else: <https://github.com/daun-gatal/bezisync/blob/main/docs/README.md>.
+The docs cover everything else: <https://bezisync.dglabs-ai.dev/docs/>.
 
 ## When you're done
 
@@ -68,4 +68,4 @@ after your retention period (30 days unless you changed it).
   and paste what `up.sh` printed.
 
 Want to run BeziSync for real? See **Install** in the
-[guide](https://github.com/daun-gatal/bezisync/blob/main/docs/README.md#install).
+[docs](https://bezisync.dglabs-ai.dev/docs/install/).
