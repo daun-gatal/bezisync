@@ -120,7 +120,7 @@ export function overrideProblem(o: Override, markdown: string): string | undefin
 
 /**
  * Text without HTML tags. Tags are removed until none is left (a nested "<scr<b>ipt>" cannot
- * reassemble into one), then any "<" or ">" still there is dropped.
+ * reassemble into one), then any "<" still there is dropped (a lone ">" cannot open a tag).
  */
 export function stripTags(s: string): string {
   let out = s;
@@ -128,7 +128,7 @@ export function stripTags(s: string): string {
     prev = out;
     out = out.replace(/<[^<>]*>/g, '');
   }
-  return out.replace(/[<>]/g, '');
+  return out.replace(/</g, '');
 }
 
 /** Regular-expression text matching s literally. */
