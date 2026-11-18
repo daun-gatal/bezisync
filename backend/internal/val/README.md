@@ -24,6 +24,7 @@ Pure: no I/O.
 - `[val.go:Constrained]` checks min, then max, then pattern; first failure wins. Patterns use search semantics and are cached in a `sync.Map` (`[val.go:patternCache]`) because requests validate concurrently; an invalid pattern panics (`regexp.MustCompile`).
 - String lengths count runes, not bytes (`[val.go:Constrained]`).
 - `[val.go:Bounds]` reports at most one error per value.
+- `[val.go:Int]` never wraps: a value outside the platform's `int` (as digits, or a whole float such as `1e19`) is `int_parsing_size` (`[val.go:fitsInt]`).
 - `[email.go:ValidateEmail]` rejects inputs longer than `maxEmailInput` (2048) before parsing.
 
 ## Side Effects

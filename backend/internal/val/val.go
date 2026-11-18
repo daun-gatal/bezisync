@@ -254,12 +254,12 @@ func (v *V) Int(loc Loc, raw any) (int, bool) {
 	case json.Number:
 		s := string(x)
 		if !strings.ContainsAny(s, ".eE") {
-			n, err := strconv.ParseInt(s, 10, 64)
+			n, err := strconv.Atoi(s) // the platform's int, range-checked
 			if err != nil {
 				v.Fail(loc, "int_parsing_size", "Unable to parse input string as an integer, exceeded maximum size")
 				return 0, false
 			}
-			return int(n), true
+			return n, true
 		}
 		f, err := strconv.ParseFloat(s, 64)
 		if err != nil || math.IsInf(f, 0) {
@@ -270,14 +270,22 @@ func (v *V) Int(loc Loc, raw any) (int, bool) {
 			v.Fail(loc, "int_from_float", "Input should be a valid integer, got a number with a fractional part")
 			return 0, false
 		}
+		if !fitsInt(f) {
+			v.Fail(loc, "int_parsing_size", "Unable to parse input string as an integer, exceeded maximum size")
+			return 0, false
+		}
 		return int(f), true
 	case string:
 		t := strings.TrimSpace(x)
 		t = strings.ReplaceAll(t, "_", "") // Python int() accepts digit separators
-		if n, err := strconv.ParseInt(t, 10, 64); err == nil && t != "" {
-			return int(n), true
+		if n, err := strconv.Atoi(t); err == nil && t != "" {
+			return n, true
 		}
 		if f, err := strconv.ParseFloat(t, 64); err == nil && f == math.Trunc(f) && !math.IsInf(f, 0) && strings.ContainsAny(t, ".") && !strings.ContainsAny(t, "eE") {
+			if !fitsInt(f) {
+				v.Fail(loc, "int_parsing_size", "Unable to parse input string as an integer, exceeded maximum size")
+				return 0, false
+			}
 			return int(f), true // "5.0"
 		}
 		v.Fail(loc, "int_parsing", "Input should be a valid integer, unable to parse string as an integer")
@@ -626,3 +634,9 @@ func sortedKeys(m map[string]any) []string {
 }
 
 func sortStrings(s []string) { sort.Strings(s) }
+
+// fitsInt reports whether a whole float converts to int exactly. float64(math.MaxInt) rounds up
+// to 2^63 (on 64-bit), one past the top, so the upper bound is exclusive.
+func fitsInt(f float64) bool {
+	return f >= math.MinInt && f < math.MaxInt
+}

@@ -162,7 +162,7 @@ func (s *kinesisSink) PrepareSink(ctx context.Context, conn Resolved, _ CompileC
 			results = append(results, ArtifactResult{Kind: "stream", Name: stream, Outcome: "failed", Detail: "Stream does not exist."})
 			continue
 		}
-		if _, err := kc.CreateStream(ctx, &kinesis.CreateStreamInput{StreamName: aws.String(stream), ShardCount: aws.Int32(int32(cfg.Shards))}); err != nil {
+		if _, err := kc.CreateStream(ctx, &kinesis.CreateStreamInput{StreamName: aws.String(stream), ShardCount: aws.Int32(int32Of(cfg.Shards))}); err != nil {
 			return nil, err
 		}
 		waiter := kinesis.NewStreamExistsWaiter(kc, func(o *kinesis.StreamExistsWaiterOptions) {

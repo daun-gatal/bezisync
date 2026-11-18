@@ -199,7 +199,7 @@ func (s *kafkaSink) Check(ctx context.Context, conn Resolved, _ []string) (check
 	}
 	if cfg.CreateTopics {
 		tctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		resp, err := admin.ValidateCreateTopics(tctx, 1, int16(min(cfg.RF, brokerCount)), nil, kafkaProbeTopic)
+		resp, err := admin.ValidateCreateTopics(tctx, 1, int16Of(min(cfg.RF, brokerCount)), nil, kafkaProbeTopic)
 		cancel()
 		if err == nil {
 			if r, ok := resp[kafkaProbeTopic]; ok && r.Err != nil {
@@ -329,7 +329,7 @@ func (s *kafkaSink) PrepareSink(ctx context.Context, conn Resolved, _ CompileCon
 	rf := min(cfg.RF, max(len(meta.Brokers), 1))
 	topics := sortedUnique(destinations)
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	resp, err := admin.CreateTopics(cctx, int32(cfg.Partitions), int16(rf), nil, topics...)
+	resp, err := admin.CreateTopics(cctx, int32Of(cfg.Partitions), int16Of(rf), nil, topics...)
 	cancel()
 	if err != nil {
 		return nil, err
