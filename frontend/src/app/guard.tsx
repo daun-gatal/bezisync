@@ -34,9 +34,14 @@ export function decide(access: Access, state: SessionState): Decision {
   return state === 'signed-out' ? 'to-login' : 'unreachable';
 }
 
-/** A same-site path to continue to after signing in; anything else goes home. */
+/**
+ * A same-site path to continue to after signing in; anything else goes home. Browsers drop
+ * tabs and newlines from a URL and read "\" as "/", so a backslash, whitespace or control
+ * character anywhere sends it home too ("/<tab>/evil.example" would become "//evil.example").
+ */
 export function safeNext(next: string | undefined | null): string {
-  return next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') && !next.startsWith('/login') ? next : '/';
+  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/login')) return '/';
+  return /[\\\s\u0000-\u001f\u007f-\u009f]/.test(next) ? '/' : next;
 }
 
 export function Guard({ access, children, next }: { access: Access; children: ReactNode; next?: string }) {

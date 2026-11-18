@@ -51,6 +51,14 @@ describe('safeNext', () => {
     ['//evil.example', '/'],
     ['/\\evil.example', '/'],
     ['/login?next=/x', '/'],
+    ['/p/default/pipelines/a%20b#top', '/p/default/pipelines/a%20b#top'],
+    ['/\t/evil.example', '/'],
+    ['/\n/evil.example', '/'],
+    ['/\r\\evil.example', '/'],
+    ['/ /evil.example', '/'],
+    ['/ /evil.example', '/'],
+    ['/\u0000/evil.example', '/'],
+    ['/p\\..\\evil', '/'],
   ])('%s → %s', (next, want) => {
     expect(safeNext(next)).toBe(want);
   });

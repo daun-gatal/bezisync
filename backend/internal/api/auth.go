@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -408,11 +410,22 @@ func tokenRoutes(r chi.Router) {
 	}))
 }
 
+// safeNext keeps a post-sign-in redirect on this site: a path that starts with one "/", with
+// no backslash, whitespace or control character anywhere. Browsers drop tabs and newlines from
+// a URL and read "\" as "/", so "/<tab>/evil.example" or "/\evil.example" would leave the site.
 func safeNext(v string) string {
-	if strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "//") && !strings.Contains(v, `\`) {
-		return v
+	if v == "" || v[0] != '/' || (len(v) > 1 && (v[1] == '/' || v[1] == '\\')) {
+		return "/"
 	}
-	return "/"
+	for _, r := range v {
+		if r == '\\' || unicode.IsSpace(r) || unicode.IsControl(r) {
+			return "/"
+		}
+	}
+	if u, err := url.Parse(v); err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
+		return "/"
+	}
+	return v
 }
 
 func ssoRoutes(r chi.Router) {
