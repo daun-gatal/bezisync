@@ -26,7 +26,7 @@ explicit `Perm`, derived from project role and the Admin flag. [`api`](../api/RE
 - Unknown project, a token scoped to another project, and no permissions all return 404 `not_found` — never 403 (`[auth.go:Project]`).
 - Admins hold every permission in every project without membership; `pipeline.approve` comes from the membership's `CanApprove`, not the role (`[auth.go:PermissionsFor]`).
 - Check permissions, never role names (`[auth.go:ProjectAccess.Require]`).
-- Session cookie is HttpOnly; the CSRF cookie is readable by the SPA; both are `SameSite=Lax` and `Secure` follows `CookieSecure` (`[auth.go:StartSession]`).
+- Session cookie is HttpOnly; the CSRF cookie is readable by the SPA; both are `SameSite=Lax` and `Secure` follows `CookieSecure`, and clearing them (`[auth.go:EndSession]`) sends the same attributes (`[auth.go:StartSession]`, `[auth.go:sessionCookie]`).
 
 ## Side Effects
 - DB writes: `user_sessions` (insert on sign-in, delete on sign-out, `token_hash` update after key rotation); `api_tokens` (`token_hash`, `last_used_at`, at most once a minute, even on read-only requests); `oauth_grants.last_used_at` (at most once a minute).

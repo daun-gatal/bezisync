@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+
 import { expect, request, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 export const ADMIN = { email: 'admin@bezisync.local', password: process.env.ADMIN_PASSWORD ?? 'e2e-admin-password' };
@@ -72,7 +74,7 @@ export async function defaultProject(api: Api): Promise<Me['projects'][number]> 
 }
 
 export function unique(prefix: string): string {
-  return `${prefix}-${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
+  return `${prefix}-${Date.now().toString(36)}${randomInt(1000)}`;
 }
 
 /** Choose an option in a BeziSync Select: a button that opens a listbox of options. */

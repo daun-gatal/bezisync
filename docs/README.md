@@ -487,7 +487,9 @@ Debezium retries, rather than being lost.
 Every change is appended (`XADD`) to one stream per table, the row key as the entry's first field and
 the event as its value. Presets: **Redis** and **AWS ElastiCache**. The connection takes the host,
 port, an ACL user (Redis 6+), password and TLS. Streams grow with every change: set *Trim streams to
-N entries* (Expert, an approximate `MAXLEN`) to cap them. Preflight reaches Redis, signs in, checks
+N entries* (Expert, an approximate `MAXLEN`) to cap them. With TLS, preflight only signs in once Redis
+shows a certificate for the host name you entered, signed by a trusted authority; connect by a name
+the certificate lists, not by IP address. Debezium Server itself checks the chain but not the name. Preflight reaches Redis, signs in, checks
 the user may write streams, and warns when Redis uses more than 80% of `maxmemory`. The Events tab and
 the delivery canary read the newest entries; "drop destinations" deletes the streams.
 

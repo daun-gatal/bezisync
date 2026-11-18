@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -146,4 +147,27 @@ func RefuseConfigExpressions(name string, cfg map[string]any) error {
 		errs[i] = map[string]any{"loc": append([]string{"config"}, l...), "message": "Settings can't contain \"${\": it would be read as a variable that can hold credentials."}
 	}
 	return problem.New(422, "connection_config", fmt.Sprintf("The connection %s has a setting containing \"${\", which BeziSync refuses: change it on the connection.", name)).WithErrors(errs)
+}
+
+// int32Of and int16Of narrow a validated setting (shard, partition or replica count) for an
+// API that takes a smaller integer, clamping instead of wrapping if a value ever got past
+// validation.
+func int32Of(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n)
+}
+
+func int16Of(n int) int16 {
+	if n > math.MaxInt16 {
+		return math.MaxInt16
+	}
+	if n < math.MinInt16 {
+		return math.MinInt16
+	}
+	return int16(n)
 }

@@ -52,8 +52,9 @@ func redisCfg(conn Resolved) (redisConfig, error) {
 	return out, nil
 }
 
-// redisClient mirrors redis-py: TLS requires a valid certificate chain but does not check
-// the hostname (ssl_check_hostname defaults to False).
+// redisClient talks to the destination for checks. With TLS the server must present a
+// certificate for the host name it was reached by, signed by a trusted authority, before
+// BeziSync sends the password (redis-py, which this once mirrored, checks only the chain).
 func redisClient(cfg redisConfig, timeout time.Duration) *redis.Client {
 	opts := &redis.Options{
 		Addr: net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), Username: orEmpty(cfg.User), Password: orEmpty(cfg.Password),
@@ -61,22 +62,7 @@ func redisClient(cfg redisConfig, timeout time.Duration) *redis.Client {
 		DisableIdentity: true,
 	}
 	if cfg.TLS {
-		opts.TLSConfig = &tls.Config{
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true, //nolint:gosec // chain verified below, hostname deliberately not (redis-py default)
-			VerifyConnection: func(cs tls.ConnectionState) error {
-				certs := cs.PeerCertificates
-				if len(certs) == 0 {
-					return errors.New("no server certificate")
-				}
-				inter := x509.NewCertPool()
-				for _, c := range certs[1:] {
-					inter.AddCert(c)
-				}
-				_, err := certs[0].Verify(x509.VerifyOptions{Intermediates: inter})
-				return err
-			},
-		}
+		opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: cfg.Host}
 	}
 	// The SSRF guard (ADR 0004). A custom dialer replaces go-redis's, TLS included.
 	opts.Dialer = tlsDialer(opts.TLSConfig)
@@ -92,6 +78,22 @@ func isRedisAuth(err error) bool {
 func isRedisResponse(err error) bool {
 	var re redis.Error
 	return errors.As(err, &re) && !isRedisAuth(err)
+}
+
+// redisCertProblem explains a TLS certificate BeziSync refused, or is "" for any other error.
+func redisCertProblem(err error, host string) string {
+	var hostErr x509.HostnameError
+	var authErr x509.UnknownAuthorityError
+	var invalidErr x509.CertificateInvalidError
+	switch {
+	case errors.As(err, &hostErr):
+		return fmt.Sprintf("Redis's TLS certificate is not for %s, so BeziSync did not send the password. Connect with a host name the certificate names.", host)
+	case errors.As(err, &authErr):
+		return "Redis's TLS certificate is not signed by an authority BeziSync trusts, so BeziSync did not send the password."
+	case errors.As(err, &invalidErr):
+		return "Redis's TLS certificate is not valid (expired, not yet valid or not for servers), so BeziSync did not send the password."
+	}
+	return ""
 }
 
 func (s *redisSink) Check(ctx context.Context, conn Resolved, _ []string) (checks.Report, error) {
@@ -142,6 +144,9 @@ func (s *redisSink) Check(ctx context.Context, conn Resolved, _ []string) (check
 		case isRedisResponse(err):
 			run.Add(checks.Check{Code: "redis_write", Title: "Write streams", Status: checks.Fail, Category: checks.CatPermissions, Blocking: true,
 				Message: "This user may not write streams.", Technical: text})
+		case redisCertProblem(err, cfg.Host) != "":
+			run.Add(checks.Check{Code: "redis_connect", Title: "Talk to Redis", Status: checks.Fail, Category: checks.CatNetwork, Blocking: true,
+				Message: redisCertProblem(err, cfg.Host), Technical: text})
 		default:
 			run.Add(checks.Check{Code: "redis_connect", Title: "Talk to Redis", Status: checks.Fail, Category: checks.CatNetwork, Blocking: true,
 				Message: "The port is open but Redis did not answer.", Technical: text})

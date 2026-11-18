@@ -196,7 +196,7 @@ const FeatureReadonlyDestinationChecks = "readonly_destination_checks"
 
 // JVMEnv is the workload environment plus JVM settings.
 func JVMEnv(w Workload) map[string]string {
-	out := make(map[string]string, len(w.Env)+3)
+	out := make(map[string]string, len(w.Env))
 	for k, v := range w.Env {
 		out[k] = v
 	}

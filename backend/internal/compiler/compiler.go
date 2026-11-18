@@ -446,7 +446,7 @@ func Compile(c connectors.CompileContext, source, sink connectors.Resolved, imag
 		}
 		props[s.Key] = spec.Tuning[s.Key]
 	}
-	managed := make(map[string]bool, len(props)+1)
+	managed := make(map[string]bool, len(props))
 	for k := range props {
 		managed[k] = true
 	}

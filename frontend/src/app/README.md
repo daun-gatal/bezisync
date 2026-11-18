@@ -15,7 +15,7 @@ The application frame around the feature screens: the code-based TanStack Router
 
 ## Invariants
 - Only a 401 means signed out: `[guard.tsx:sessionState]` maps a network failure or 5xx to `unreachable`, which shows `FullPageError` with Try again instead of sending people to `/login`.
-- `[guard.tsx:safeNext]` accepts only same-site paths: it must start with `/`, not `//` or `/\`, and not `/login`; anything else goes to `/`.
+- `[guard.tsx:safeNext]` accepts only same-site paths: it must start with `/`, not `//` and not `/login`, with no backslash, whitespace or control character anywhere (browsers drop tabs and newlines from a URL); anything else goes to `/`.
 - `[guard.tsx:Guard]` freezes the `?next=` address when a `to-login` redirect starts so it is not nested in itself.
 - Every project route renders inside `ProjectScope` (`[router.tsx:makeRouter]`'s tree): an unknown or inaccessible slug shows "Project not found" rather than a redirect, and the shell is wrapped in `ProjectProvider`.
 - Settings appears in the sidebar and the palette only when `canOpenSettings(ctx)` allows it. The palette keeps its own page list (`[CommandPalette.tsx:CommandPalette]`), separate from `[AppShell.tsx:NAV]`: a new top-level page goes in both. The palette shows at most 50 matches.

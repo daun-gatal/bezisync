@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -408,11 +410,22 @@ func tokenRoutes(r chi.Router) {
 	}))
 }
 
+// safeNext keeps a post-sign-in redirect on this site: a path that starts with one "/", with
+// no backslash, whitespace or control character anywhere. Browsers drop tabs and newlines from
+// a URL and read "\" as "/", so "/<tab>/evil.example" or "/\evil.example" would leave the site.
 func safeNext(v string) string {
-	if strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "//") && !strings.Contains(v, `\`) {
-		return v
+	if v == "" || v[0] != '/' || (len(v) > 1 && (v[1] == '/' || v[1] == '\\')) {
+		return "/"
 	}
-	return "/"
+	for _, r := range v {
+		if r == '\\' || unicode.IsSpace(r) || unicode.IsControl(r) {
+			return "/"
+		}
+	}
+	if u, err := url.Parse(v); err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
+		return "/"
+	}
+	return v
 }
 
 func ssoRoutes(r chi.Router) {
@@ -434,9 +447,7 @@ func ssoRoutes(r chi.Router) {
 		httpapi.JSON(w, http.StatusOK, obj("password", password, "providers", providers, "lab", config.Get().Lab))
 		return nil
 	}))
-	clearCookie := func(w http.ResponseWriter) {
-		http.SetCookie(w, &http.Cookie{Name: oidc.Cookie, Value: "", Path: oidc.CookiePath, MaxAge: -1, Expires: time.Unix(0, 0)}) //nolint:gosec // deleting the cookie
-	}
+	clearCookie := func(w http.ResponseWriter) { http.SetCookie(w, oidcCookie("", -1)) }
 	r.Get("/auth/oidc/login", httpapi.H(func(w http.ResponseWriter, r *http.Request) error {
 		q := httpapi.Q(r)
 		next := "/"
@@ -500,9 +511,7 @@ func ssoRoutes(r chi.Router) {
 			}
 			return err
 		}
-		//nolint:gosec // Secure follows BEZISYNC_COOKIE_SECURE
-		http.SetCookie(w, &http.Cookie{Name: oidc.Cookie, Value: cookie, MaxAge: int(oidc.TTL.Seconds()), HttpOnly: true, Secure: config.Get().CookieSecure,
-			SameSite: http.SameSiteLaxMode, Path: oidc.CookiePath, Expires: time.Now().Add(oidc.TTL)})
+		http.SetCookie(w, oidcCookie(cookie, int(oidc.TTL.Seconds())))
 		redirect(w, url)
 		return nil
 	}))
@@ -576,6 +585,18 @@ func ssoRoutes(r chi.Router) {
 		redirect(w, safeNext(next))
 		return nil
 	}))
+}
+
+// oidcCookie carries an OpenID Connect or OAuth2 sign-in's encrypted state; a negative maxAge
+// deletes it, with the same attributes it was set with.
+func oidcCookie(value string, maxAge int) *http.Cookie {
+	expires := time.Now().Add(time.Duration(maxAge) * time.Second)
+	if maxAge < 0 {
+		expires = time.Unix(0, 0)
+	}
+	//nolint:gosec // Secure follows BEZISYNC_COOKIE_SECURE (production requires it)
+	return &http.Cookie{Name: oidc.Cookie, Value: value, MaxAge: maxAge, Expires: expires, Path: oidc.CookiePath, HttpOnly: true,
+		Secure: config.Get().CookieSecure, SameSite: http.SameSiteLaxMode}
 }
 
 // samlRelayCookie ties a SAML sign-in to the browser that started it. The identity provider posts

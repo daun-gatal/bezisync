@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -153,7 +154,7 @@ func (k *KubernetesDriver) applyFlink(ctx context.Context, w Workload, wrap func
 	}
 	jmReplicas, tmReplicas := int32(0), int32(0)
 	if w.Running {
-		jmReplicas, tmReplicas = 1, int32(w.Flink.TaskManagers)
+		jmReplicas, tmReplicas = 1, replicaCount(w.Flink.TaskManagers)
 	}
 	// The TaskManagers first: on a stop the JobManager is already gone, on a start they wait for it.
 	if err := k.upsertDeployment(ctx, k.flinkDeployment(w, RoleTaskManager, tmReplicas)); err != nil {
@@ -443,4 +444,16 @@ func (k *KubernetesDriver) LogsOf(ctx context.Context, shortID, component string
 		return "", nil //nolint:nilerr // logs that cannot be read are simply empty, as for Logs
 	}
 	return decodeReplace(raw), nil
+}
+
+// replicaCount is a validated TaskManager count (at most domain.MaxTaskManagers) as Kubernetes
+// replicas, clamped rather than wrapped should a value ever get past validation.
+func replicaCount(n int) int32 {
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(n)
 }

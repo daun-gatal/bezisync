@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"net"
 	"sort"
 	"strconv"
@@ -458,10 +459,19 @@ func nullInt(s sql.NullString) *int64 {
 	}
 	n, err := strconv.ParseInt(s.String, 10, 64)
 	if err != nil {
-		if u, err2 := strconv.ParseUint(s.String, 10, 64); err2 == nil {
-			n = int64(u)
-		} else if f, err3 := strconv.ParseFloat(s.String, 64); err3 == nil {
-			n = int64(f)
+		// An estimate past int64 (an unsigned column near its top) is shown as the largest
+		// int64 rather than wrapping to a negative number.
+		if _, err2 := strconv.ParseUint(s.String, 10, 64); err2 == nil {
+			n = math.MaxInt64
+		} else if f, err3 := strconv.ParseFloat(s.String, 64); err3 == nil && !math.IsNaN(f) {
+			switch {
+			case f >= math.MaxInt64: // float64(MaxInt64) is 2^63, one past the top
+				n = math.MaxInt64
+			case f <= math.MinInt64:
+				n = math.MinInt64
+			default:
+				n = int64(f)
+			}
 		} else {
 			return nil
 		}

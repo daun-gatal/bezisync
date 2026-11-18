@@ -200,7 +200,7 @@ func TestStoreRefusesBadPathsAndKeys(t *testing.T) {
 		t.Fatal("accepted a short key")
 	}
 	s, _ := openTestStore(t, newKey(t))
-	for _, rel := range []string{"", ".", "..", "../x", "/abs"} {
+	for _, rel := range []string{"", ".", "./", "..", "../x", "a/../../x", "./../x", "/abs", "a/.."} {
 		if _, err := s.Save(ctx, "checkpoint", "periodic", 1, t.TempDir(), rel); err == nil {
 			t.Errorf("saved %q", rel)
 		}

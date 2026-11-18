@@ -307,7 +307,9 @@ func unarchive(data []byte, stateDir string) error {
 	}
 }
 
+// validRel reports whether rel names something strictly inside the state dir: not empty, not
+// the dir itself, not absolute and never climbing out through "..".
 func validRel(rel string) bool {
-	clean := filepath.Clean(filepath.FromSlash(rel))
-	return rel != "" && !filepath.IsAbs(clean) && clean != "." && !strings.HasPrefix(clean, ".."+string(filepath.Separator)) && clean != ".."
+	p := filepath.FromSlash(rel)
+	return filepath.IsLocal(p) && filepath.Clean(p) != "."
 }
